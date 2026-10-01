@@ -26,6 +26,12 @@
           cargo = toolchain;
           rustc = toolchain;
         };
+        codeReviewPackage = rustPlatform.buildRustPackage {
+          pname = "code-review";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+        };
       in
       {
         # Development shell
@@ -38,13 +44,19 @@
             ];
           };
 
-        # Optional: Uncomment if configuring a single-crate build package
-        # packages.default = rustPlatform.buildRustPackage {
-        #   pname = "your-package-name";
-        #   version = "0.1.0";
-        #   src = ./.;
-        #   cargoLock.lockFile = ./Cargo.lock;
-        # };
+        packages = {
+          default = codeReviewPackage;
+          code-review = codeReviewPackage;
+        };
+
+        apps = {
+          default = flake-utils.lib.mkApp {
+            drv = codeReviewPackage;
+          };
+          code-review = flake-utils.lib.mkApp {
+            drv = codeReviewPackage;
+          };
+        };
       }
     );
 }

@@ -2,6 +2,10 @@
 name = "code-review"
 version = "0.1.0"
 edition = "2024"
+description = "A suite of code review skills, opinionated linters, and Inspect AI evals"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/drmartinwimmer/review"
 
 [dependencies]
 
