@@ -1,0 +1,12 @@
+/target
+/.direnv
+fence-*
+*.sock
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
+node-compile-cache/
