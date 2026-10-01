@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "init-cargo"
+name = "review"
 version = "0.1.0"
