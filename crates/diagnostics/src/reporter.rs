@@ -188,41 +188,21 @@ fn render_markdown(report: &DiagnosticReport, writer: &mut dyn io::Write) -> io:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::diagnostics::{Diagnostic, Severity, Span};
+    use crate::diagnostics::{Diagnostic, Severity, Span};
+    use googletest::prelude::*;
 
-    macro_rules! ensure {
-        ($cond:expr, $($arg:tt)*) => {
-            if !$cond {
-                return Err(format!($($arg)*).into());
-            }
-        };
-    }
-
-    macro_rules! ensure_eq {
-        ($left:expr, $right:expr) => {
-            if $left != $right {
-                return Err(
-                    format!("check failed: left: `{:?}`, right: `{:?}`", $left, $right).into(),
-                );
-            }
-        };
-    }
-
-    #[test]
+    #[googletest::test]
     fn test_render_console_empty_report_reports_no_issues() -> Result<(), Box<dyn std::error::Error>>
     {
         let report = DiagnosticReport::default();
         let mut buffer = Vec::new();
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, false)?;
         let output = String::from_utf8(buffer)?;
-        ensure!(
-            output.contains("No issues found."),
-            "Expected 'No issues found.' in output"
-        );
+        expect_that!(output, contains_substring("No issues found."));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_console_diagnostics_formats_grouped_by_file_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -245,27 +225,21 @@ mod tests {
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, false)?;
         let output = String::from_utf8(buffer)?;
 
-        ensure!(output.contains("--> src/main.rs"), "Expected file header");
-        ensure!(
-            output.contains("--> (global)"),
-            "Expected global group header"
-        );
-        ensure!(output.contains("[error]"), "Expected [error]");
-        ensure!(output.contains("[hint]"), "Expected [hint]");
-        ensure!(output.contains("[warning]"), "Expected [warning]");
-        ensure!(output.contains("rule::test"), "Expected rule name");
-        ensure!(
-            output.contains("src/main.rs:15:2"),
-            "Expected span location"
-        );
-        ensure!(output.contains("add semicolon"), "Expected suggestion");
-        ensure!(output.contains("1 error(s)"), "Expected error count");
-        ensure!(output.contains("1 warning(s)"), "Expected warning count");
-        ensure!(output.contains("1 hint(s)"), "Expected hint count");
+        expect_that!(output, contains_substring("--> src/main.rs"));
+        expect_that!(output, contains_substring("--> (global)"));
+        expect_that!(output, contains_substring("[error]"));
+        expect_that!(output, contains_substring("[hint]"));
+        expect_that!(output, contains_substring("[warning]"));
+        expect_that!(output, contains_substring("rule::test"));
+        expect_that!(output, contains_substring("src/main.rs:15:2"));
+        expect_that!(output, contains_substring("add semicolon"));
+        expect_that!(output, contains_substring("1 error(s)"));
+        expect_that!(output, contains_substring("1 warning(s)"));
+        expect_that!(output, contains_substring("1 hint(s)"));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_console_with_color_includes_ansi_escape_codes()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -283,15 +257,12 @@ mod tests {
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, true)?;
         let output = String::from_utf8(buffer)?;
 
-        ensure!(
-            output.contains("\x1b[1;31m"),
-            "Expected red ANSI escape code for error"
-        );
-        ensure!(output.contains("\x1b[0m"), "Expected ANSI reset code");
+        expect_that!(output, contains_substring("\x1b[1;31m"));
+        expect_that!(output, contains_substring("\x1b[0m"));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_json_outputs_valid_pretty_json_with_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -309,29 +280,29 @@ mod tests {
             .and_then(|d| d.get(0))
             .and_then(|e| e.get("rule"))
             .and_then(|r| r.as_str());
-        ensure_eq!(rule, Some("rule::json"));
+        expect_that!(rule, eq(Some("rule::json")));
 
         let total_warnings = parsed
             .get("summary")
             .and_then(|s| s.get("total_warnings"))
             .and_then(|w| w.as_u64());
-        ensure_eq!(total_warnings, Some(1));
+        expect_that!(total_warnings, eq(Some(1)));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_markdown_empty_report_outputs_clean_markdown()
     -> Result<(), Box<dyn std::error::Error>> {
         let report = DiagnosticReport::default();
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Markdown, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
-        ensure!(output.contains("# Diagnostic Report"), "Expected title");
-        ensure!(output.contains("No issues found."), "Expected clean status");
+        expect_that!(output, contains_substring("# Diagnostic Report"));
+        expect_that!(output, contains_substring("No issues found."));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_markdown_diagnostics_outputs_table_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -342,22 +313,22 @@ mod tests {
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Markdown, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
-        ensure!(
-            output.contains("| Severity | Rule | Location | Message | Suggestion |"),
-            "Expected table header"
+        expect_that!(
+            output,
+            contains_substring("| Severity | Rule | Location | Message | Suggestion |")
         );
-        ensure!(
-            output.contains("| Error | `rule::md` | `lib.rs:1:1` | Missing doc | - |"),
-            "Expected row content"
+        expect_that!(
+            output,
+            contains_substring("| Error | `rule::md` | `lib.rs:1:1` | Missing doc | - |")
         );
-        ensure!(
-            output.contains("**Summary**: 1 error(s), 0 warning(s)"),
-            "Expected summary footer"
+        expect_that!(
+            output,
+            contains_substring("**Summary**: 1 error(s), 0 warning(s)")
         );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_render_markdown_sanitizes_pipes_and_newlines_in_suggested_fix()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -368,10 +339,9 @@ mod tests {
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Markdown, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
-        ensure!(
-            output.contains("`first line \\| second line third line`"),
-            "Expected sanitized suggestion with escaped pipe and replaced newline, but got:\n{}",
-            output
+        expect_that!(
+            output,
+            contains_substring("`first line \\| second line third line`")
         );
         Ok(())
     }

@@ -16,7 +16,7 @@ pub enum LintProfile {
 }
 
 impl LintProfile {
-    pub fn includes_lint(&self, lint: &str) -> bool {
+    pub(crate) fn includes_lint(&self, lint: &str) -> bool {
         match self {
             Self::Strict => true,
             Self::Standard => !matches!(
@@ -26,7 +26,7 @@ impl LintProfile {
         }
     }
 
-    pub fn expected_count(&self) -> usize {
+    pub(crate) fn expected_count(&self) -> usize {
         match self {
             Self::Strict => 34,
             Self::Standard => 31,
@@ -513,6 +513,7 @@ pub fn remove_lints(manifest_path: &Path) -> Result<ConfigureResult, CargoTomlEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use googletest::prelude::*;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -548,25 +549,7 @@ mod tests {
         }
     }
 
-    macro_rules! ensure {
-        ($cond:expr, $($arg:tt)*) => {
-            if !$cond {
-                return Err(format!($($arg)*).into());
-            }
-        };
-    }
-
-    macro_rules! ensure_eq {
-        ($left:expr, $right:expr) => {
-            if $left != $right {
-                return Err(
-                    format!("check failed: left: `{:?}`, right: `{:?}`", $left, $right).into(),
-                );
-            }
-        };
-    }
-
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_with_comments_and_whitespace_preserves_formatting()
     -> Result<(), Box<dyn std::error::Error>> {
         let original = r#"# Top-level comment
@@ -582,42 +565,36 @@ serde = "1.0" # inline dep comment
 "#;
         let manifest = TempManifest::new(original)?;
         let result = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(result.modified, "expected modified to be true");
-        ensure_eq!(result.lints_configured, 34);
+        expect_that!(result.modified, is_true());
+        expect_that!(result.lints_configured, eq(34));
 
         let modified_content = manifest.read()?;
-        ensure!(
-            modified_content.contains("# Top-level comment"),
-            "Top-level comment must be preserved"
+        expect_that!(modified_content, contains_substring("# Top-level comment"));
+        expect_that!(
+            modified_content,
+            contains_substring("name = \"demo\" # inline comment")
         );
-        ensure!(
-            modified_content.contains("name = \"demo\" # inline comment"),
-            "Inline comment must be preserved"
+        expect_that!(
+            modified_content,
+            contains_substring("# Dependency section comment")
         );
-        ensure!(
-            modified_content.contains("# Dependency section comment"),
-            "Section comment must be preserved"
+        expect_that!(
+            modified_content,
+            contains_substring("serde = \"1.0\" # inline dep comment")
         );
-        ensure!(
-            modified_content.contains("serde = \"1.0\" # inline dep comment"),
-            "Inline dep comment must be preserved"
+        expect_that!(
+            modified_content,
+            contains_substring("# Trailing comment at end")
         );
-        ensure!(
-            modified_content.contains("# Trailing comment at end"),
-            "Trailing comment must be preserved"
-        );
-        ensure!(
-            modified_content.contains("[lints.clippy]"),
-            "Expected [lints.clippy] section"
-        );
-        ensure!(
-            modified_content.contains("unwrap_used = \"warn\""),
-            "Expected unwrap_used lint"
+        expect_that!(modified_content, contains_substring("[lints.clippy]"));
+        expect_that!(
+            modified_content,
+            contains_substring("unwrap_used = \"warn\"")
         );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_twice_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
@@ -625,21 +602,21 @@ version = "0.1.0"
 "#;
         let manifest = TempManifest::new(initial)?;
         let res1 = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(res1.modified, "First run should modify");
-        ensure_eq!(res1.lints_configured, 34);
+        expect_that!(res1.modified, is_true());
+        expect_that!(res1.lints_configured, eq(34));
 
         let content_after_run1 = manifest.read()?;
 
         let res2 = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(!res2.modified, "Second run should report modified: false");
-        ensure_eq!(res2.lints_configured, 34);
+        expect_that!(res2.modified, is_false());
+        expect_that!(res2.lints_configured, eq(34));
 
         let content_after_run2 = manifest.read()?;
-        ensure_eq!(content_after_run1, content_after_run2);
+        expect_that!(content_after_run1, eq(&content_after_run2));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_virtual_workspace_injects_only_workspace_clippy()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[workspace]
@@ -647,23 +624,17 @@ members = ["crates/*"]
 "#;
         let manifest = TempManifest::new(initial)?;
         let res = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(res.modified, "expected modified");
-        ensure_eq!(res.lints_configured, 34);
+        expect_that!(res.modified, is_true());
+        expect_that!(res.lints_configured, eq(34));
 
         let content = manifest.read()?;
-        ensure!(
-            content.contains("[workspace.lints.clippy]"),
-            "Must contain [workspace.lints.clippy]"
-        );
-        ensure!(!content.contains("\n[lints]"), "Must NOT contain [lints]");
-        ensure!(
-            !content.contains("workspace = true"),
-            "Must NOT contain workspace = true"
-        );
+        expect_that!(content, contains_substring("[workspace.lints.clippy]"));
+        expect_that!(content, not(contains_substring("\n[lints]")));
+        expect_that!(content, not(contains_substring("workspace = true")));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_root_package_with_workspace_injects_workspace_clippy_and_workspace_true()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -675,24 +646,16 @@ members = ["crates/*"]
 "#;
         let manifest = TempManifest::new(initial)?;
         let res = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(res.modified, "expected modified");
-        ensure_eq!(res.lints_configured, 34);
+        expect_that!(res.modified, is_true());
+        expect_that!(res.lints_configured, eq(34));
 
         let content = manifest.read()?;
-        ensure!(
-            content.contains("[workspace.lints.clippy]"),
-            "Must contain [workspace.lints.clippy]"
-        );
-        ensure!(
-            content.contains("[lints]\nworkspace = true")
-                || content.contains("[lints]\r\nworkspace = true")
-                || content.contains("workspace = true"),
-            "Must ensure [lints] workspace = true"
-        );
+        expect_that!(content, contains_substring("[workspace.lints.clippy]"));
+        expect_that!(content, contains_substring("workspace = true"));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_single_crate_injects_lints_clippy()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -701,22 +664,16 @@ version = "0.1.0"
 "#;
         let manifest = TempManifest::new(initial)?;
         let res = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(res.modified, "expected modified");
-        ensure_eq!(res.lints_configured, 34);
+        expect_that!(res.modified, is_true());
+        expect_that!(res.lints_configured, eq(34));
 
         let content = manifest.read()?;
-        ensure!(
-            content.contains("[lints.clippy]"),
-            "Must contain [lints.clippy]"
-        );
-        ensure!(
-            !content.contains("[workspace"),
-            "Must not contain [workspace]"
-        );
+        expect_that!(content, contains_substring("[lints.clippy]"));
+        expect_that!(content, not(contains_substring("[workspace")));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_profile_differences_strict_34_and_standard_31()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -725,49 +682,49 @@ version = "0.1.0"
 "#;
         let manifest_strict = TempManifest::new(initial)?;
         let res_strict = configure_lints(&manifest_strict.path, LintProfile::Strict)?;
-        ensure_eq!(res_strict.lints_configured, 34);
+        expect_that!(res_strict.lints_configured, eq(34));
         let content_strict = manifest_strict.read()?;
-        ensure!(
-            content_strict.contains("string_slice = \"warn\""),
-            "Strict must have string_slice"
+        expect_that!(
+            content_strict,
+            contains_substring("string_slice = \"warn\"")
         );
-        ensure!(
-            content_strict.contains("indexing_slicing = \"warn\""),
-            "Strict must have indexing_slicing"
+        expect_that!(
+            content_strict,
+            contains_substring("indexing_slicing = \"warn\"")
         );
-        ensure!(
-            content_strict.contains("allow_attributes = \"warn\""),
-            "Strict must have allow_attributes"
+        expect_that!(
+            content_strict,
+            contains_substring("allow_attributes = \"warn\"")
         );
 
         let manifest_standard = TempManifest::new(initial)?;
         let res_standard = configure_lints(&manifest_standard.path, LintProfile::Standard)?;
-        ensure_eq!(res_standard.lints_configured, 31);
+        expect_that!(res_standard.lints_configured, eq(31));
         let content_standard = manifest_standard.read()?;
-        ensure!(
-            !content_standard.contains("string_slice = \"warn\""),
-            "Standard must omit string_slice"
+        expect_that!(
+            content_standard,
+            not(contains_substring("string_slice = \"warn\""))
         );
-        ensure!(
-            !content_standard.contains("indexing_slicing = \"warn\""),
-            "Standard must omit indexing_slicing"
+        expect_that!(
+            content_standard,
+            not(contains_substring("indexing_slicing = \"warn\""))
         );
-        ensure!(
-            !content_standard.contains("allow_attributes = \"warn\""),
-            "Standard must omit allow_attributes"
+        expect_that!(
+            content_standard,
+            not(contains_substring("allow_attributes = \"warn\""))
         );
-        ensure!(
-            content_standard.contains("allow_attributes_without_reason = \"warn\""),
-            "Standard retains allow_attributes_without_reason"
+        expect_that!(
+            content_standard,
+            contains_substring("allow_attributes_without_reason = \"warn\"")
         );
-        ensure!(
-            content_standard.contains("unwrap_used = \"warn\""),
-            "Standard retains unwrap_used"
+        expect_that!(
+            content_standard,
+            contains_substring("unwrap_used = \"warn\"")
         );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_remove_lints_cleans_clippy_and_prunes_empty_parent_table()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -778,29 +735,23 @@ version = "0.1.0"
         configure_lints(&manifest.path, LintProfile::Strict)?;
 
         let remove_res = remove_lints(&manifest.path)?;
-        ensure!(remove_res.modified, "remove_lints should modify");
-        ensure_eq!(remove_res.lints_configured, 34);
+        expect_that!(remove_res.modified, is_true());
+        expect_that!(remove_res.lints_configured, eq(34));
 
         let content_after_remove = manifest.read()?;
-        ensure!(
-            !content_after_remove.contains("[lints]"),
-            "Empty [lints] table should be pruned"
-        );
-        ensure!(
-            !content_after_remove.contains("[lints.clippy]"),
-            "[lints.clippy] should be removed"
+        expect_that!(content_after_remove, not(contains_substring("[lints]")));
+        expect_that!(
+            content_after_remove,
+            not(contains_substring("[lints.clippy]"))
         );
 
         let remove_again = remove_lints(&manifest.path)?;
-        ensure!(
-            !remove_again.modified,
-            "second remove should report modified: false"
-        );
-        ensure_eq!(remove_again.lints_configured, 0);
+        expect_that!(remove_again.modified, is_false());
+        expect_that!(remove_again.lints_configured, eq(0));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_remove_lints_with_existing_rust_lints_preserves_parent_table()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -814,49 +765,40 @@ unsafe_code = "forbid"
         configure_lints(&manifest.path, LintProfile::Strict)?;
 
         let content_configured = manifest.read()?;
-        ensure!(
-            content_configured.contains("[lints.rust]"),
-            "Rust lints must be present"
-        );
-        ensure!(
-            content_configured.contains("[lints.clippy]"),
-            "Clippy lints must be present"
-        );
+        expect_that!(content_configured, contains_substring("[lints.rust]"));
+        expect_that!(content_configured, contains_substring("[lints.clippy]"));
 
         let remove_res = remove_lints(&manifest.path)?;
-        ensure!(remove_res.modified, "remove_lints should modify");
-        ensure_eq!(remove_res.lints_configured, 34);
+        expect_that!(remove_res.modified, is_true());
+        expect_that!(remove_res.lints_configured, eq(34));
 
         let content_after_remove = manifest.read()?;
-        ensure!(
-            content_after_remove.contains("[lints.rust]"),
-            "Rust lints must be preserved"
+        expect_that!(content_after_remove, contains_substring("[lints.rust]"));
+        expect_that!(
+            content_after_remove,
+            contains_substring("unsafe_code = \"forbid\"")
         );
-        ensure!(
-            content_after_remove.contains("unsafe_code = \"forbid\""),
-            "Rust lint keys must be preserved"
-        );
-        ensure!(
-            !content_after_remove.contains("[lints.clippy]"),
-            "Clippy table must be removed"
+        expect_that!(
+            content_after_remove,
+            not(contains_substring("[lints.clippy]"))
         );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_missing_file_returns_manifest_not_found()
     -> Result<(), Box<dyn std::error::Error>> {
         let missing = PathBuf::from("/non/existent/path/Cargo.toml");
         match configure_lints(&missing, LintProfile::Strict) {
             Err(CargoTomlError::ManifestNotFound { path }) => {
-                ensure_eq!(path, missing);
+                expect_that!(path, eq(&missing));
             }
             other => return Err(format!("Expected ManifestNotFound, got {other:?}").into()),
         }
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_malformed_toml_returns_parse_error()
     -> Result<(), Box<dyn std::error::Error>> {
         let malformed = "this is not valid toml = [[";
@@ -867,7 +809,7 @@ unsafe_code = "forbid"
         }
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_scalar_lints_or_workspace_returns_invalid_structure()
     -> Result<(), Box<dyn std::error::Error>> {
         let invalid_lints = r#"lints = "invalid_scalar"
@@ -901,7 +843,7 @@ version = "0.1.0"
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_remove_lints_with_empty_clippy_table_prunes_empty_tables_on_disk()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -912,25 +854,16 @@ version = "0.1.0"
 "#;
         let manifest = TempManifest::new(initial)?;
         let remove_res = remove_lints(&manifest.path)?;
-        ensure!(
-            remove_res.modified,
-            "Expected modified to be true when pruning empty table"
-        );
-        ensure_eq!(remove_res.lints_configured, 0);
+        expect_that!(remove_res.modified, is_true());
+        expect_that!(remove_res.lints_configured, eq(0));
 
         let content_after = manifest.read()?;
-        ensure!(
-            !content_after.contains("[lints]"),
-            "Empty [lints] table should be pruned from disk"
-        );
-        ensure!(
-            !content_after.contains("[lints.clippy]"),
-            "Empty [lints.clippy] table should be pruned from disk"
-        );
+        expect_that!(content_after, not(contains_substring("[lints]")));
+        expect_that!(content_after, not(contains_substring("[lints.clippy]")));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_remove_lints_virtual_workspace_prunes_workspace_lints()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[workspace]
@@ -939,33 +872,27 @@ members = ["crates/*"]
         let manifest = TempManifest::new(initial)?;
         configure_lints(&manifest.path, LintProfile::Strict)?;
         let content_configured = manifest.read()?;
-        ensure!(
-            content_configured.contains("[workspace.lints.clippy]"),
-            "Must contain workspace clippy"
+        expect_that!(
+            content_configured,
+            contains_substring("[workspace.lints.clippy]")
         );
 
         let remove_res = remove_lints(&manifest.path)?;
-        ensure!(remove_res.modified, "Expected modified to be true");
-        ensure_eq!(remove_res.lints_configured, 34);
+        expect_that!(remove_res.modified, is_true());
+        expect_that!(remove_res.lints_configured, eq(34));
 
         let content_after = manifest.read()?;
-        ensure!(
-            !content_after.contains("[workspace.lints]"),
-            "Must prune [workspace.lints]"
-        );
-        ensure!(!content_after.contains("clippy"), "Must remove clippy");
-        ensure!(
-            content_after.contains("[workspace]"),
-            "Must keep [workspace]"
-        );
-        ensure!(
-            content_after.contains("members = [\"crates/*\"]"),
-            "Must keep members"
+        expect_that!(content_after, not(contains_substring("[workspace.lints]")));
+        expect_that!(content_after, not(contains_substring("clippy")));
+        expect_that!(content_after, contains_substring("[workspace]"));
+        expect_that!(
+            content_after,
+            contains_substring("members = [\"crates/*\"]")
         );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_remove_lints_root_package_with_workspace_prunes_workspace_lints_and_root_lints()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -978,37 +905,25 @@ members = ["crates/*"]
         let manifest = TempManifest::new(initial)?;
         configure_lints(&manifest.path, LintProfile::Strict)?;
         let content_configured = manifest.read()?;
-        ensure!(
-            content_configured.contains("[workspace.lints.clippy]"),
-            "Must contain workspace clippy"
+        expect_that!(
+            content_configured,
+            contains_substring("[workspace.lints.clippy]")
         );
-        ensure!(
-            content_configured.contains("[lints]"),
-            "Must contain [lints]"
-        );
+        expect_that!(content_configured, contains_substring("[lints]"));
 
         let remove_res = remove_lints(&manifest.path)?;
-        ensure!(remove_res.modified, "Expected modified to be true");
-        ensure_eq!(remove_res.lints_configured, 34);
+        expect_that!(remove_res.modified, is_true());
+        expect_that!(remove_res.lints_configured, eq(34));
 
         let content_after = manifest.read()?;
-        ensure!(
-            !content_after.contains("[workspace.lints]"),
-            "Must prune [workspace.lints]"
-        );
-        ensure!(
-            !content_after.contains("[lints]"),
-            "Must prune [lints] that only had workspace = true"
-        );
-        ensure!(content_after.contains("[package]"), "Must keep [package]");
-        ensure!(
-            content_after.contains("[workspace]"),
-            "Must keep [workspace]"
-        );
+        expect_that!(content_after, not(contains_substring("[workspace.lints]")));
+        expect_that!(content_after, not(contains_substring("[lints]")));
+        expect_that!(content_after, contains_substring("[package]"));
+        expect_that!(content_after, contains_substring("[workspace]"));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_configure_lints_downgrade_to_standard_preserves_category_comments()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
@@ -1017,48 +932,30 @@ version = "0.1.0"
 "#;
         let manifest = TempManifest::new(initial)?;
         let res_strict = configure_lints(&manifest.path, LintProfile::Strict)?;
-        ensure!(res_strict.modified, "Expected modified for strict");
+        expect_that!(res_strict.modified, is_true());
         let content_strict = manifest.read()?;
-        ensure!(
-            content_strict.contains("# Don't Panic"),
-            "Expected Don't Panic comment"
-        );
-        ensure!(
-            content_strict.contains("# Don't `allow`"),
-            "Expected Don't allow comment"
-        );
+        expect_that!(content_strict, contains_substring("# Don't Panic"));
+        expect_that!(content_strict, contains_substring("# Don't `allow`"));
 
         let res_standard = configure_lints(&manifest.path, LintProfile::Standard)?;
-        ensure!(
-            res_standard.modified,
-            "Expected modified for standard downgrade"
-        );
-        ensure_eq!(res_standard.lints_configured, 31);
+        expect_that!(res_standard.modified, is_true());
+        expect_that!(res_standard.lints_configured, eq(31));
 
         let content_standard = manifest.read()?;
-        ensure!(
-            !content_standard.contains("string_slice"),
-            "Standard must omit string_slice"
+        expect_that!(content_standard, not(contains_substring("string_slice")));
+        expect_that!(
+            content_standard,
+            not(contains_substring("allow_attributes ="))
         );
-        ensure!(
-            !content_standard.contains("allow_attributes ="),
-            "Standard must omit allow_attributes"
+        expect_that!(content_standard, contains_substring("# Don't Panic"));
+        expect_that!(content_standard, contains_substring("# Don't `allow`"));
+        expect_that!(
+            content_standard,
+            contains_substring("unwrap_used = \"warn\"")
         );
-        ensure!(
-            content_standard.contains("# Don't Panic"),
-            "Category comment for Don't Panic must be preserved and transferred to unwrap_used"
-        );
-        ensure!(
-            content_standard.contains("# Don't `allow`"),
-            "Category comment for Don't allow must be preserved and transferred to allow_attributes_without_reason"
-        );
-        ensure!(
-            content_standard.contains("unwrap_used = \"warn\""),
-            "unwrap_used must be present"
-        );
-        ensure!(
-            content_standard.contains("allow_attributes_without_reason = \"warn\""),
-            "allow_attributes_without_reason must be present"
+        expect_that!(
+            content_standard,
+            contains_substring("allow_attributes_without_reason = \"warn\"")
         );
         Ok(())
     }

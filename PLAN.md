@@ -347,9 +347,9 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
 - **Description:** Initialize the Rust CLI crate structure with `clap`, create unified diagnostic data structures, and implement `code-review configure-lints` using `toml_edit` to inject and update strict Clippy lint configurations in `Cargo.toml`.
-- **Status:** `[ ] Pending`
+- **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-05
-- **Actual Completion Date:** -
+- **Actual Completion Date:** 2026-10-02
 - **Dependencies:** None
 - **Tasks File:** `plan/M1.md`
 - **Feedback File:** `plan/FEEDBACK_M1.md`
@@ -456,6 +456,11 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Wire `code-review configure-lints` subcommand in `src/main.rs`.
   - Verify with `cargo test`.
   - Describe Jujutsu change: `jj describe -m "plan-M1-T2: feat: implement Cargo.toml lint configurator using toml_edit"`
+- [x] **M1-T3: Milestone Spec Remediation & Completion**
+  - Create module specifications `src/cli.spec.md` and `src/common/SPEC.md`.
+  - Tighten visibility of internal helper methods on `LintProfile` to `pub(crate)`.
+  - Update `plan/M1.md` and `PLAN.md` roadmap status to completed.
+  - Describe Jujutsu change: `jj describe -m "plan-M1-T3: docs: add cli and common specs, tighten visibility, and complete milestone 1"`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
 - [ ] **M2-T0: Update Specifications (`src/tools/opinionated/SPEC.md`)**

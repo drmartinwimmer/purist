@@ -1,21 +1,28 @@
-[package]
-name = "code-review"
+[workspace]
+members = [
+    "crates/*",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "A suite of code review skills, opinionated linters, and Inspect AI evals"
 license = "MIT"
-readme = "README.md"
 repository = "https://github.com/drmartinwimmer/review"
 
-[dependencies]
+[workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
 toml_edit = "0.22"
-
-[lints]
-workspace = true
+thiserror = "2.0"
+googletest = "0.14"
+code-review-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
+code-review-configure-lints = { path = "crates/configure-lints", version = "0.1.0" }
+code-review-check = { path = "crates/check", version = "0.1.0" }
+code-review-opinionated = { path = "crates/opinionated", version = "0.1.0" }
+code-review-api = { path = "crates/api", version = "0.1.0" }
+code-review-coverage = { path = "crates/coverage", version = "0.1.0" }
 
 [workspace.lints.clippy]
 # Don't Panic - prevent panics from unwraps and unsafe slicing or indexing

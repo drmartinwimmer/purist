@@ -197,41 +197,24 @@ impl DiagnosticReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use googletest::prelude::*;
 
-    macro_rules! ensure {
-        ($cond:expr, $($arg:tt)*) => {
-            if !$cond {
-                return Err(format!($($arg)*).into());
-            }
-        };
-    }
-
-    macro_rules! ensure_eq {
-        ($left:expr, $right:expr) => {
-            if $left != $right {
-                return Err(
-                    format!("check failed: left: `{:?}`, right: `{:?}`", $left, $right).into(),
-                );
-            }
-        };
-    }
-
-    #[test]
+    #[googletest::test]
     fn test_check_empty_report_returns_empty_and_zero_counts()
     -> Result<(), Box<dyn std::error::Error>> {
         let report = DiagnosticReport::default();
-        ensure!(report.is_empty(), "expected empty report");
-        ensure!(!report.has_errors(), "expected no errors");
-        ensure_eq!(report.error_count(), 0);
-        ensure_eq!(report.warning_count(), 0);
-        ensure_eq!(report.info_count(), 0);
-        ensure_eq!(report.hint_count(), 0);
-        ensure_eq!(report.summary.targets_scanned, 0);
-        ensure_eq!(report.summary.duration_ms, 0);
+        expect_that!(report.is_empty(), is_true());
+        expect_that!(report.has_errors(), is_false());
+        expect_that!(report.error_count(), eq(0));
+        expect_that!(report.warning_count(), eq(0));
+        expect_that!(report.info_count(), eq(0));
+        expect_that!(report.hint_count(), eq(0));
+        expect_that!(report.summary.targets_scanned, eq(0));
+        expect_that!(report.summary.duration_ms, eq(0));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_add_diagnostics_updates_error_and_warning_counts()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
@@ -256,35 +239,35 @@ mod tests {
             "A helpful hint",
         ));
 
-        ensure!(!report.is_empty(), "expected non-empty report");
-        ensure!(report.has_errors(), "expected errors present");
-        ensure_eq!(report.error_count(), 1);
-        ensure_eq!(report.warning_count(), 1);
-        ensure_eq!(report.info_count(), 1);
-        ensure_eq!(report.hint_count(), 1);
-        ensure_eq!(report.diagnostics.len(), 4);
-        ensure_eq!(report.summary.total_errors, 1);
-        ensure_eq!(report.summary.total_warnings, 1);
-        ensure_eq!(report.summary.total_info, 1);
-        ensure_eq!(report.summary.total_hints, 1);
+        expect_that!(report.is_empty(), is_false());
+        expect_that!(report.has_errors(), is_true());
+        expect_that!(report.error_count(), eq(1));
+        expect_that!(report.warning_count(), eq(1));
+        expect_that!(report.info_count(), eq(1));
+        expect_that!(report.hint_count(), eq(1));
+        expect_that!(report.diagnostics.len(), eq(4));
+        expect_that!(report.summary.total_errors, eq(1));
+        expect_that!(report.summary.total_warnings, eq(1));
+        expect_that!(report.summary.total_info, eq(1));
+        expect_that!(report.summary.total_hints, eq(1));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_create_span_stores_coordinates_and_byte_offsets()
     -> Result<(), Box<dyn std::error::Error>> {
         let span = Span::new("src/lib.rs", 12, 4, 12, 18).with_byte_offsets(120, 134);
-        ensure_eq!(span.file, PathBuf::from("src/lib.rs"));
-        ensure_eq!(span.start_line, 12);
-        ensure_eq!(span.start_col, 4);
-        ensure_eq!(span.end_line, 12);
-        ensure_eq!(span.end_col, 18);
-        ensure_eq!(span.start_byte, Some(120));
-        ensure_eq!(span.end_byte, Some(134));
+        expect_that!(span.file, eq(&PathBuf::from("src/lib.rs")));
+        expect_that!(span.start_line, eq(12));
+        expect_that!(span.start_col, eq(4));
+        expect_that!(span.end_line, eq(12));
+        expect_that!(span.end_col, eq(18));
+        expect_that!(span.start_byte, eq(Some(120)));
+        expect_that!(span.end_byte, eq(Some(134)));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_serialize_diagnostic_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
         let span = Span::new("src/main.rs", 10, 5, 10, 20).with_byte_offsets(85, 100);
         let diag = Diagnostic::new("rule::style", Severity::Warning, "Avoid raw unwrap")
@@ -294,13 +277,16 @@ mod tests {
         let serialized = serde_json::to_string(&diag)?;
         let deserialized: Diagnostic = serde_json::from_str(&serialized)?;
 
-        ensure_eq!(diag, deserialized);
-        ensure_eq!(deserialized.span, Some(span.clone()));
-        ensure_eq!(deserialized.suggested_fix.as_deref(), Some("use ? instead"));
+        expect_that!(diag, eq(&deserialized));
+        expect_that!(deserialized.span.as_ref(), eq(Some(&span)));
+        expect_that!(
+            deserialized.suggested_fix.as_deref(),
+            eq(Some("use ? instead"))
+        );
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_serialize_report_with_summary_roundtrips_json() -> Result<(), Box<dyn std::error::Error>>
     {
         let report = DiagnosticReport::new(vec![
@@ -313,21 +299,21 @@ mod tests {
         let serialized = serde_json::to_string_pretty(&report)?;
         let deserialized: DiagnosticReport = serde_json::from_str(&serialized)?;
 
-        ensure_eq!(report, deserialized);
-        ensure_eq!(deserialized.diagnostics.len(), 2);
-        ensure_eq!(deserialized.summary.total_errors, 1);
-        ensure_eq!(deserialized.summary.total_hints, 1);
-        ensure_eq!(deserialized.summary.targets_scanned, 42);
-        ensure_eq!(deserialized.summary.duration_ms, 150);
+        expect_that!(report, eq(&deserialized));
+        expect_that!(deserialized.diagnostics.len(), eq(2));
+        expect_that!(deserialized.summary.total_errors, eq(1));
+        expect_that!(deserialized.summary.total_hints, eq(1));
+        expect_that!(deserialized.summary.targets_scanned, eq(42));
+        expect_that!(deserialized.summary.duration_ms, eq(150));
         Ok(())
     }
 
-    #[test]
+    #[googletest::test]
     fn test_display_severity_formats_lowercase() -> Result<(), Box<dyn std::error::Error>> {
-        ensure_eq!(Severity::Error.to_string(), "error");
-        ensure_eq!(Severity::Warning.to_string(), "warning");
-        ensure_eq!(Severity::Info.to_string(), "info");
-        ensure_eq!(Severity::Hint.to_string(), "hint");
+        expect_that!(Severity::Error.to_string(), eq("error"));
+        expect_that!(Severity::Warning.to_string(), eq("warning"));
+        expect_that!(Severity::Info.to_string(), eq("info"));
+        expect_that!(Severity::Hint.to_string(), eq("hint"));
         Ok(())
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "code-review-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Check aggregator subcommand for code-review"
+
+[[bin]]
+name = "check"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+googletest = { workspace = true }
+
+[lints]
+workspace = true

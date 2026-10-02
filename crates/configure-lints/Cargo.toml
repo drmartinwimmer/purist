@@ -1,0 +1,23 @@
+[package]
+name = "code-review-configure-lints"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Configure strict Clippy lints in Cargo.toml"
+
+[[bin]]
+name = "configure-lints"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+serde = { workspace = true }
+toml_edit = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+googletest = { workspace = true }
+
+[lints]
+workspace = true
