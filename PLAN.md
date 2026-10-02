@@ -443,7 +443,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - [x] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
   - Define invariants for `code-review` CLI subcommands and `Cargo.toml` modification safety (no comment stripping, preserving existing tables, idempotency).
   - Describe Jujutsu change: `jj describe -m "plan-M1-T0: docs: add specs for core CLI and cargo-toml configurator"`
-- [ ] **M1-T1: CLI Dispatcher & Diagnostic Core Types**
+- [x] **M1-T1: CLI Dispatcher & Diagnostic Core Types**
   - Add `clap` and `serde` dependencies to `Cargo.toml`.
   - Create `src/cli.rs` defining commands: `check`, `configure-lints`, `opinionated`, `api`, `coverage`.
   - Create `src/common/diagnostics.rs` defining `Diagnostic`, `Severity`, `Span`, and `DiagnosticReport`.
