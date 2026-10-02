@@ -449,7 +449,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Create `src/common/diagnostics.rs` defining `Diagnostic`, `Severity`, `Span`, and `DiagnosticReport`.
   - Create `src/common/reporter.rs` supporting console output and structured JSON.
   - Describe Jujutsu change: `jj describe -m "plan-M1-T1: feat: add clap CLI dispatcher and unified diagnostic types"`
-- [ ] **M1-T2: Cargo.toml Lint Injection Engine (`src/tools/cargo_toml.rs`)**
+- [x] **M1-T2: Cargo.toml Lint Injection Engine (`src/tools/cargo_toml.rs`)**
   - Add `toml_edit` dependency to `Cargo.toml`.
   - Write unit tests in `src/tools/cargo_toml.rs` verifying that running `configure_lints` on a minimal `Cargo.toml` preserves comments, inserts `[workspace.lints.clippy]` or `[lints.clippy]`, and sets `warn` on all required lints.
   - Implement `configure_lints` and `remove_lints` functions.

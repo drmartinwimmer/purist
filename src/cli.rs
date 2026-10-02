@@ -1,19 +1,9 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use serde::{Deserialize, Serialize};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 use crate::common::reporter::OutputFormat;
 
-/// Lint profile preset for configure-lints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LintProfile {
-    /// Comprehensive safety, robustness, and suppression hygiene rules (34 lints)
-    #[default]
-    Strict,
-    /// Standard baseline safety and robustness rules (31 lints)
-    Standard,
-}
+pub use crate::tools::cargo_toml::LintProfile;
 
 /// Command-line arguments for the configure-lints subcommand.
 #[derive(Debug, Clone, Args, PartialEq, Eq)]

@@ -157,7 +157,10 @@ fn render_markdown(report: &DiagnosticReport, writer: &mut dyn io::Write) -> io:
         };
 
         let suggestion = match &diag.suggested_fix {
-            Some(fix) => format!("`{fix}`"),
+            Some(fix) => {
+                let sanitized_fix = fix.replace('|', "\\|").replace('\n', " ");
+                format!("`{sanitized_fix}`")
+            }
             None => "-".to_string(),
         };
 
@@ -350,6 +353,25 @@ mod tests {
         ensure!(
             output.contains("**Summary**: 1 error(s), 0 warning(s)"),
             "Expected summary footer"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_render_markdown_sanitizes_pipes_and_newlines_in_suggested_fix()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut report = DiagnosticReport::default();
+        report.add(
+            Diagnostic::new("rule::fix", Severity::Warning, "Fix issue")
+                .with_suggested_fix("first line | second line\nthird line"),
+        );
+        let mut buffer = Vec::new();
+        render_report(&report, OutputFormat::Markdown, &mut buffer)?;
+        let output = String::from_utf8(buffer)?;
+        ensure!(
+            output.contains("`first line \\| second line third line`"),
+            "Expected sanitized suggestion with escaped pipe and replaced newline, but got:\n{}",
+            output
         );
         Ok(())
     }
