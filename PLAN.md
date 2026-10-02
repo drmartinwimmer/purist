@@ -440,7 +440,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 ## Detailed Task Breakdown
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
-- [ ] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
+- [x] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
   - Define invariants for `code-review` CLI subcommands and `Cargo.toml` modification safety (no comment stripping, preserving existing tables, idempotency).
   - Describe Jujutsu change: `jj describe -m "plan-M1-T0: docs: add specs for core CLI and cargo-toml configurator"`
 - [ ] **M1-T1: CLI Dispatcher & Diagnostic Core Types**
