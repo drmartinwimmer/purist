@@ -33,7 +33,10 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Verify package & metadata
-        run: cargo publish --dry-run
+        run: |
+          for pkg in code-review-configure-lints code-review-diagnostics code-review-check code-review-opinionated code-review-api code-review-coverage; do
+            cargo publish --dry-run -p "$pkg"
+          done
 
   test:
     name: Unit & Integration Tests

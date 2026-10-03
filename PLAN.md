@@ -347,9 +347,9 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
 - **Description:** Initialize the Rust CLI crate structure with `clap`, create unified diagnostic data structures, and implement `code-review configure-lints` using `toml_edit` to inject and update strict Clippy lint configurations in `Cargo.toml`.
-- **Status:** `[ ] Pending`
+- **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-05
-- **Actual Completion Date:** -
+- **Actual Completion Date:** 2026-10-02
 - **Dependencies:** None
 - **Tasks File:** `plan/M1.md`
 - **Feedback File:** `plan/FEEDBACK_M1.md`
@@ -440,22 +440,27 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 ## Detailed Task Breakdown
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
-- [ ] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
+- [x] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
   - Define invariants for `code-review` CLI subcommands and `Cargo.toml` modification safety (no comment stripping, preserving existing tables, idempotency).
   - Describe Jujutsu change: `jj describe -m "plan-M1-T0: docs: add specs for core CLI and cargo-toml configurator"`
-- [ ] **M1-T1: CLI Dispatcher & Diagnostic Core Types**
+- [x] **M1-T1: CLI Dispatcher & Diagnostic Core Types**
   - Add `clap` and `serde` dependencies to `Cargo.toml`.
   - Create `src/cli.rs` defining commands: `check`, `configure-lints`, `opinionated`, `api`, `coverage`.
   - Create `src/common/diagnostics.rs` defining `Diagnostic`, `Severity`, `Span`, and `DiagnosticReport`.
   - Create `src/common/reporter.rs` supporting console output and structured JSON.
   - Describe Jujutsu change: `jj describe -m "plan-M1-T1: feat: add clap CLI dispatcher and unified diagnostic types"`
-- [ ] **M1-T2: Cargo.toml Lint Injection Engine (`src/tools/cargo_toml.rs`)**
+- [x] **M1-T2: Cargo.toml Lint Injection Engine (`src/tools/cargo_toml.rs`)**
   - Add `toml_edit` dependency to `Cargo.toml`.
   - Write unit tests in `src/tools/cargo_toml.rs` verifying that running `configure_lints` on a minimal `Cargo.toml` preserves comments, inserts `[workspace.lints.clippy]` or `[lints.clippy]`, and sets `warn` on all required lints.
   - Implement `configure_lints` and `remove_lints` functions.
   - Wire `code-review configure-lints` subcommand in `src/main.rs`.
   - Verify with `cargo test`.
   - Describe Jujutsu change: `jj describe -m "plan-M1-T2: feat: implement Cargo.toml lint configurator using toml_edit"`
+- [x] **M1-T3: Milestone Spec Remediation & Completion**
+  - Create module specifications `src/cli.spec.md` and `src/common/SPEC.md`.
+  - Tighten visibility of internal helper methods on `LintProfile` to `pub(crate)`.
+  - Update `plan/M1.md` and `PLAN.md` roadmap status to completed.
+  - Describe Jujutsu change: `jj describe -m "plan-M1-T3: docs: add cli and common specs, tighten visibility, and complete milestone 1"`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
 - [ ] **M2-T0: Update Specifications (`src/tools/opinionated/SPEC.md`)**
