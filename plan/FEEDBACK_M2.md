@@ -1,7 +1,7 @@
 # Milestone 2 Feedback: Opinionated Static Analysis Linter Engine & Rules
 
 **Date:** 2026-10-03  
-**Status:** In Progress  
+**Status:** Completed  
 **Revision:** @  
 
 This document serves as an asynchronous feedback template for human review. Humans can record observations, suggestions, or concerns here to be addressed later using the `reacting-to-feedback` skill.
@@ -9,11 +9,11 @@ This document serves as an asynchronous feedback template for human review. Huma
 ---
 
 ## Completed Tasks
-- [ ] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`, `plan/M2.md`, `plan/FEEDBACK_M2.md`)**
-- [ ] **M2-T1: AST Visitor Framework (`crates/opinionated/src/engine.rs`)**
-- [ ] **M2-T2: Rule Implementations (`crates/opinionated/src/rules/`)**
-- [ ] **M2-T3: Opinionated Linter CLI Integration (`crates/opinionated/src/lib.rs`, `crates/code-review/src/lib.rs`)**
-- [ ] **M2-T4: Milestone Completion & Feedback Template**
+- [x] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`, `plan/M2.md`, `plan/FEEDBACK_M2.md`)**
+- [x] **M2-T1: AST Visitor Framework (`crates/opinionated/src/engine.rs`)**
+- [x] **M2-T2: Rule Implementations (`crates/opinionated/src/rules/`)**
+- [x] **M2-T3: Opinionated Linter CLI Integration (`crates/opinionated/src/lib.rs`, `crates/code-review/src/lib.rs`)**
+- [x] **M2-T4: Milestone Completion & Feedback Template**
 
 ---
 
