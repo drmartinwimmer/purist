@@ -463,7 +463,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M1-T3: docs: add cli and common specs, tighten visibility, and complete milestone 1"`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
-- [ ] **M2-T0: Update Specifications (`src/tools/opinionated/SPEC.md`)**
+- [x] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`)**
   - Document the contract, AST patterns, and false-positive criteria for each custom lint rule.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T0: docs: add spec for opinionated linter rules"`
 - [ ] **M2-T1: AST Visitor Framework (`src/tools/opinionated/engine.rs`)**
