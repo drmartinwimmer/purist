@@ -175,7 +175,11 @@ name = "code-review-opinionated"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "code-review-diagnostics",
  "googletest",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
  "thiserror",
 ]
 

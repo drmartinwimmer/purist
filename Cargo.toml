@@ -23,6 +23,9 @@ code-review-check = { path = "crates/check", version = "0.1.0" }
 code-review-opinionated = { path = "crates/opinionated", version = "0.1.0" }
 code-review-api = { path = "crates/api", version = "0.1.0" }
 code-review-coverage = { path = "crates/coverage", version = "0.1.0" }
+syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 [workspace.lints.clippy]
 # Don't Panic - prevent panics from unwraps and unsafe slicing or indexing

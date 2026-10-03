@@ -1,4 +1,7 @@
+pub mod engine;
+
 use clap::Args;
+pub use engine::{LintContext, OpinionatedEngine, Rule};
 use std::path::{Path, PathBuf};
 
 /// Error type for opinionated linter execution.

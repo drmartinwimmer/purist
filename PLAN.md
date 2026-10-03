@@ -466,7 +466,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - [x] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`)**
   - Document the contract, AST patterns, and false-positive criteria for each custom lint rule.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T0: docs: add spec for opinionated linter rules"`
-- [ ] **M2-T1: AST Visitor Framework (`src/tools/opinionated/engine.rs`)**
+- [x] **M2-T1: AST Visitor Framework (`crates/opinionated/src/engine.rs`)**
   - Add `syn` and `quote` dependencies to `Cargo.toml`.
   - Implement visitor engine traversing Rust files, handling syntax errors gracefully, and delegating to rule checkers.
   - Unit tests for AST traversal.
