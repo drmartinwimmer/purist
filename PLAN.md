@@ -471,13 +471,14 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Implement visitor engine traversing Rust files, handling syntax errors gracefully, and delegating to rule checkers.
   - Unit tests for AST traversal.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T1: feat: implement opinionated AST visitor engine"`
-- [ ] **M2-T2: Rule Implementations (`src/tools/opinionated/rules/`)**
+- [x] **M2-T2: Rule Implementations (`crates/opinionated/src/rules/`)**
   - Implement `no_inline_mods.rs`: Detect non-test inline modules in `main.rs`/`lib.rs`.
   - Implement `free_functions.rs`: Detect unit structs with pure associated methods.
   - Implement `path_resolution.rs`: Detect non-manifest relative paths.
   - Implement `error_types.rs`: Detect raw `Result<T, String>` signatures.
   - Implement `clippy_suppress.rs`: Detect `#[expect]` or `#[allow]` lacking `reason` or comments.
   - Implement `test_patterns.rs`: Detect test naming and assertion violations.
+  - Implement `no_redundant_conversions.rs`: Detect redundant serialization roundtrips.
   - Unit test each rule with positive and negative snippets.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T2: feat: implement opinionated static analysis rules"`
 - [ ] **M2-T3: Opinionated Linter CLI Integration**

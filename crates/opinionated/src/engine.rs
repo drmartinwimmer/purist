@@ -141,7 +141,9 @@ impl OpinionatedEngine {
 
     /// Creates a new engine instance with default opinionated rules registered.
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: crate::rules::default_rules(),
+        }
     }
 
     /// Registers a custom or built-in rule.
@@ -377,6 +379,13 @@ mod tests {
             files[0].file_name().and_then(|s| s.to_str()),
             eq(Some("lib.rs"))
         );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn test_engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::new();
+        assert_that!(engine.rules().len(), eq(7));
         Ok(())
     }
 }
