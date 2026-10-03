@@ -481,9 +481,9 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Implement `no_redundant_conversions.rs`: Detect redundant serialization roundtrips.
   - Unit test each rule with positive and negative snippets.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T2: feat: implement opinionated static analysis rules"`
-- [ ] **M2-T3: Opinionated Linter CLI Integration**
+- [x] **M2-T3: Opinionated Linter CLI Integration**
   - Connect engine to `code-review opinionated` CLI command.
-  - Support `--path`, `--json`, and `--fix` stubs.
+  - Support `--path`, `--format`, and `--fix` stubs with exit codes 0, 1, 2.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T3: feat: connect opinionated linter to code-review CLI"`
 
 ### Milestone 3: Linter & Formatter Runner Aggregator (`code-review check`)

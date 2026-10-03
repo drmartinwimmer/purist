@@ -53,12 +53,23 @@ pub enum Commands {
 }
 
 impl Commands {
-    /// Executes the subcommand.
+    /// Executes the subcommand with default formatting.
     pub fn run(&self) -> Result<(), CodeReviewError> {
+        self.run_with_format(OutputFormat::Console)
+    }
+
+    /// Executes the subcommand with the specified report output format.
+    pub fn run_with_format(&self, format: OutputFormat) -> Result<(), CodeReviewError> {
         match self {
             Self::ConfigureLints(cmd) => Ok(cmd.run()?),
             Self::Check(cmd) => Ok(cmd.run()?),
-            Self::Opinionated(cmd) => Ok(cmd.run()?),
+            Self::Opinionated(cmd) => {
+                let mut cmd = cmd.clone();
+                if cmd.format().is_none() {
+                    cmd = cmd.with_format(format);
+                }
+                Ok(cmd.run()?)
+            }
             Self::Api(cmd) => Ok(cmd.run()?),
             Self::Coverage(cmd) => Ok(cmd.run()?),
         }
@@ -122,8 +133,11 @@ impl Cli {
 
     /// Runs the selected subcommand and returns an exit code.
     pub fn run(self) -> ExitCode {
-        match self.command.run() {
+        match self.command.run_with_format(self.format) {
             Ok(()) => ExitCode::SUCCESS,
+            Err(CodeReviewError::Opinionated(OpinionatedError::LintViolationsFound { .. })) => {
+                ExitCode::from(1)
+            }
             Err(err) => {
                 eprintln!("Error: {err}");
                 ExitCode::from(2)
@@ -241,5 +255,73 @@ mod tests {
         let cmd = CheckCommand::new(None, true);
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Check(cmd));
         expect_that!(cli.run(), eq(ExitCode::SUCCESS));
+    }
+
+    #[googletest::test]
+    fn parse_cli_opinionated_subcommand_parses_flags() -> Result<(), Box<dyn std::error::Error>> {
+        let args = [
+            "code-review",
+            "--format",
+            "json",
+            "opinionated",
+            "--path",
+            "crates/opinionated/src",
+            "--fix",
+            "--quiet",
+        ];
+        let cli = Cli::try_parse_from(args)?;
+        expect_that!(cli.format(), eq(OutputFormat::Json));
+        match cli.command() {
+            Commands::Opinionated(cmd) => {
+                expect_that!(
+                    cmd.path(),
+                    eq(Some(std::path::Path::new("crates/opinionated/src")))
+                );
+                expect_that!(cmd.is_fix(), is_true());
+                expect_that!(cmd.is_quiet(), is_true());
+            }
+            _ => return Err("Expected Opinionated subcommand".into()),
+        }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_cli_opinionated_command_on_clean_target_returns_success()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "test_code_review_opinionated_clean_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("clean.rs");
+        std::fs::write(&file_path, "pub fn helper() -> i32 { 10 }\n")?;
+
+        let cmd = OpinionatedCommand::new(Some(file_path), true);
+        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
+        let code = cli.run();
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        expect_that!(code, eq(ExitCode::SUCCESS));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn run_cli_opinionated_command_with_violations_returns_exit_code_1()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "test_code_review_opinionated_viol_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("main.rs");
+        std::fs::write(&file_path, "mod helpers { pub fn broken() {} }\n")?;
+
+        let cmd = OpinionatedCommand::new(Some(file_path), true);
+        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
+        let code = cli.run();
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        expect_that!(code, eq(ExitCode::from(1)));
+        Ok(())
     }
 }
