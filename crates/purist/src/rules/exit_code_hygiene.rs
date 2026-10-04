@@ -1,4 +1,4 @@
-//! Rule: `opinionated::exit_code_hygiene`
+//! Rule: `purist::exit_code_hygiene`
 //!
 //! # What This Rule Does
 //! Enforces three key exit code hygiene constraints across application and library code:
@@ -56,7 +56,7 @@ pub struct ExitCodeHygieneRule;
 
 impl Rule for ExitCodeHygieneRule {
     fn name(&self) -> &'static str {
-        "opinionated::exit_code_hygiene"
+        "purist::exit_code_hygiene"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -128,7 +128,7 @@ fn check_library_exit_code_return(
     let fn_name = item_fn.sig.ident.to_string();
     Some(
         Diagnostic::new(
-            "opinionated::exit_code_hygiene",
+            "purist::exit_code_hygiene",
             Severity::Warning,
             format!(
                 "Function '{fn_name}' returns 'ExitCode'. Library functions must return 'Result' and let the CLI entrypoint handle exit codes."
@@ -163,7 +163,7 @@ fn check_process_exit_call(
     {
         findings.push(
             Diagnostic::new(
-                "opinionated::exit_code_hygiene",
+                "purist::exit_code_hygiene",
                 Severity::Warning,
                 "Raw integer literal passed to 'exit(...)'. Use 'ExitCode::SUCCESS' or 'ExitCode::FAILURE' instead.",
             )
@@ -176,7 +176,7 @@ fn check_process_exit_call(
     if !in_main_fn {
         findings.push(
             Diagnostic::new(
-                "opinionated::exit_code_hygiene",
+                "purist::exit_code_hygiene",
                 Severity::Warning,
                 "Direct invocation of 'process::exit' outside 'main()'. Propagate errors using 'Result' instead.",
             )
@@ -235,7 +235,7 @@ pub fn abort_execution() {
 
         assert_that!(diags.len(), eq(2)); // Both raw int and non-main call
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::exit_code_hygiene"));
+        assert_that!(&diag.rule, eq("purist::exit_code_hygiene"));
         Ok(())
     }
 
@@ -248,7 +248,7 @@ pub fn abort_execution() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::exit_code_hygiene"));
+        assert_that!(&diag.rule, eq("purist::exit_code_hygiene"));
         assert_that!(
             &diag.message,
             contains_substring("Function 'execute' returns 'ExitCode'")

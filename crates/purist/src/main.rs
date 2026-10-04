@@ -1,23 +1,23 @@
 use clap::Parser;
-use purist::{OpinionatedCommand, OpinionatedError};
+use purist::{PuristCommand, PuristError};
 use std::process::ExitCode;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "purist",
-    about = "Fast, opinionated AST linter for enforcing strict Rust code hygiene",
+    about = "Fast purist AST linter for enforcing strict Rust code hygiene",
     version
 )]
 struct Cli {
     #[command(flatten)]
-    cmd: OpinionatedCommand,
+    cmd: PuristCommand,
 }
 
 impl Cli {
     fn run(self) -> ExitCode {
         match self.cmd.run() {
             Ok(()) => ExitCode::SUCCESS,
-            Err(OpinionatedError::LintViolationsFound { .. }) => ExitCode::from(1),
+            Err(PuristError::LintViolationsFound { .. }) => ExitCode::from(1),
             Err(err) => {
                 eprintln!("Error: {err}");
                 ExitCode::from(2)
@@ -55,7 +55,7 @@ mod tests {
         fs::write(&file_path, "pub fn add(x: i32) -> i32 { x + 1 }\n")?;
 
         let cli = Cli {
-            cmd: OpinionatedCommand::new(Some(file_path), true),
+            cmd: PuristCommand::new(Some(file_path), true),
         };
         let code = cli.run();
 
@@ -72,7 +72,7 @@ mod tests {
         fs::write(&file_path, "mod helpers { pub fn foo() {} }\n")?;
 
         let cli = Cli {
-            cmd: OpinionatedCommand::new(Some(file_path), true),
+            cmd: PuristCommand::new(Some(file_path), true),
         };
         let code = cli.run();
 
@@ -84,7 +84,7 @@ mod tests {
     fn run_cli_with_nonexistent_path_returns_exit_code_2() -> Result<(), Box<dyn std::error::Error>>
     {
         let cli = Cli {
-            cmd: OpinionatedCommand::new(Some(PathBuf::from("nonexistent_path_404.rs")), true),
+            cmd: PuristCommand::new(Some(PathBuf::from("nonexistent_path_404.rs")), true),
         };
         let code = cli.run();
         assert_that!(code, eq(ExitCode::from(2)));

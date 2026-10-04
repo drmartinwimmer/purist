@@ -1,4 +1,4 @@
-//! Rule: `opinionated::no_env_access_outside_config`
+//! Rule: `purist::no_env_access_outside_config`
 //!
 //! # What This Rule Does
 //! Flags direct invocations of `std::env::var`, `var_os`, `set_var`, or `remove_var` outside of
@@ -52,7 +52,7 @@ pub struct NoEnvAccessOutsideConfigRule;
 
 impl Rule for NoEnvAccessOutsideConfigRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_env_access_outside_config"
+        "purist::no_env_access_outside_config"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -181,7 +181,7 @@ fn check_env_call(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Option<Diagnos
 
     Some(
         Diagnostic::new(
-            "opinionated::no_env_access_outside_config",
+            "purist::no_env_access_outside_config",
             Severity::Warning,
             format!(
                 "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
@@ -240,7 +240,7 @@ pub fn connect() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_env_access_outside_config"));
+        assert_that!(&diag.rule, eq("purist::no_env_access_outside_config"));
         assert_that!(&diag.message, contains_substring("std::env::var"));
         Ok(())
     }

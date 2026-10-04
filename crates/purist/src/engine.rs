@@ -88,9 +88,9 @@ impl<'a> LintContext<'a> {
     }
 }
 
-/// Trait defining an opinionated static analysis rule.
+/// Trait defining a purist static analysis rule.
 pub trait Rule: Send + Sync {
-    /// Returns the unique rule identifier (e.g. "opinionated::no_inline_mods").
+    /// Returns the unique rule identifier (e.g. "purist::no_inline_mods").
     fn name(&self) -> &'static str;
 
     /// Analyzes the parsed AST file and reports any diagnostics found.
@@ -105,19 +105,22 @@ pub struct CodeSuppression {
     pub end_line: usize,
 }
 
-/// Static analysis engine running registered opinionated rules over Rust source files.
-pub struct OpinionatedEngine {
+/// Static analysis engine running registered purist rules over Rust source files.
+pub struct PuristEngine {
     rules: Vec<Box<dyn Rule>>,
     config: Option<LintConfig>,
 }
 
-impl Default for OpinionatedEngine {
+/// Backwards compatibility alias for `PuristEngine`.
+pub type OpinionatedEngine = PuristEngine;
+
+impl Default for PuristEngine {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpinionatedEngine {
+impl PuristEngine {
     /// Creates a new engine instance with no rules registered.
     pub fn empty() -> Self {
         Self {
@@ -126,7 +129,7 @@ impl OpinionatedEngine {
         }
     }
 
-    /// Creates a new engine instance with default opinionated rules registered.
+    /// Creates a new engine instance with default purist rules registered.
     pub fn new() -> Self {
         Self {
             rules: default_rules(),
@@ -189,7 +192,7 @@ impl OpinionatedEngine {
                 }
 
                 for mut diag in raw_diags {
-                    // Check in-code suppression (e.g. #[allow(opinionated::...)] or #[expect(...)])
+                    // Check in-code suppression (e.g. #[allow(purist::...)] or #[expect(...)])
                     if is_suppressed(&diag, &suppressions) {
                         continue;
                     }
@@ -215,7 +218,7 @@ impl OpinionatedEngine {
                 let span = ctx.to_span(parse_err.span());
                 report.add(
                     Diagnostic::new(
-                        "opinionated::syntax_error",
+                        "purist::syntax_error",
                         Severity::Error,
                         format!("Failed to parse Rust syntax: {parse_err}"),
                     )
@@ -226,10 +229,12 @@ impl OpinionatedEngine {
 
         if emit_config_warnings && let Some(cfg) = config {
             for warning in cfg.warnings() {
-                let rule = if warning.starts_with("Rule 'opinionated::") {
-                    "opinionated::deprecated_rule"
+                let rule = if warning.starts_with("Rule 'purist::")
+                    || warning.starts_with("Rule 'opinionated::")
+                {
+                    "purist::deprecated_rule"
                 } else {
-                    "opinionated::unknown_rule"
+                    "purist::unknown_rule"
                 };
                 report.add(
                     Diagnostic::new(rule, Severity::Warning, warning)
@@ -266,10 +271,12 @@ impl OpinionatedEngine {
         let manifest_path =
             find_cargo_toml(target_path).unwrap_or_else(|| target_path.to_path_buf());
         for warning in config.warnings() {
-            let rule = if warning.starts_with("Rule 'opinionated::") {
-                "opinionated::deprecated_rule"
+            let rule = if warning.starts_with("Rule 'purist::")
+                || warning.starts_with("Rule 'opinionated::")
+            {
+                "purist::deprecated_rule"
             } else {
-                "opinionated::unknown_rule"
+                "purist::unknown_rule"
             };
             report.add(
                 Diagnostic::new(rule, Severity::Warning, warning).with_span(Span::new(
@@ -289,7 +296,7 @@ impl OpinionatedEngine {
                 Err(err) => {
                     report.add(
                         Diagnostic::new(
-                            "opinionated::io_error",
+                            "purist::io_error",
                             Severity::Error,
                             format!("Failed to read file '{}': {err}", path.display()),
                         )
@@ -330,7 +337,7 @@ fn collect_comment_suppressions(ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
         let line_num = line_idx + 1; // 1-indexed
         let trimmed = line.trim();
 
-        // 1. Module/file-level inner comments: //! opinionated:allow(...)
+        // 1. Module/file-level inner comments: //! purist:allow(...) or //! opinionated:allow(...)
         if let Some(comment) = trimmed.strip_prefix("//!") {
             if let Some(rule) = extract_directive_rule(comment.trim()) {
                 suppressions.push(CodeSuppression {
@@ -344,7 +351,9 @@ fn collect_comment_suppressions(ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
             if let Some(rule) = extract_directive_rule(comment) {
                 if trimmed.starts_with("//") {
                     // Line-leading comment: suppresses next line (or whole file if file-allow)
-                    if comment.starts_with("opinionated:file-allow") {
+                    if comment.starts_with("purist:file-allow")
+                        || comment.starts_with("opinionated:file-allow")
+                    {
                         suppressions.push(CodeSuppression {
                             rule,
                             start_line: 1,
@@ -374,6 +383,10 @@ fn collect_comment_suppressions(ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
 
 fn extract_directive_rule(comment: &str) -> Option<String> {
     for prefix in &[
+        "purist:allow",
+        "purist:disable",
+        "purist:ignore",
+        "purist:file-allow",
         "opinionated:allow",
         "opinionated:disable",
         "opinionated:ignore",
@@ -386,7 +399,10 @@ fn extract_directive_rule(comment: &str) -> Option<String> {
                     .get(1..rest.len().saturating_sub(1))
                     .map(str::trim)
                     .unwrap_or("");
-                let rule = inner.strip_prefix("opinionated::").unwrap_or(inner);
+                let rule = inner
+                    .strip_prefix("purist::")
+                    .or_else(|| inner.strip_prefix("opinionated::"))
+                    .unwrap_or(inner);
                 return Some(if rule.is_empty() {
                     "all".to_string()
                 } else {
@@ -419,13 +435,16 @@ impl SuppressionVisitor {
                 .collect::<Vec<_>>()
                 .join("::");
 
-            if path_str == "opinionated" {
+            if path_str == "purist" || path_str == "opinionated" {
                 self.suppressions.push(CodeSuppression {
                     rule: "all".to_string(),
                     start_line: start,
                     end_line: end,
                 });
-            } else if let Some(rule_name) = path_str.strip_prefix("opinionated::") {
+            } else if let Some(rule_name) = path_str
+                .strip_prefix("purist::")
+                .or_else(|| path_str.strip_prefix("opinionated::"))
+            {
                 self.suppressions.push(CodeSuppression {
                     rule: rule_name.to_string(),
                     start_line: start,
@@ -484,7 +503,8 @@ fn is_suppressed(diag: &Diagnostic, suppressions: &[CodeSuppression]) -> bool {
     };
     let stripped = diag
         .rule
-        .strip_prefix("opinionated::")
+        .strip_prefix("purist::")
+        .or_else(|| diag.rule.strip_prefix("opinionated::"))
         .unwrap_or(&diag.rule);
 
     for s in suppressions {
@@ -508,7 +528,7 @@ mod tests {
 
     impl DummyRule {
         fn new() -> Self {
-            Self("opinionated::dummy")
+            Self("purist::dummy")
         }
 
         fn with_name(name: &'static str) -> Self {
@@ -562,32 +582,32 @@ mod tests {
     #[googletest::test]
     fn engine_check_source_syntax_error_produces_diagnostic()
     -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty();
+        let engine = PuristEngine::empty();
         let report = engine.check_source(Path::new("bad.rs"), "fn broken syntax {{{");
 
         assert_that!(report.has_errors(), is_true());
         assert_that!(report.diagnostics.len(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::syntax_error"));
+        assert_that!(&diag.rule, eq("purist::syntax_error"));
         Ok(())
     }
 
     #[googletest::test]
     fn engine_runs_registered_rule() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.has_errors(), is_false());
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::dummy"));
+        assert_that!(&diag.rule, eq("purist::dummy"));
         Ok(())
     }
 
     #[googletest::test]
     fn in_code_suppression_via_allow_attribute() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "#![allow(opinionated::dummy)]\nfn ok() {}\n";
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let source = "#![allow(purist::dummy)]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -596,7 +616,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_expect_attribute() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "#![expect(dummy, reason = \"test\")]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -606,8 +626,8 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_comment_next_line() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "// opinionated:allow(dummy)\nfn ok() {}\n";
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let source = "// purist:allow(dummy)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -616,8 +636,8 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_comment_same_line() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "fn ok() {} // opinionated:allow(dummy)\n";
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let source = "fn ok() {} // purist:allow(dummy)\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -626,8 +646,8 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_file_comment() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "//! opinionated:allow(dummy)\nfn ok() {}\n";
+        let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
+        let source = "//! purist:allow(dummy)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -638,10 +658,10 @@ mod tests {
     fn config_disables_rule() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
         config.set_rule("no_wildcard_imports", RuleLevel::Allow);
-        let engine = OpinionatedEngine::empty()
+        let engine = PuristEngine::empty()
             .with_config(config)
             .with_rule(Box::new(DummyRule::with_name(
-                "opinionated::no_wildcard_imports",
+                "purist::no_wildcard_imports",
             )));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
@@ -652,10 +672,10 @@ mod tests {
     #[googletest::test]
     fn config_upgrades_rule_to_deny() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
-        config.set_rule("opinionated::error_types", RuleLevel::Deny);
-        let engine = OpinionatedEngine::empty()
+        config.set_rule("purist::error_types", RuleLevel::Deny);
+        let engine = PuristEngine::empty()
             .with_config(config)
-            .with_rule(Box::new(DummyRule::with_name("opinionated::error_types")));
+            .with_rule(Box::new(DummyRule::with_name("purist::error_types")));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.error_count(), eq(1));
@@ -666,12 +686,12 @@ mod tests {
     fn config_warns_on_unrecognized_rule() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
         config.set_rule("nonexistent_custom_rule", RuleLevel::Deny);
-        let engine = OpinionatedEngine::empty().with_config(config);
+        let engine = PuristEngine::empty().with_config(config);
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::unknown_rule"));
+        assert_that!(&diag.rule, eq("purist::unknown_rule"));
         Ok(())
     }
 
@@ -679,19 +699,19 @@ mod tests {
     fn config_warns_on_deprecated_rule() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
         config.set_rule("clap_encapsulation", RuleLevel::Allow);
-        let engine = OpinionatedEngine::empty().with_config(config.clone());
+        let engine = PuristEngine::empty().with_config(config.clone());
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::deprecated_rule"));
+        assert_that!(&diag.rule, eq("purist::deprecated_rule"));
         assert_that!(config.rules.clap_struct_encapsulation, eq(RuleLevel::Allow));
         Ok(())
     }
 
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::new();
+        let engine = PuristEngine::new();
         assert_that!(engine.rules().len(), eq(23));
         Ok(())
     }

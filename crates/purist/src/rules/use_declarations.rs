@@ -1,4 +1,4 @@
-//! # Rule: opinionated::use_declarations_over_qualified_paths
+//! # Rule: purist::use_declarations_over_qualified_paths
 //!
 //! ## What This Rule Does
 //! Flags deeply nested, long qualified paths (such as `crate::workspace::Workspace` or
@@ -33,7 +33,7 @@ pub struct UseDeclarationsRule;
 
 impl Rule for UseDeclarationsRule {
     fn name(&self) -> &'static str {
-        "opinionated::use_declarations_over_qualified_paths"
+        "purist::use_declarations_over_qualified_paths"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -155,7 +155,7 @@ fn check_qualified_path(
     let span = ctx.to_span(path.span());
     Some(
         Diagnostic::new(
-            "opinionated::use_declarations_over_qualified_paths",
+            "purist::use_declarations_over_qualified_paths",
             Severity::Warning,
             format!(
                 "Avoid long qualified path '{path_str}'. Add a 'use' declaration at the top of the module."
@@ -251,7 +251,7 @@ mod tests {
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
             &diag.rule,
-            eq("opinionated::use_declarations_over_qualified_paths")
+            eq("purist::use_declarations_over_qualified_paths")
         );
         assert_that!(
             &diag.message,
@@ -271,7 +271,7 @@ mod tests {
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
             &diag.rule,
-            eq("opinionated::use_declarations_over_qualified_paths")
+            eq("purist::use_declarations_over_qualified_paths")
         );
         assert_that!(
             &diag.message,

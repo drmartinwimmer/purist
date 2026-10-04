@@ -1,4 +1,4 @@
-//! Rule: `opinionated::no_inline_mods`
+//! Rule: `purist::no_inline_mods`
 //!
 //! # What This Rule Does
 //! Forbids inline module definitions (`mod foo { ... }`) in crate entry point files (`main.rs` and `lib.rs`).
@@ -36,7 +36,7 @@ pub struct NoInlineModsRule;
 
 impl Rule for NoInlineModsRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_inline_mods"
+        "purist::no_inline_mods"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -125,7 +125,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_inline_mods"));
+        assert_that!(&diag.rule, eq("purist::no_inline_mods"));
         assert_that!(&diag.message, contains_substring("Inline module 'helpers'"));
         assert_that!(
             diag.suggested_fix.as_deref(),

@@ -1,4 +1,4 @@
-//! Rule: `opinionated::no_boxed_dyn_error`
+//! Rule: `purist::no_boxed_dyn_error`
 //!
 //! # What This Rule Does
 //! Bans `Box<dyn std::error::Error>` (and trait object variants such as `Box<dyn Error + Send + Sync>`)
@@ -43,7 +43,7 @@ pub struct NoBoxedDynErrorRule;
 
 impl Rule for NoBoxedDynErrorRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_boxed_dyn_error"
+        "purist::no_boxed_dyn_error"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -166,7 +166,7 @@ fn check_fn_signature(
     let span = ctx.to_span(sig.output.span());
     Some(
         Diagnostic::new(
-            "opinionated::no_boxed_dyn_error",
+            "purist::no_boxed_dyn_error",
             Severity::Error,
             format!(
                 "Function '{fn_name}' returns 'Box<dyn Error>'. Return a concrete domain error enum deriving 'thiserror::Error' instead."
@@ -250,7 +250,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_boxed_dyn_error"));
+        assert_that!(&diag.rule, eq("purist::no_boxed_dyn_error"));
         assert_that!(
             &diag.message,
             contains_substring("Function 'run' returns 'Box<dyn Error>'")

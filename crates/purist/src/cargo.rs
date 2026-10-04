@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
-/// Severity configuration for an opinionated lint rule.
+/// Severity configuration for a purist lint rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuleLevel {
     Allow,
@@ -24,9 +24,9 @@ impl RuleLevel {
     }
 }
 
-/// Strongly-typed struct holding configuration levels for all known opinionated lint rules.
+/// Strongly-typed struct holding configuration levels for all known purist lint rules.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OpinionatedLintsConfig {
+pub struct PuristLintsConfig {
     pub no_inline_mods: RuleLevel,
     pub free_functions: RuleLevel,
     pub path_resolution: RuleLevel,
@@ -52,9 +52,15 @@ pub struct OpinionatedLintsConfig {
     pub cli_run_consumes_self: RuleLevel,
 }
 
-impl OpinionatedLintsConfig {
+/// Backwards compatibility alias for `PuristLintsConfig`.
+pub type OpinionatedLintsConfig = PuristLintsConfig;
+
+impl PuristLintsConfig {
     pub fn get(&self, rule_name: &str) -> Option<RuleLevel> {
-        let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
+        let stripped = rule_name
+            .strip_prefix("purist::")
+            .or_else(|| rule_name.strip_prefix("opinionated::"))
+            .unwrap_or(rule_name);
         match stripped {
             "no_inline_mods" => Some(self.no_inline_mods),
             "free_functions" => Some(self.free_functions),
@@ -86,7 +92,10 @@ impl OpinionatedLintsConfig {
     }
 
     pub fn set(&mut self, rule_name: &str, level: RuleLevel) -> Result<(), UnrecognizedRule> {
-        let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
+        let stripped = rule_name
+            .strip_prefix("purist::")
+            .or_else(|| rule_name.strip_prefix("opinionated::"))
+            .unwrap_or(rule_name);
         match stripped {
             "no_inline_mods" => self.no_inline_mods = level,
             "free_functions" => self.free_functions = level,
@@ -135,7 +144,7 @@ const DEPRECATED_ALIASES: &[(&str, &str)] = &[
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
-    pub rules: OpinionatedLintsConfig,
+    pub rules: PuristLintsConfig,
     pub unrecognized: Vec<String>,
     pub deprecated: Vec<String>,
 }
@@ -147,14 +156,17 @@ impl LintConfig {
 
     pub fn set_rule(&mut self, rule: impl Into<String>, level: RuleLevel) {
         let name = rule.into();
-        let stripped = name.strip_prefix("opinionated::").unwrap_or(&name);
+        let stripped = name
+            .strip_prefix("purist::")
+            .or_else(|| name.strip_prefix("opinionated::"))
+            .unwrap_or(&name);
 
         if let Some((_, canonical)) = DEPRECATED_ALIASES
             .iter()
             .find(|(alias, _)| *alias == stripped)
         {
             self.deprecated.push(format!(
-                "Rule 'opinionated::{stripped}' is deprecated. Use 'opinionated::{canonical}' instead."
+                "Rule 'purist::{stripped}' is deprecated. Use 'purist::{canonical}' instead."
             ));
             if let Err(UnrecognizedRule) = self.rules.set(canonical, level) {
                 self.unrecognized.push(canonical.to_string());
@@ -175,7 +187,7 @@ impl LintConfig {
         }
         for unrec in &self.unrecognized {
             warnings.push(format!(
-                "Unrecognized opinionated lint rule '{unrec}' specified in Cargo.toml."
+                "Unrecognized purist lint rule '{unrec}' specified in Cargo.toml."
             ));
         }
         warnings
@@ -195,24 +207,34 @@ impl LintConfig {
         let doc: DocumentMut = content.parse().ok()?;
         let mut config = Self::empty();
 
-        // 1. Check [lints.opinionated] or [workspace.lints.opinionated]
+        // 1. Check [lints.purist] or [workspace.lints.purist] (with [lints.opinionated] fallback)
         if let Some(lints) = doc.get("lints").and_then(|l| l.as_table())
-            && let Some(opinionated) = lints.get("opinionated").and_then(|o| o.as_table())
+            && let Some(table) = lints
+                .get("purist")
+                .or_else(|| lints.get("opinionated"))
+                .and_then(|o| o.as_table())
         {
-            parse_rules_table(opinionated, &mut config);
+            parse_rules_table(table, &mut config);
         }
 
         if let Some(ws) = doc.get("workspace").and_then(|w| w.as_table())
             && let Some(lints) = ws.get("lints").and_then(|l| l.as_table())
-            && let Some(opinionated) = lints.get("opinionated").and_then(|o| o.as_table())
+            && let Some(table) = lints
+                .get("purist")
+                .or_else(|| lints.get("opinionated"))
+                .and_then(|o| o.as_table())
         {
-            parse_rules_table(opinionated, &mut config);
+            parse_rules_table(table, &mut config);
         }
 
-        // 2. Check [package.metadata.opinionated.lints] or [workspace.metadata.opinionated.lints]
+        // 2. Check [package.metadata.purist.lints] or [workspace.metadata.purist.lints]
+        // (with metadata.opinionated fallback)
         if let Some(pkg) = doc.get("package").and_then(|p| p.as_table())
             && let Some(meta) = pkg.get("metadata").and_then(|m| m.as_table())
-            && let Some(op) = meta.get("opinionated").and_then(|o| o.as_table())
+            && let Some(op) = meta
+                .get("purist")
+                .or_else(|| meta.get("opinionated"))
+                .and_then(|o| o.as_table())
             && let Some(lints) = op.get("lints").and_then(|l| l.as_table())
         {
             parse_rules_table(lints, &mut config);
@@ -220,7 +242,10 @@ impl LintConfig {
 
         if let Some(ws) = doc.get("workspace").and_then(|w| w.as_table())
             && let Some(meta) = ws.get("metadata").and_then(|m| m.as_table())
-            && let Some(op) = meta.get("opinionated").and_then(|o| o.as_table())
+            && let Some(op) = meta
+                .get("purist")
+                .or_else(|| meta.get("opinionated"))
+                .and_then(|o| o.as_table())
             && let Some(lints) = op.get("lints").and_then(|l| l.as_table())
         {
             parse_rules_table(lints, &mut config);
@@ -425,7 +450,7 @@ mod tests {
 name = "my-crate"
 version = "0.1.0"
 
-[lints.opinionated]
+[lints.purist]
 no_wildcard_imports = "allow"
 no_boxed_dyn_error = "deny"
 exit_code_hygiene = { level = "warn" }
@@ -433,6 +458,10 @@ exit_code_hygiene = { level = "warn" }
         let config = LintConfig::from_manifest_content(manifest).expect("valid manifest");
         assert_that!(
             config.level_for("no_wildcard_imports"),
+            eq(Some(RuleLevel::Allow))
+        );
+        assert_that!(
+            config.level_for("purist::no_wildcard_imports"),
             eq(Some(RuleLevel::Allow))
         );
         assert_that!(
@@ -456,10 +485,14 @@ exit_code_hygiene = { level = "warn" }
 [workspace]
 members = ["crates/*"]
 
-[workspace.metadata.opinionated.lints]
+[workspace.metadata.purist.lints]
 centralized_command_execution = "allow"
 "#;
         let config = LintConfig::from_manifest_content(manifest).expect("valid manifest");
+        assert_that!(
+            config.level_for("purist::centralized_command_execution"),
+            eq(Some(RuleLevel::Allow))
+        );
         assert_that!(
             config.level_for("opinionated::centralized_command_execution"),
             eq(Some(RuleLevel::Allow))
@@ -467,8 +500,8 @@ centralized_command_execution = "allow"
     }
 
     #[googletest::test]
-    fn opinionated_lints_config_defaults_all_rules_to_warn() {
-        let config = OpinionatedLintsConfig::default();
+    fn purist_lints_config_defaults_all_rules_to_warn() {
+        let config = PuristLintsConfig::default();
         assert_that!(config.no_inline_mods, eq(RuleLevel::Warn));
         assert_that!(config.free_functions, eq(RuleLevel::Warn));
         assert_that!(config.path_resolution, eq(RuleLevel::Warn));
@@ -479,8 +512,8 @@ centralized_command_execution = "allow"
     }
 
     #[googletest::test]
-    fn opinionated_lints_config_set_updates_rule_level() {
-        let mut config = OpinionatedLintsConfig::default();
+    fn purist_lints_config_set_updates_rule_level() {
+        let mut config = PuristLintsConfig::default();
         assert_that!(
             config.set("no_wildcard_imports", RuleLevel::Allow),
             eq(Ok(()))
@@ -488,6 +521,10 @@ centralized_command_execution = "allow"
         assert_that!(config.no_wildcard_imports, eq(RuleLevel::Allow));
         assert_that!(
             config.get("no_wildcard_imports"),
+            eq(Some(RuleLevel::Allow))
+        );
+        assert_that!(
+            config.get("purist::no_wildcard_imports"),
             eq(Some(RuleLevel::Allow))
         );
         assert_that!(

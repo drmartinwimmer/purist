@@ -3,7 +3,7 @@ use code_review_api::{ApiCommand, ApiError};
 use code_review_check::{CheckCommand, CheckError};
 use code_review_configure_lints::{CargoTomlError, ConfigureLintsCommand};
 use code_review_coverage::{CoverageCommand, CoverageError};
-use purist::{OpinionatedCommand, OpinionatedError, OutputFormat};
+use purist::{OutputFormat, PuristCommand, PuristError};
 use std::process::ExitCode;
 use thiserror::Error;
 
@@ -18,9 +18,9 @@ pub enum CodeReviewError {
     #[error(transparent)]
     Check(#[from] CheckError),
 
-    /// Errors originating from the opinionated linter subcommand.
+    /// Errors originating from the purist linter subcommand.
     #[error(transparent)]
-    Opinionated(#[from] OpinionatedError),
+    Purist(#[from] PuristError),
 
     /// Errors originating from the API drift detector subcommand.
     #[error(transparent)]
@@ -34,15 +34,16 @@ pub enum CodeReviewError {
 /// Subcommands supported by the code-review CLI toolkit.
 #[derive(Debug, Subcommand, PartialEq)]
 pub enum Commands {
-    /// Aggregates formatters, clippy, opinionated, audit, and coverage checks
+    /// Aggregates formatters, clippy, purist, audit, and coverage checks
     Check(CheckCommand),
 
     /// Configure or remove strict Clippy lints in Cargo.toml
     #[command(name = "configure-lints")]
     ConfigureLints(ConfigureLintsCommand),
 
-    /// Run AST-based opinionated linter rules
-    Opinionated(OpinionatedCommand),
+    /// Run AST-based purist linter rules
+    #[command(alias = "opinionated")]
+    Purist(PuristCommand),
 
     /// Introspect and detect public API drift against API.md
     Api(ApiCommand),
@@ -62,7 +63,7 @@ impl Commands {
         match self {
             Self::ConfigureLints(cmd) => Ok(cmd.run()?),
             Self::Check(cmd) => Ok(cmd.run()?),
-            Self::Opinionated(mut cmd) => {
+            Self::Purist(mut cmd) => {
                 if cmd.format().is_none() {
                     cmd = cmd.with_format(format);
                 }
@@ -133,7 +134,7 @@ impl Cli {
     pub fn run(self) -> ExitCode {
         match self.command.run_with_format(self.format) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(CodeReviewError::Opinionated(OpinionatedError::LintViolationsFound { .. })) => {
+            Err(CodeReviewError::Purist(PuristError::LintViolationsFound { .. })) => {
                 ExitCode::from(1)
             }
             Err(err) => {
@@ -229,7 +230,8 @@ mod tests {
                 ["code-review", "configure-lints"].as_slice(),
                 "configure-lints",
             ),
-            (["code-review", "opinionated"].as_slice(), "opinionated"),
+            (["code-review", "purist"].as_slice(), "purist"),
+            (["code-review", "opinionated"].as_slice(), "purist"),
             (["code-review", "api"].as_slice(), "api"),
             (["code-review", "coverage"].as_slice(), "coverage"),
         ];
@@ -239,7 +241,7 @@ mod tests {
             let actual_name = match cli.command() {
                 Commands::Check(_) => "check",
                 Commands::ConfigureLints(_) => "configure-lints",
-                Commands::Opinionated(_) => "opinionated",
+                Commands::Purist(_) => "purist",
                 Commands::Api(_) => "api",
                 Commands::Coverage(_) => "coverage",
             };
@@ -256,29 +258,29 @@ mod tests {
     }
 
     #[googletest::test]
-    fn parse_cli_opinionated_subcommand_parses_flags() -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_cli_purist_subcommand_parses_flags() -> Result<(), Box<dyn std::error::Error>> {
         let args = [
             "code-review",
             "--format",
             "json",
-            "opinionated",
+            "purist",
             "--path",
-            "crates/opinionated/src",
+            "crates/purist/src",
             "--fix",
             "--quiet",
         ];
         let cli = Cli::try_parse_from(args)?;
         expect_that!(cli.format(), eq(OutputFormat::Json));
         match cli.command() {
-            Commands::Opinionated(cmd) => {
+            Commands::Purist(cmd) => {
                 expect_that!(
                     cmd.path(),
-                    eq(Some(std::path::Path::new("crates/opinionated/src")))
+                    eq(Some(std::path::Path::new("crates/purist/src")))
                 );
                 expect_that!(cmd.is_fix(), is_true());
                 expect_that!(cmd.is_quiet(), is_true());
             }
-            _ => return Err("Expected Opinionated subcommand".into()),
+            _ => return Err("Expected Purist subcommand".into()),
         }
         Ok(())
     }
@@ -292,10 +294,10 @@ mod tests {
     }
 
     #[googletest::test]
-    fn run_cli_opinionated_command_on_clean_target_returns_success()
+    fn run_cli_purist_command_on_clean_target_returns_success()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!(
-            "test_code_review_opinionated_clean_{}",
+            "test_code_review_purist_clean_{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir)?;
@@ -303,8 +305,8 @@ mod tests {
         let file_path = temp_dir.join("clean.rs");
         std::fs::write(&file_path, "pub fn helper() -> i32 { 10 }\n")?;
 
-        let cmd = OpinionatedCommand::new(Some(file_path), true);
-        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
+        let cmd = PuristCommand::new(Some(file_path), true);
+        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Purist(cmd));
         let code = cli.run();
 
         expect_that!(code, eq(ExitCode::SUCCESS));
@@ -312,10 +314,10 @@ mod tests {
     }
 
     #[googletest::test]
-    fn run_cli_opinionated_command_with_violations_returns_exit_code_1()
+    fn run_cli_purist_command_with_violations_returns_exit_code_1()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!(
-            "test_code_review_opinionated_viol_{}",
+            "test_code_review_purist_viol_{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir)?;
@@ -323,8 +325,8 @@ mod tests {
         let file_path = temp_dir.join("main.rs");
         std::fs::write(&file_path, "mod helpers { pub fn broken() {} }\n")?;
 
-        let cmd = OpinionatedCommand::new(Some(file_path), true);
-        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
+        let cmd = PuristCommand::new(Some(file_path), true);
+        let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Purist(cmd));
         let code = cli.run();
 
         expect_that!(code, eq(ExitCode::from(1)));

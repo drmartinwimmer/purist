@@ -1,4 +1,4 @@
-//! Rule: `opinionated::clippy_suppression_hygiene`
+//! Rule: `purist::clippy_suppression_hygiene`
 //!
 //! # What This Rule Does
 //! Enforces rigorous hygiene on compiler and Clippy lint suppressions (`#[allow(...)]` and `#[expect(...)]`).
@@ -35,7 +35,7 @@ pub struct ClippySuppressRule;
 
 impl Rule for ClippySuppressRule {
     fn name(&self) -> &'static str {
-        "opinionated::clippy_suppression_hygiene"
+        "purist::clippy_suppression_hygiene"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -82,7 +82,7 @@ fn check_suppression_attribute(ctx: &LintContext<'_>, attr: &syn::Attribute) -> 
     match (has_reason, has_comment) {
         (false, false) => Some(
             Diagnostic::new(
-                "opinionated::clippy_suppression_hygiene",
+                "purist::clippy_suppression_hygiene",
                 Severity::Warning,
                 "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line.",
             )
@@ -91,7 +91,7 @@ fn check_suppression_attribute(ctx: &LintContext<'_>, attr: &syn::Attribute) -> 
         ),
         (false, true) => Some(
             Diagnostic::new(
-                "opinionated::clippy_suppression_hygiene",
+                "purist::clippy_suppression_hygiene",
                 Severity::Warning,
                 "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary.",
             )
@@ -100,7 +100,7 @@ fn check_suppression_attribute(ctx: &LintContext<'_>, attr: &syn::Attribute) -> 
         ),
         (true, false) => Some(
             Diagnostic::new(
-                "opinionated::clippy_suppression_hygiene",
+                "purist::clippy_suppression_hygiene",
                 Severity::Warning,
                 "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved.",
             )
@@ -144,7 +144,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
+        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
         assert_that!(&diag.message, contains_substring("lacks both a 'reason"));
         Ok(())
     }
@@ -158,7 +158,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
+        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
         assert_that!(
             &diag.message,
             contains_substring("lacks an accompanying code comment")
@@ -175,7 +175,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
+        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
         assert_that!(
             &diag.message,
             contains_substring("lacks a 'reason = \"...\"' parameter")

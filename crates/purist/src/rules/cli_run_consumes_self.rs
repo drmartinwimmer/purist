@@ -1,4 +1,4 @@
-//! Rule: `opinionated::cli_run_consumes_self`
+//! Rule: `purist::cli_run_consumes_self`
 //!
 //! # What This Rule Does
 //! Enforces that CLI execution methods (such as `run`, `run_with_format`, or `execute`) defined on
@@ -49,7 +49,7 @@ pub struct CliRunConsumesSelfRule;
 
 impl Rule for CliRunConsumesSelfRule {
     fn name(&self) -> &'static str {
-        "opinionated::cli_run_consumes_self"
+        "purist::cli_run_consumes_self"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -150,7 +150,7 @@ impl BuildCommand {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::cli_run_consumes_self"));
+        assert_that!(&diag.rule, eq("purist::cli_run_consumes_self"));
         assert_that!(
             &diag.message,
             contains_substring("takes '&self' by reference")

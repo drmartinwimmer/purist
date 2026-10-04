@@ -1,4 +1,4 @@
-//! # Rule: opinionated::no_test_prefix
+//! # Rule: purist::no_test_prefix
 //!
 //! ## What This Rule Does
 //! Flags test functions that use a redundant `test_` or `test` prefix in their name.
@@ -34,7 +34,7 @@ pub struct NoTestPrefixRule;
 
 impl Rule for NoTestPrefixRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_test_prefix"
+        "purist::no_test_prefix"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -159,7 +159,7 @@ fn check_function_name(
     let span = ctx.to_span(ident.span());
     Some(
         Diagnostic::new(
-            "opinionated::no_test_prefix",
+            "purist::no_test_prefix",
             Severity::Warning,
             format!(
                 "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
@@ -187,7 +187,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_test_prefix"));
+        assert_that!(&diag.rule, eq("purist::no_test_prefix"));
         assert_that!(
             &diag.message,
             contains_substring("redundant 'test_' prefix")

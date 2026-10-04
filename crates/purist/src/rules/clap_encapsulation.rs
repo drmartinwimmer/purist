@@ -1,4 +1,4 @@
-//! Rule: `opinionated::clap_struct_encapsulation`
+//! Rule: `purist::clap_struct_encapsulation`
 //!
 //! # What This Rule Does
 //! Enforces encapsulation standards on CLI command structs that derive Clap traits (`clap::Args`, `clap::Parser`):
@@ -45,7 +45,7 @@ pub struct ClapEncapsulationRule;
 
 impl Rule for ClapEncapsulationRule {
     fn name(&self) -> &'static str {
-        "opinionated::clap_struct_encapsulation"
+        "purist::clap_struct_encapsulation"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -250,7 +250,7 @@ impl LintCommand {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::clap_struct_encapsulation"));
+        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
         assert_that!(
             &diag.message,
             contains_substring("Field 'fix' in Clap struct 'LintCommand' is declared public")
@@ -272,7 +272,7 @@ pub struct CheckCommand {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::clap_struct_encapsulation"));
+        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
         assert_that!(
             &diag.message,
             contains_substring("lacks an associated 'run' or 'execute' method")

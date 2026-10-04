@@ -1,4 +1,4 @@
-//! Rule: `opinionated::no_redundant_conversions`
+//! Rule: `purist::no_redundant_conversions`
 //!
 //! # What This Rule Does
 //! Detects redundant serialization roundtrips where a data structure is serialized (e.g. via
@@ -38,7 +38,7 @@ pub struct NoRedundantConversionsRule;
 
 impl Rule for NoRedundantConversionsRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_redundant_conversions"
+        "purist::no_redundant_conversions"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -183,7 +183,7 @@ fn check_redundant_conversion_call(
             let span = ctx.to_span(inner_call_span);
             findings.push(
                 Diagnostic::new(
-                    "opinionated::no_redundant_conversions",
+                    "purist::no_redundant_conversions",
                     Severity::Warning,
                     "Redundant serialization roundtrip: value serialized and immediately deserialized.",
                 )
@@ -202,7 +202,7 @@ fn check_redundant_conversion_call(
                 let span = ctx.to_span(init_span);
                 findings.push(
                     Diagnostic::new(
-                        "opinionated::no_redundant_conversions",
+                        "purist::no_redundant_conversions",
                         Severity::Warning,
                         format!(
                             "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
@@ -313,7 +313,7 @@ fn duplicate(data: &MyData) -> MyData {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_redundant_conversions"));
+        assert_that!(&diag.rule, eq("purist::no_redundant_conversions"));
         Ok(())
     }
 
@@ -332,7 +332,7 @@ fn convert(data: &MyData) -> MyData {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_redundant_conversions"));
+        assert_that!(&diag.rule, eq("purist::no_redundant_conversions"));
         assert_that!(&diag.message, contains_substring("variable 'serialized'"));
         Ok(())
     }

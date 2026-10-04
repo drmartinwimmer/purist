@@ -1,4 +1,4 @@
-//! # Rule: opinionated::path_resolution
+//! # Rule: purist::path_resolution
 //!
 //! ## What This Rule Does
 //! Flags unanchored relative path literals passed to standard library filesystem operations
@@ -34,7 +34,7 @@ pub struct PathResolutionRule;
 
 impl Rule for PathResolutionRule {
     fn name(&self) -> &'static str {
-        "opinionated::path_resolution"
+        "purist::path_resolution"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -203,7 +203,7 @@ fn check_expr_for_unanchored_path(ctx: &LintContext<'_>, expr: &syn::Expr) -> Op
             let span = ctx.to_span(lit_str.span());
             return Some(
                 Diagnostic::new(
-                    "opinionated::path_resolution",
+                    "purist::path_resolution",
                     Severity::Warning,
                     format!(
                         "Unanchored relative path '{val}' in '{}'. Relative paths break when executed outside the crate root.",
@@ -277,7 +277,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::path_resolution"));
+        assert_that!(&diag.rule, eq("purist::path_resolution"));
         assert_that!(
             &diag.message,
             contains_substring("Unanchored relative path")

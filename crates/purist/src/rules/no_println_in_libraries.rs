@@ -1,4 +1,4 @@
-//! Rule: `opinionated::no_println_in_libraries`
+//! Rule: `purist::no_println_in_libraries`
 //!
 //! # What This Rule Does
 //! Flags direct invocations of `println!` and `eprintln!` in library modules. Dedicated entry points
@@ -43,7 +43,7 @@ pub struct NoPrintlnInLibrariesRule;
 
 impl Rule for NoPrintlnInLibrariesRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_println_in_libraries"
+        "purist::no_println_in_libraries"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -241,7 +241,7 @@ fn check_print_macro(
     let span = ctx.to_span(mac.path.span());
     Some(
         Diagnostic::new(
-            "opinionated::no_println_in_libraries",
+            "purist::no_println_in_libraries",
             Severity::Warning,
             format!(
                 "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
@@ -271,7 +271,7 @@ pub fn parse_input() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_println_in_libraries"));
+        assert_that!(&diag.rule, eq("purist::no_println_in_libraries"));
         assert_that!(&diag.message, contains_substring("println!"));
         Ok(())
     }

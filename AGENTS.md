@@ -14,11 +14,11 @@ The user uses **Jujutsu (`jj`)** for version control.
   ```
 - If you need to start a new logical change, use `jj new`.
 
-## 2. Opinionated AST Linter
+## 2. Purist AST Linter
 
-Review agents must always run the opinionated AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
+Review agents must always run the Purist AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
 ```bash
-cargo run -p code-review -- opinionated --path .
+cargo run -p code-review -- purist --path .
 # or directly:
 cargo run -p purist -- --path .
 ```

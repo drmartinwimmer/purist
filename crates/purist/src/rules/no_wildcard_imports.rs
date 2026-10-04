@@ -1,4 +1,4 @@
-//! # Rule: opinionated::no_wildcard_imports
+//! # Rule: purist::no_wildcard_imports
 //!
 //! ## What This Rule Does
 //! Flags wildcard imports (`use path::*`) outside of test files, test modules, and prelude imports.
@@ -29,7 +29,7 @@ pub struct NoWildcardImportsRule;
 
 impl Rule for NoWildcardImportsRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_wildcard_imports"
+        "purist::no_wildcard_imports"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -124,7 +124,7 @@ fn collect_wildcard_diagnostics(
                 let span = ctx.to_span(g.span());
                 diagnostics.push(
                     Diagnostic::new(
-                        "opinionated::no_wildcard_imports",
+                        "purist::no_wildcard_imports",
                         Severity::Warning,
                         format!(
                             "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
@@ -159,7 +159,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_wildcard_imports"));
+        assert_that!(&diag.rule, eq("purist::no_wildcard_imports"));
         assert_that!(&diag.message, contains_substring("std::collections::*"));
         Ok(())
     }

@@ -48,7 +48,7 @@ pub use use_declarations::UseDeclarationsRule;
 
 use crate::engine::Rule;
 
-/// Returns a collection of all standard opinionated static analysis rules.
+/// Returns a collection of all standard purist static analysis rules.
 pub fn default_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(NoInlineModsRule),
