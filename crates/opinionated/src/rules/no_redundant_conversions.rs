@@ -13,10 +13,15 @@ impl Rule for NoRedundantConversionsRule {
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+        if ctx.is_test_file() {
+            return Vec::new();
+        }
+
         let mut visitor = RedundantConversionsVisitor {
             ctx,
             diagnostics: Vec::new(),
             block_vars_stack: Vec::new(),
+            in_test_scope: false,
         };
 
         visitor.visit_file(file);
@@ -28,10 +33,58 @@ struct RedundantConversionsVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     block_vars_stack: Vec<HashMap<String, proc_macro2::Span>>,
+    in_test_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
+    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
+        let is_test = item_mod.attrs.iter().any(|attr| {
+            if !attr.path().is_ident("cfg") {
+                return false;
+            }
+            let mut test_attr = false;
+            drop(attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("test") {
+                    test_attr = true;
+                }
+                Ok(())
+            }));
+            test_attr
+        });
+
+        let previous_test_scope = self.in_test_scope;
+        if is_test {
+            self.in_test_scope = true;
+        }
+
+        visit::visit_item_mod(self, item_mod);
+        self.in_test_scope = previous_test_scope;
+    }
+
+    fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
+        let is_test = item_fn.attrs.iter().any(|attr| {
+            attr.path().is_ident("test")
+                || attr
+                    .path()
+                    .segments
+                    .last()
+                    .map(|s| s.ident == "test")
+                    .unwrap_or(false)
+        });
+
+        let previous_test_scope = self.in_test_scope;
+        if is_test {
+            self.in_test_scope = true;
+        }
+
+        visit::visit_item_fn(self, item_fn);
+        self.in_test_scope = previous_test_scope;
+    }
+
     fn visit_block(&mut self, block: &'ast syn::Block) {
+        if self.in_test_scope {
+            return;
+        }
         let mut serializer_vars: HashMap<String, proc_macro2::Span> = HashMap::new();
 
         for stmt in &block.stmts {
@@ -50,6 +103,10 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
     }
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+        if self.in_test_scope {
+            return;
+        }
+
         if is_serde_parse_func(&call.func) {
             // Check nested serializer invocation
             for arg in &call.args {
@@ -217,6 +274,41 @@ fn parse_incoming(raw: &str) -> MyData {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/parse.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoRedundantConversionsRule.check_file(&ctx, &ast);
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn roundtrip_in_test_fn_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[test]
+fn test_roundtrip() {
+    let serialized = serde_json::to_string(&data).unwrap();
+    let deserialized: MyData = serde_json::from_str(&serialized).unwrap();
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoRedundantConversionsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn roundtrip_in_cfg_test_mod_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[cfg(test)]
+mod tests {
+    fn helper() {
+        let serialized = serde_json::to_string(&data).unwrap();
+        let deserialized: MyData = serde_json::from_str(&serialized).unwrap();
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoRedundantConversionsRule.check_file(&ctx, &ast);
 
