@@ -37,7 +37,7 @@ impl CheckCommand {
     }
 
     /// Runs the check aggregator.
-    pub fn run(&self) -> Result<(), CheckError> {
+    pub fn run(self) -> Result<(), CheckError> {
         if !self.quiet {
             eprintln!("Notice: check aggregator is scheduled for future milestones.");
         }

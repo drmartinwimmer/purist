@@ -40,7 +40,7 @@ impl ApiCommand {
     }
 
     /// Runs the API manifest inspection checks.
-    pub fn run(&self) -> Result<(), ApiError> {
+    pub fn run(self) -> Result<(), ApiError> {
         if !self.quiet {
             eprintln!("Notice: api drift detector is scheduled for future milestones.");
         }

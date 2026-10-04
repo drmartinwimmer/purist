@@ -1,5 +1,6 @@
 pub mod centralized_commands;
 pub mod clap_encapsulation;
+pub mod cli_run_consumes_self;
 pub mod clippy_suppress;
 pub mod error_types;
 pub mod exit_code_hygiene;
@@ -23,6 +24,7 @@ pub mod use_declarations;
 
 pub use centralized_commands::CentralizedCommandsRule;
 pub use clap_encapsulation::ClapEncapsulationRule;
+pub use cli_run_consumes_self::CliRunConsumesSelfRule;
 pub use clippy_suppress::ClippySuppressRule;
 pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
@@ -71,5 +73,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(SingleMatchToLetElseRule),
         Box::new(RaiiTempDirectoriesRule),
         Box::new(NoPrintlnInLibrariesRule),
+        Box::new(CliRunConsumesSelfRule),
     ]
 }

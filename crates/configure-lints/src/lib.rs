@@ -60,7 +60,7 @@ impl ConfigureLintsCommand {
     }
 
     /// Executes the configuration or removal of Clippy lints in the target manifest.
-    pub fn run(&self) -> Result<(), CargoTomlError> {
+    pub fn run(self) -> Result<(), CargoTomlError> {
         if self.remove {
             let result = remove_lints(&self.manifest_path)?;
             if !self.quiet {

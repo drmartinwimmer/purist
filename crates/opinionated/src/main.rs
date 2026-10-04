@@ -14,7 +14,7 @@ struct Cli {
 }
 
 impl Cli {
-    fn run(&self) -> ExitCode {
+    fn run(self) -> ExitCode {
         match self.cmd.run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(OpinionatedError::LintViolationsFound { .. }) => ExitCode::from(1),

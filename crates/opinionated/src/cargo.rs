@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
@@ -24,29 +23,161 @@ impl RuleLevel {
     }
 }
 
+/// Strongly-typed struct holding configuration levels for all known opinionated lint rules.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OpinionatedLintsConfig {
+    pub no_inline_mods: Option<RuleLevel>,
+    pub free_functions: Option<RuleLevel>,
+    pub path_resolution: Option<RuleLevel>,
+    pub error_types: Option<RuleLevel>,
+    pub clippy_suppression_hygiene: Option<RuleLevel>,
+    pub test_patterns: Option<RuleLevel>,
+    pub no_redundant_conversions: Option<RuleLevel>,
+    pub use_declarations_over_qualified_paths: Option<RuleLevel>,
+    pub no_redundant_wrappers: Option<RuleLevel>,
+    pub no_boxed_dyn_error: Option<RuleLevel>,
+    pub test_matcher_borrow_simplification: Option<RuleLevel>,
+    pub no_test_prefix: Option<RuleLevel>,
+    pub no_unsafe_in_tests: Option<RuleLevel>,
+    pub centralized_command_execution: Option<RuleLevel>,
+    pub clap_struct_encapsulation: Option<RuleLevel>,
+    pub exit_code_hygiene: Option<RuleLevel>,
+    pub idiomatic_option_bool_mapping: Option<RuleLevel>,
+    pub no_wildcard_imports: Option<RuleLevel>,
+    pub no_env_access_outside_config: Option<RuleLevel>,
+    pub single_match_to_let_else: Option<RuleLevel>,
+    pub raii_temp_directories: Option<RuleLevel>,
+    pub no_println_in_libraries: Option<RuleLevel>,
+    pub cli_run_consumes_self: Option<RuleLevel>,
+}
+
+impl OpinionatedLintsConfig {
+    pub fn get(&self, rule_name: &str) -> Option<RuleLevel> {
+        let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
+        match stripped {
+            "no_inline_mods" => self.no_inline_mods,
+            "free_functions" => self.free_functions,
+            "path_resolution" => self.path_resolution,
+            "error_types" => self.error_types,
+            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene,
+            "test_patterns" => self.test_patterns,
+            "no_redundant_conversions" => self.no_redundant_conversions,
+            "use_declarations_over_qualified_paths" => self.use_declarations_over_qualified_paths,
+            "no_redundant_wrappers" => self.no_redundant_wrappers,
+            "no_boxed_dyn_error" => self.no_boxed_dyn_error,
+            "test_matcher_borrow_simplification" => self.test_matcher_borrow_simplification,
+            "no_test_prefix" => self.no_test_prefix,
+            "no_unsafe_in_tests" => self.no_unsafe_in_tests,
+            "centralized_command_execution" => self.centralized_command_execution,
+            "clap_struct_encapsulation" => self.clap_struct_encapsulation,
+            "exit_code_hygiene" => self.exit_code_hygiene,
+            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping,
+            "no_wildcard_imports" => self.no_wildcard_imports,
+            "no_env_access_outside_config" => self.no_env_access_outside_config,
+            "single_match_to_let_else" => self.single_match_to_let_else,
+            "raii_temp_directories" => self.raii_temp_directories,
+            "no_println_in_libraries" => self.no_println_in_libraries,
+            "cli_run_consumes_self" => self.cli_run_consumes_self,
+            _ => None,
+        }
+    }
+
+    pub fn set(&mut self, rule_name: &str, level: RuleLevel) -> Result<(), UnrecognizedRule> {
+        let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
+        match stripped {
+            "no_inline_mods" => self.no_inline_mods = Some(level),
+            "free_functions" => self.free_functions = Some(level),
+            "path_resolution" => self.path_resolution = Some(level),
+            "error_types" => self.error_types = Some(level),
+            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene = Some(level),
+            "test_patterns" => self.test_patterns = Some(level),
+            "no_redundant_conversions" => self.no_redundant_conversions = Some(level),
+            "use_declarations_over_qualified_paths" => {
+                self.use_declarations_over_qualified_paths = Some(level)
+            }
+            "no_redundant_wrappers" => self.no_redundant_wrappers = Some(level),
+            "no_boxed_dyn_error" => self.no_boxed_dyn_error = Some(level),
+            "test_matcher_borrow_simplification" => {
+                self.test_matcher_borrow_simplification = Some(level)
+            }
+            "no_test_prefix" => self.no_test_prefix = Some(level),
+            "no_unsafe_in_tests" => self.no_unsafe_in_tests = Some(level),
+            "centralized_command_execution" => self.centralized_command_execution = Some(level),
+            "clap_struct_encapsulation" => self.clap_struct_encapsulation = Some(level),
+            "exit_code_hygiene" => self.exit_code_hygiene = Some(level),
+            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping = Some(level),
+            "no_wildcard_imports" => self.no_wildcard_imports = Some(level),
+            "no_env_access_outside_config" => self.no_env_access_outside_config = Some(level),
+            "single_match_to_let_else" => self.single_match_to_let_else = Some(level),
+            "raii_temp_directories" => self.raii_temp_directories = Some(level),
+            "no_println_in_libraries" => self.no_println_in_libraries = Some(level),
+            "cli_run_consumes_self" => self.cli_run_consumes_self = Some(level),
+            _ => return Err(UnrecognizedRule),
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnrecognizedRule;
+
+/// Map of deprecated rule aliases to their canonical rule names.
+const DEPRECATED_ALIASES: &[(&str, &str)] = &[
+    ("clippy_suppress", "clippy_suppression_hygiene"),
+    ("use_declarations", "use_declarations_over_qualified_paths"),
+    ("centralized_commands", "centralized_command_execution"),
+    ("clap_encapsulation", "clap_struct_encapsulation"),
+    ("option_bool_mapping", "idiomatic_option_bool_mapping"),
+    ("test_matcher_borrow", "test_matcher_borrow_simplification"),
+];
+
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
-    rules: HashMap<String, RuleLevel>,
+    pub rules: OpinionatedLintsConfig,
+    pub unrecognized: Vec<String>,
+    pub deprecated: Vec<String>,
 }
 
 impl LintConfig {
     pub fn empty() -> Self {
-        Self {
-            rules: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn set_rule(&mut self, rule: impl Into<String>, level: RuleLevel) {
-        self.rules.insert(rule.into(), level);
+        let name = rule.into();
+        let stripped = name.strip_prefix("opinionated::").unwrap_or(&name);
+
+        if let Some((_, canonical)) = DEPRECATED_ALIASES
+            .iter()
+            .find(|(alias, _)| *alias == stripped)
+        {
+            self.deprecated.push(format!(
+                "Rule 'opinionated::{stripped}' is deprecated. Use 'opinionated::{canonical}' instead."
+            ));
+            if let Err(UnrecognizedRule) = self.rules.set(canonical, level) {
+                self.unrecognized.push(canonical.to_string());
+            }
+        } else if self.rules.set(stripped, level).is_err() {
+            self.unrecognized.push(stripped.to_string());
+        }
     }
 
     pub fn level_for(&self, rule_name: &str) -> Option<RuleLevel> {
-        if let Some(level) = self.rules.get(rule_name) {
-            return Some(*level);
+        self.rules.get(rule_name)
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for dep in &self.deprecated {
+            warnings.push(dep.clone());
         }
-        let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
-        self.rules.get(stripped).copied()
+        for unrec in &self.unrecognized {
+            warnings.push(format!(
+                "Unrecognized opinionated lint rule '{unrec}' specified in Cargo.toml."
+            ));
+        }
+        warnings
     }
 
     /// Loads lint configuration from the nearest `Cargo.toml` at or above `path`.

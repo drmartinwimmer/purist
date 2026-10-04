@@ -54,17 +54,16 @@ pub enum Commands {
 
 impl Commands {
     /// Executes the subcommand with default formatting.
-    pub fn run(&self) -> Result<(), CodeReviewError> {
+    pub fn run(self) -> Result<(), CodeReviewError> {
         self.run_with_format(OutputFormat::Console)
     }
 
     /// Executes the subcommand with the specified report output format.
-    pub fn run_with_format(&self, format: OutputFormat) -> Result<(), CodeReviewError> {
+    pub fn run_with_format(self, format: OutputFormat) -> Result<(), CodeReviewError> {
         match self {
             Self::ConfigureLints(cmd) => Ok(cmd.run()?),
             Self::Check(cmd) => Ok(cmd.run()?),
-            Self::Opinionated(cmd) => {
-                let mut cmd = cmd.clone();
+            Self::Opinionated(mut cmd) => {
                 if cmd.format().is_none() {
                     cmd = cmd.with_format(format);
                 }

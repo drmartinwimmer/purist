@@ -160,6 +160,16 @@ impl OpinionatedEngine {
 
     /// Analyzes a single in-memory source string without disk access.
     pub fn check_source(&self, file_path: &Path, source: &str) -> DiagnosticReport {
+        self.check_source_internal(file_path, source, self.config.as_ref(), true)
+    }
+
+    fn check_source_internal(
+        &self,
+        file_path: &Path,
+        source: &str,
+        config: Option<&LintConfig>,
+        emit_config_warnings: bool,
+    ) -> DiagnosticReport {
         let mut report = DiagnosticReport::default();
         let ctx = LintContext::new(file_path, source);
 
@@ -170,7 +180,7 @@ impl OpinionatedEngine {
 
                 for rule in &self.rules {
                     // Skip rule if globally allowed in config
-                    if let Some(cfg) = &self.config
+                    if let Some(cfg) = config
                         && cfg.level_for(rule.name()) == Some(RuleLevel::Allow)
                     {
                         continue;
@@ -186,7 +196,7 @@ impl OpinionatedEngine {
                     }
 
                     // Apply config overrides (e.g. deny upgrades warning to error)
-                    if let Some(cfg) = &self.config {
+                    if let Some(cfg) = config {
                         match cfg.level_for(&diag.rule) {
                             Some(RuleLevel::Allow) => continue,
                             Some(RuleLevel::Deny | RuleLevel::Forbid) => {
@@ -215,6 +225,20 @@ impl OpinionatedEngine {
             }
         }
 
+        if emit_config_warnings && let Some(cfg) = config {
+            for warning in cfg.warnings() {
+                let rule = if warning.starts_with("Rule 'opinionated::") {
+                    "opinionated::deprecated_rule"
+                } else {
+                    "opinionated::unknown_rule"
+                };
+                report.add(
+                    Diagnostic::new(rule, Severity::Warning, warning)
+                        .with_span(Span::new(file_path, 1, 1, 1, 1)),
+                );
+            }
+        }
+
         report
     }
 
@@ -231,24 +255,33 @@ impl OpinionatedEngine {
         let files = discover_rust_files(target_path);
 
         // If no explicit config was supplied, discover from target path
-        let engine_with_config = if self.config.is_none() {
-            let discovered_cfg = LintConfig::discover_for_path(target_path);
-            Self {
-                rules: crate::rules::default_rules(),
-                config: Some(discovered_cfg),
-            }
+        let discovered_cfg;
+        let config = if let Some(cfg) = &self.config {
+            cfg
         } else {
-            Self {
-                rules: Vec::new(),
-                config: self.config.clone(),
-            }
+            discovered_cfg = LintConfig::discover_for_path(target_path);
+            &discovered_cfg
         };
 
-        let active_engine = if self.config.is_none() {
-            &engine_with_config
-        } else {
-            self
-        };
+        // Report manifest-level configuration warnings once for the target path
+        let manifest_path =
+            crate::cargo::find_cargo_toml(target_path).unwrap_or_else(|| target_path.to_path_buf());
+        for warning in config.warnings() {
+            let rule = if warning.starts_with("Rule 'opinionated::") {
+                "opinionated::deprecated_rule"
+            } else {
+                "opinionated::unknown_rule"
+            };
+            report.add(
+                Diagnostic::new(rule, Severity::Warning, warning).with_span(Span::new(
+                    &manifest_path,
+                    1,
+                    1,
+                    1,
+                    1,
+                )),
+            );
+        }
 
         let mut targets_scanned = 0;
         for path in &files {
@@ -268,7 +301,7 @@ impl OpinionatedEngine {
             };
 
             targets_scanned += 1;
-            let file_report = active_engine.check_source(path, &content);
+            let file_report = self.check_source_internal(path, &content, Some(config), false);
             for diag in file_report.diagnostics {
                 report.add(diag);
             }
@@ -472,10 +505,21 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
 
-    struct DummyRule;
+    struct DummyRule(&'static str);
+
+    impl DummyRule {
+        fn new() -> Self {
+            Self("opinionated::dummy")
+        }
+
+        fn with_name(name: &'static str) -> Self {
+            Self(name)
+        }
+    }
+
     impl Rule for DummyRule {
         fn name(&self) -> &'static str {
-            "opinionated::dummy"
+            self.0
         }
 
         fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -531,7 +575,7 @@ mod tests {
 
     #[googletest::test]
     fn engine_runs_registered_rule() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.has_errors(), is_false());
@@ -543,7 +587,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_allow_attribute() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "#![allow(opinionated::dummy)]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -553,7 +597,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_expect_attribute() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "#![expect(dummy, reason = \"test\")]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -563,7 +607,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_comment_next_line() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "// opinionated:allow(dummy)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -573,7 +617,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_comment_same_line() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "fn ok() {} // opinionated:allow(dummy)\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -583,7 +627,7 @@ mod tests {
 
     #[googletest::test]
     fn in_code_suppression_via_file_comment() -> Result<(), Box<dyn std::error::Error>> {
-        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule::new()));
         let source = "//! opinionated:allow(dummy)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
@@ -594,10 +638,12 @@ mod tests {
     #[googletest::test]
     fn config_disables_rule() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
-        config.set_rule("dummy", RuleLevel::Allow);
+        config.set_rule("no_wildcard_imports", RuleLevel::Allow);
         let engine = OpinionatedEngine::empty()
             .with_config(config)
-            .with_rule(Box::new(DummyRule));
+            .with_rule(Box::new(DummyRule::with_name(
+                "opinionated::no_wildcard_imports",
+            )));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.is_empty(), is_true());
@@ -607,10 +653,10 @@ mod tests {
     #[googletest::test]
     fn config_upgrades_rule_to_deny() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
-        config.set_rule("opinionated::dummy", RuleLevel::Deny);
+        config.set_rule("opinionated::error_types", RuleLevel::Deny);
         let engine = OpinionatedEngine::empty()
             .with_config(config)
-            .with_rule(Box::new(DummyRule));
+            .with_rule(Box::new(DummyRule::with_name("opinionated::error_types")));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.error_count(), eq(1));
@@ -618,9 +664,39 @@ mod tests {
     }
 
     #[googletest::test]
+    fn config_warns_on_unrecognized_rule() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = LintConfig::empty();
+        config.set_rule("nonexistent_custom_rule", RuleLevel::Deny);
+        let engine = OpinionatedEngine::empty().with_config(config);
+        let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
+
+        assert_that!(report.warning_count(), eq(1));
+        let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::unknown_rule"));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn config_warns_on_deprecated_rule() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = LintConfig::empty();
+        config.set_rule("clap_encapsulation", RuleLevel::Allow);
+        let engine = OpinionatedEngine::empty().with_config(config.clone());
+        let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
+
+        assert_that!(report.warning_count(), eq(1));
+        let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::deprecated_rule"));
+        assert_that!(
+            config.rules.clap_struct_encapsulation,
+            eq(Some(RuleLevel::Allow))
+        );
+        Ok(())
+    }
+
+    #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = OpinionatedEngine::new();
-        assert_that!(engine.rules().len(), eq(22));
+        assert_that!(engine.rules().len(), eq(23));
         Ok(())
     }
 }

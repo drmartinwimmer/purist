@@ -2,7 +2,7 @@ pub mod cargo;
 pub mod engine;
 pub mod rules;
 
-pub use cargo::{LintConfig, RuleLevel};
+pub use cargo::{LintConfig, OpinionatedLintsConfig, RuleLevel};
 use clap::Args;
 use code_review_diagnostics::{DiagnosticReport, OutputFormat, render_report};
 pub use engine::{LintContext, OpinionatedEngine, Rule};
@@ -99,7 +99,7 @@ impl OpinionatedCommand {
     }
 
     /// Runs the opinionated static analysis checks and renders diagnostics.
-    pub fn run(&self) -> Result<(), OpinionatedError> {
+    pub fn run(self) -> Result<(), OpinionatedError> {
         let report = self.execute()?;
         let format = self.format.unwrap_or(OutputFormat::Console);
 
