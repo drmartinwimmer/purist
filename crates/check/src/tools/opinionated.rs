@@ -1,5 +1,5 @@
 use code_review_diagnostics::DiagnosticReport;
-use code_review_opinionated::OpinionatedEngine;
+use purist::OpinionatedEngine;
 use std::path::{Path, PathBuf};
 
 /// Runner for opinionated AST static analysis rules.

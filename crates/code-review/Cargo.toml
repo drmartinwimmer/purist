@@ -16,6 +16,7 @@ clap = { workspace = true }
 thiserror = { workspace = true }
 code-review-configure-lints = { workspace = true }
 code-review-check = { workspace = true }
+code-review-diagnostics = { workspace = true }
 purist = { workspace = true }
 code-review-api = { workspace = true }
 code-review-coverage = { workspace = true }

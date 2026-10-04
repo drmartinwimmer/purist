@@ -1,7 +1,7 @@
 # Milestone 3 Feedback: Linter & Formatter Runner Aggregator (`code-review check`)
 
 **Date:** 2026-10-04  
-**Status:** In Progress  
+**Status:** Completed  
 **Revision:** @  
 
 This document serves as an asynchronous feedback template for human review. Humans can record observations, suggestions, or concerns here to be addressed later using the `reacting-to-feedback` skill.
@@ -10,10 +10,10 @@ This document serves as an asynchronous feedback template for human review. Huma
 
 ## Completed Tasks
 - [x] **M3-T0: Update Specifications (`crates/check/SPEC.md`, `plan/M3.md`, `plan/FEEDBACK_M3.md`)**
-- [ ] **M3-T1: Subprocess Runners & Diagnostic Parsers (`crates/check/src/tools/`)**
-- [ ] **M3-T2: Jujutsu Integration (`--changed-only`)**
-- [ ] **M3-T3: CLI Integration, Multi-Format Reporting & Failure Thresholds**
-- [ ] **M3-T4: Milestone Completion & Feedback Template**
+- [x] **M3-T1: Subprocess Runners & Diagnostic Parsers (`crates/check/src/tools/`)**
+- [x] **M3-T2: Jujutsu Integration (`--changed-only`)**
+- [x] **M3-T3: CLI Integration, Multi-Format Reporting & Failure Thresholds**
+- [x] **M3-T4: Milestone Completion & Feedback Template**
 
 ---
 

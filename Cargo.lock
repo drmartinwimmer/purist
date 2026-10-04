@@ -127,6 +127,7 @@ dependencies = [
  "code-review-check",
  "code-review-configure-lints",
  "code-review-coverage",
+ "code-review-diagnostics",
  "googletest",
  "purist",
  "thiserror",
@@ -147,8 +148,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "code-review-diagnostics",
- "code-review-opinionated",
  "googletest",
+ "purist",
  "serde",
  "serde_json",
  "thiserror",
@@ -183,6 +184,7 @@ dependencies = [
  "anstyle-query",
  "clap",
  "googletest",
+ "purist",
  "serde",
  "serde_json",
 ]
