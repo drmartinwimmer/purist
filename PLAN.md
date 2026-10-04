@@ -487,20 +487,26 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M2-T3: feat: connect opinionated linter to code-review CLI"`
 
 ### Milestone 3: Linter & Formatter Runner Aggregator (`code-review check`)
-- [ ] **M3-T0: Update Specifications (`src/tools/runner.spec.md`)**
+- [x] **M3-T0: Update Specifications (`crates/check/SPEC.md`, `plan/M3.md`, `plan/FEEDBACK_M3.md`)**
   - Document runner behavior, exit code aggregation, and multi-format reporting.
-  - Describe Jujutsu change: `jj describe -m "plan-M3-T0: docs: add spec for linter runner aggregator"`
-- [ ] **M3-T1: Subprocess Runners & Diagnostic Parsers (`src/tools/runner.rs`)**
+  - Describe Jujutsu change: `jj describe -m "plan-M3-T0: docs: add spec for check aggregator and initialize milestone 3"`
+- [ ] **M3-T1: Subprocess Runners & Diagnostic Parsers (`crates/check/src/tools/`)**
   - Implement runners for `cargo fmt --check` and `cargo clippy --message-format=json`.
   - Implement JSON output parser converting rustc/clippy JSON compiler messages into `Diagnostic`.
   - Implement runner for `code-review opinionated`.
   - Implement runner for `cargo audit --json`.
   - Aggregate all diagnostics into `DiagnosticReport`.
-  - Describe Jujutsu change: `jj describe -m "plan-M3-T1: feat: implement subprocess runner and compiler json parser"`
+  - Describe Jujutsu change: `jj describe -m "plan-M3-T1: feat: implement subprocess runners and compiler json parser"`
 - [ ] **M3-T2: Jujutsu Integration (`--changed-only`)**
   - Implement VCS query using `jj --no-pager diff --summary` to extract modified files.
   - Filter diagnostics to only report issues on modified files.
   - Describe Jujutsu change: `jj describe -m "plan-M3-T2: feat: add jj changed-file filtering to code-review check"`
+- [ ] **M3-T3: CLI Integration, Multi-Format Reporting & Failure Thresholds**
+  - Connect all runners into `CheckCommand` and top-level `code-review` CLI with multi-format and exit code support.
+  - Describe Jujutsu change: `jj describe -m "plan-M3-T3: feat: connect check aggregator to CLI and support multi-format reporting"`
+- [ ] **M3-T4: Milestone Completion & Feedback Template**
+  - Complete milestone 3, verify all quality gates, and update feedback template.
+  - Describe Jujutsu change: `jj describe -m "plan-M3-T4: docs: complete milestone 3 and update plan"`
 
 ### Milestone 4: API Manifest Engine & Auditor (`code-review api`)
 - [ ] **M4-T0: Update Specifications (`src/tools/api/SPEC.md`)**
