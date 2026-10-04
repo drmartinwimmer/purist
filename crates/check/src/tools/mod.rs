@@ -2,11 +2,13 @@ pub mod cargo_audit;
 pub mod cargo_clippy;
 pub mod cargo_fmt;
 pub mod opinionated;
+pub mod vcs_jj;
 
 pub use cargo_audit::{AuditRunner, parse_audit_json};
 pub use cargo_clippy::{ClippyRunner, parse_clippy_json_stream};
 pub use cargo_fmt::{FmtRunner, parse_fmt_output};
 pub use opinionated::OpinionatedRunner;
+pub use vcs_jj::{JjError, JjVcs, filter_diagnostics_by_changed_files, parse_jj_diff_summary};
 
 use code_review_diagnostics::{Diagnostic, DiagnosticReport};
 
