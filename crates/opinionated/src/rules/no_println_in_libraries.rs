@@ -20,6 +20,8 @@ impl Rule for NoPrintlnInLibrariesRule {
             ctx,
             diagnostics: Vec::new(),
             in_test_scope: ctx.is_test_file(),
+            current_impl_is_cli: false,
+            in_cli_runner_scope: false,
         };
 
         visitor.visit_file(file);
@@ -32,10 +34,58 @@ fn is_exempt_entrypoint_or_example(ctx: &LintContext<'_>) -> bool {
     path_str.ends_with("main.rs") || path_str.contains("/bin/") || path_str.contains("/examples/")
 }
 
+fn is_cli_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.last()
+    {
+        let name = segment.ident.to_string();
+        return name.ends_with("Command")
+            || name.ends_with("Cli")
+            || name == "Cli"
+            || name == "Commands"
+            || name.ends_with("Subcommand");
+    }
+    false
+}
+
+fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
+    if is_cli_type(&item_impl.self_ty) {
+        return true;
+    }
+    if let Some((_, ref trait_path, _)) = item_impl.trait_
+        && let Some(segment) = trait_path.segments.last()
+    {
+        let name = segment.ident.to_string();
+        if name.ends_with("Command") || name == "Command" || name.ends_with("Runner") {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+fn is_execution_method(ident: &syn::Ident) -> bool {
+    let name = ident.to_string();
+    matches!(name.as_str(), "run" | "run_with_format" | "execute")
+}
+
 struct PrintlnVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     in_test_scope: bool,
+    current_impl_is_cli: bool,
+    in_cli_runner_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
@@ -63,16 +113,38 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
+        let prev_impl_is_cli = self.current_impl_is_cli;
+        if is_cli_impl(item_impl) {
+            self.current_impl_is_cli = true;
+        }
+
+        visit::visit_item_impl(self, item_impl);
+        self.current_impl_is_cli = prev_impl_is_cli;
+    }
+
+    fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
+        let is_test = has_test_attr(&method.attrs);
+        let is_runner = self.current_impl_is_cli && is_execution_method(&method.sig.ident);
+
+        let prev_test = self.in_test_scope;
+        let prev_runner = self.in_cli_runner_scope;
+
+        if is_test {
+            self.in_test_scope = true;
+        }
+        if is_runner {
+            self.in_cli_runner_scope = true;
+        }
+
+        visit::visit_impl_item_fn(self, method);
+
+        self.in_test_scope = prev_test;
+        self.in_cli_runner_scope = prev_runner;
+    }
+
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
+        let is_test = has_test_attr(&item_fn.attrs);
 
         let prev = self.in_test_scope;
         if is_test {
@@ -85,6 +157,7 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
         if !self.in_test_scope
+            && !self.in_cli_runner_scope
             && let Some(segment) = mac.path.segments.last()
         {
             let name = segment.ident.to_string();
@@ -156,6 +229,50 @@ fn runs_test() {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/parser.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn println_in_command_runner_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct ApiCommand {
+    pub quiet: bool,
+}
+
+impl ApiCommand {
+    pub fn run(self) -> Result<(), ApiError> {
+        if !self.quiet {
+            eprintln!("Notice: api drift detector is scheduled for future milestones.");
+        }
+        Ok(())
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("crates/api/src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn println_in_cli_runner_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct Cli;
+
+impl Cli {
+    pub fn run(self) -> Result<(), String> {
+        eprintln!("Error executing command");
+        Ok(())
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("crates/code-review/src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
 
