@@ -38,7 +38,12 @@ fn collect_imported_names(file: &syn::File) -> HashSet<String> {
 
 fn collect_use_tree_names(tree: &syn::UseTree, names: &mut HashSet<String>) {
     match tree {
-        syn::UseTree::Path(p) => collect_use_tree_names(&p.tree, names),
+        syn::UseTree::Path(p) => {
+            if is_self_use_tree(&p.tree) {
+                names.insert(p.ident.to_string());
+            }
+            collect_use_tree_names(&p.tree, names);
+        }
         syn::UseTree::Name(n) => {
             names.insert(n.ident.to_string());
         }
@@ -51,6 +56,14 @@ fn collect_use_tree_names(tree: &syn::UseTree, names: &mut HashSet<String>) {
             }
         }
         syn::UseTree::Glob(_) => {}
+    }
+}
+
+fn is_self_use_tree(tree: &syn::UseTree) -> bool {
+    match tree {
+        syn::UseTree::Name(n) => n.ident == "self",
+        syn::UseTree::Group(g) => g.items.iter().any(is_self_use_tree),
+        _ => false,
     }
 }
 
@@ -115,9 +128,33 @@ impl QualifiedPathVisitor<'_> {
     }
 }
 
+fn is_primitive_type(name: &str) -> bool {
+    matches!(
+        name,
+        "bool"
+            | "char"
+            | "str"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "f32"
+            | "f64"
+    )
+}
+
 fn should_flag_qualified_path(path: &syn::Path, imported_names: &HashSet<String>) -> bool {
     let segments = &path.segments;
-    if segments.is_empty() {
+    // Long qualified paths have at least 3 segments (e.g. crate::workspace::Workspace, syn::visit::Visit)
+    if segments.len() < 3 {
         return false;
     }
 
@@ -126,19 +163,8 @@ fn should_flag_qualified_path(path: &syn::Path, imported_names: &HashSet<String>
         .map(|s| s.ident.to_string())
         .unwrap_or_default();
 
-    // Check crate::a::B (3 or more segments)
-    if (first == "crate" || first == "super") && segments.len() >= 3 {
-        return true;
-    }
-
-    // Exempt common standard libraries, keywords, and self
-    if first == "std"
-        || first == "core"
-        || first == "alloc"
-        || first == "crate"
-        || first == "super"
-        || first == "self"
-    {
+    // Exempt primitive types (e.g. usize::MAX)
+    if is_primitive_type(&first) {
         return false;
     }
 
@@ -152,13 +178,17 @@ fn should_flag_qualified_path(path: &syn::Path, imported_names: &HashSet<String>
         return false;
     }
 
-    // If the module prefix was explicitly imported via a use declaration, referring through it is valid
-    if imported_names.contains(&first) {
+    // Exempt common standard libraries and self
+    if first == "std" || first == "core" || first == "alloc" || first == "self" {
         return false;
     }
 
-    // External crate paths like directories::ProjectDirs
-    segments.len() >= 2
+    // If the module prefix was explicitly imported via a use declaration, check remaining segments
+    if imported_names.contains(&first) {
+        return segments.len() >= 4;
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -188,8 +218,8 @@ mod tests {
     }
 
     #[googletest::test]
-    fn external_crate_qualified_path_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
-        let source = "fn init() -> directories::ProjectDirs { todo!() }\n";
+    fn external_crate_long_qualified_path_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let source = "fn init() -> syn::punctuated::Punctuated { todo!() }\n";
         let ctx = LintContext::new(Path::new("src/config.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = UseDeclarationsRule.check_file(&ctx, &ast);
@@ -202,8 +232,30 @@ mod tests {
         );
         assert_that!(
             &diag.message,
-            contains_substring("directories::ProjectDirs")
+            contains_substring("syn::punctuated::Punctuated")
         );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn two_segment_external_path_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = "fn process(file: syn::File) -> googletest::Result<()> { Ok(()) }\n";
+        let ctx = LintContext::new(Path::new("src/main.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn primitive_associated_item_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = "fn max() -> usize { usize::MAX }\n";
+        let ctx = LintContext::new(Path::new("src/main.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
         Ok(())
     }
 
