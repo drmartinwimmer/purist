@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 /// Severity configuration for an opinionated lint rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuleLevel {
     Allow,
+    #[default]
     Warn,
     Deny,
     Forbid,
@@ -26,58 +27,60 @@ impl RuleLevel {
 /// Strongly-typed struct holding configuration levels for all known opinionated lint rules.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpinionatedLintsConfig {
-    pub no_inline_mods: Option<RuleLevel>,
-    pub free_functions: Option<RuleLevel>,
-    pub path_resolution: Option<RuleLevel>,
-    pub error_types: Option<RuleLevel>,
-    pub clippy_suppression_hygiene: Option<RuleLevel>,
-    pub test_patterns: Option<RuleLevel>,
-    pub no_redundant_conversions: Option<RuleLevel>,
-    pub use_declarations_over_qualified_paths: Option<RuleLevel>,
-    pub no_redundant_wrappers: Option<RuleLevel>,
-    pub no_boxed_dyn_error: Option<RuleLevel>,
-    pub test_matcher_borrow_simplification: Option<RuleLevel>,
-    pub no_test_prefix: Option<RuleLevel>,
-    pub no_unsafe_in_tests: Option<RuleLevel>,
-    pub centralized_command_execution: Option<RuleLevel>,
-    pub clap_struct_encapsulation: Option<RuleLevel>,
-    pub exit_code_hygiene: Option<RuleLevel>,
-    pub idiomatic_option_bool_mapping: Option<RuleLevel>,
-    pub no_wildcard_imports: Option<RuleLevel>,
-    pub no_env_access_outside_config: Option<RuleLevel>,
-    pub single_match_to_let_else: Option<RuleLevel>,
-    pub raii_temp_directories: Option<RuleLevel>,
-    pub no_println_in_libraries: Option<RuleLevel>,
-    pub cli_run_consumes_self: Option<RuleLevel>,
+    pub no_inline_mods: RuleLevel,
+    pub free_functions: RuleLevel,
+    pub path_resolution: RuleLevel,
+    pub error_types: RuleLevel,
+    pub clippy_suppression_hygiene: RuleLevel,
+    pub test_patterns: RuleLevel,
+    pub no_redundant_conversions: RuleLevel,
+    pub use_declarations_over_qualified_paths: RuleLevel,
+    pub no_redundant_wrappers: RuleLevel,
+    pub no_boxed_dyn_error: RuleLevel,
+    pub test_matcher_borrow_simplification: RuleLevel,
+    pub no_test_prefix: RuleLevel,
+    pub no_unsafe_in_tests: RuleLevel,
+    pub centralized_command_execution: RuleLevel,
+    pub clap_struct_encapsulation: RuleLevel,
+    pub exit_code_hygiene: RuleLevel,
+    pub idiomatic_option_bool_mapping: RuleLevel,
+    pub no_wildcard_imports: RuleLevel,
+    pub no_env_access_outside_config: RuleLevel,
+    pub single_match_to_let_else: RuleLevel,
+    pub raii_temp_directories: RuleLevel,
+    pub no_println_in_libraries: RuleLevel,
+    pub cli_run_consumes_self: RuleLevel,
 }
 
 impl OpinionatedLintsConfig {
     pub fn get(&self, rule_name: &str) -> Option<RuleLevel> {
         let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
         match stripped {
-            "no_inline_mods" => self.no_inline_mods,
-            "free_functions" => self.free_functions,
-            "path_resolution" => self.path_resolution,
-            "error_types" => self.error_types,
-            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene,
-            "test_patterns" => self.test_patterns,
-            "no_redundant_conversions" => self.no_redundant_conversions,
-            "use_declarations_over_qualified_paths" => self.use_declarations_over_qualified_paths,
-            "no_redundant_wrappers" => self.no_redundant_wrappers,
-            "no_boxed_dyn_error" => self.no_boxed_dyn_error,
-            "test_matcher_borrow_simplification" => self.test_matcher_borrow_simplification,
-            "no_test_prefix" => self.no_test_prefix,
-            "no_unsafe_in_tests" => self.no_unsafe_in_tests,
-            "centralized_command_execution" => self.centralized_command_execution,
-            "clap_struct_encapsulation" => self.clap_struct_encapsulation,
-            "exit_code_hygiene" => self.exit_code_hygiene,
-            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping,
-            "no_wildcard_imports" => self.no_wildcard_imports,
-            "no_env_access_outside_config" => self.no_env_access_outside_config,
-            "single_match_to_let_else" => self.single_match_to_let_else,
-            "raii_temp_directories" => self.raii_temp_directories,
-            "no_println_in_libraries" => self.no_println_in_libraries,
-            "cli_run_consumes_self" => self.cli_run_consumes_self,
+            "no_inline_mods" => Some(self.no_inline_mods),
+            "free_functions" => Some(self.free_functions),
+            "path_resolution" => Some(self.path_resolution),
+            "error_types" => Some(self.error_types),
+            "clippy_suppression_hygiene" => Some(self.clippy_suppression_hygiene),
+            "test_patterns" => Some(self.test_patterns),
+            "no_redundant_conversions" => Some(self.no_redundant_conversions),
+            "use_declarations_over_qualified_paths" => {
+                Some(self.use_declarations_over_qualified_paths)
+            }
+            "no_redundant_wrappers" => Some(self.no_redundant_wrappers),
+            "no_boxed_dyn_error" => Some(self.no_boxed_dyn_error),
+            "test_matcher_borrow_simplification" => Some(self.test_matcher_borrow_simplification),
+            "no_test_prefix" => Some(self.no_test_prefix),
+            "no_unsafe_in_tests" => Some(self.no_unsafe_in_tests),
+            "centralized_command_execution" => Some(self.centralized_command_execution),
+            "clap_struct_encapsulation" => Some(self.clap_struct_encapsulation),
+            "exit_code_hygiene" => Some(self.exit_code_hygiene),
+            "idiomatic_option_bool_mapping" => Some(self.idiomatic_option_bool_mapping),
+            "no_wildcard_imports" => Some(self.no_wildcard_imports),
+            "no_env_access_outside_config" => Some(self.no_env_access_outside_config),
+            "single_match_to_let_else" => Some(self.single_match_to_let_else),
+            "raii_temp_directories" => Some(self.raii_temp_directories),
+            "no_println_in_libraries" => Some(self.no_println_in_libraries),
+            "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
             _ => None,
         }
     }
@@ -85,33 +88,31 @@ impl OpinionatedLintsConfig {
     pub fn set(&mut self, rule_name: &str, level: RuleLevel) -> Result<(), UnrecognizedRule> {
         let stripped = rule_name.strip_prefix("opinionated::").unwrap_or(rule_name);
         match stripped {
-            "no_inline_mods" => self.no_inline_mods = Some(level),
-            "free_functions" => self.free_functions = Some(level),
-            "path_resolution" => self.path_resolution = Some(level),
-            "error_types" => self.error_types = Some(level),
-            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene = Some(level),
-            "test_patterns" => self.test_patterns = Some(level),
-            "no_redundant_conversions" => self.no_redundant_conversions = Some(level),
+            "no_inline_mods" => self.no_inline_mods = level,
+            "free_functions" => self.free_functions = level,
+            "path_resolution" => self.path_resolution = level,
+            "error_types" => self.error_types = level,
+            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene = level,
+            "test_patterns" => self.test_patterns = level,
+            "no_redundant_conversions" => self.no_redundant_conversions = level,
             "use_declarations_over_qualified_paths" => {
-                self.use_declarations_over_qualified_paths = Some(level)
+                self.use_declarations_over_qualified_paths = level
             }
-            "no_redundant_wrappers" => self.no_redundant_wrappers = Some(level),
-            "no_boxed_dyn_error" => self.no_boxed_dyn_error = Some(level),
-            "test_matcher_borrow_simplification" => {
-                self.test_matcher_borrow_simplification = Some(level)
-            }
-            "no_test_prefix" => self.no_test_prefix = Some(level),
-            "no_unsafe_in_tests" => self.no_unsafe_in_tests = Some(level),
-            "centralized_command_execution" => self.centralized_command_execution = Some(level),
-            "clap_struct_encapsulation" => self.clap_struct_encapsulation = Some(level),
-            "exit_code_hygiene" => self.exit_code_hygiene = Some(level),
-            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping = Some(level),
-            "no_wildcard_imports" => self.no_wildcard_imports = Some(level),
-            "no_env_access_outside_config" => self.no_env_access_outside_config = Some(level),
-            "single_match_to_let_else" => self.single_match_to_let_else = Some(level),
-            "raii_temp_directories" => self.raii_temp_directories = Some(level),
-            "no_println_in_libraries" => self.no_println_in_libraries = Some(level),
-            "cli_run_consumes_self" => self.cli_run_consumes_self = Some(level),
+            "no_redundant_wrappers" => self.no_redundant_wrappers = level,
+            "no_boxed_dyn_error" => self.no_boxed_dyn_error = level,
+            "test_matcher_borrow_simplification" => self.test_matcher_borrow_simplification = level,
+            "no_test_prefix" => self.no_test_prefix = level,
+            "no_unsafe_in_tests" => self.no_unsafe_in_tests = level,
+            "centralized_command_execution" => self.centralized_command_execution = level,
+            "clap_struct_encapsulation" => self.clap_struct_encapsulation = level,
+            "exit_code_hygiene" => self.exit_code_hygiene = level,
+            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping = level,
+            "no_wildcard_imports" => self.no_wildcard_imports = level,
+            "no_env_access_outside_config" => self.no_env_access_outside_config = level,
+            "single_match_to_let_else" => self.single_match_to_let_else = level,
+            "raii_temp_directories" => self.raii_temp_directories = level,
+            "no_println_in_libraries" => self.no_println_in_libraries = level,
+            "cli_run_consumes_self" => self.cli_run_consumes_self = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -462,6 +463,40 @@ centralized_command_execution = "allow"
         assert_that!(
             config.level_for("opinionated::centralized_command_execution"),
             eq(Some(RuleLevel::Allow))
+        );
+    }
+
+    #[googletest::test]
+    fn opinionated_lints_config_defaults_all_rules_to_warn() {
+        let config = OpinionatedLintsConfig::default();
+        assert_that!(config.no_inline_mods, eq(RuleLevel::Warn));
+        assert_that!(config.free_functions, eq(RuleLevel::Warn));
+        assert_that!(config.path_resolution, eq(RuleLevel::Warn));
+        assert_that!(config.error_types, eq(RuleLevel::Warn));
+        assert_that!(config.cli_run_consumes_self, eq(RuleLevel::Warn));
+        assert_that!(config.no_wildcard_imports, eq(RuleLevel::Warn));
+        assert_that!(config.no_println_in_libraries, eq(RuleLevel::Warn));
+    }
+
+    #[googletest::test]
+    fn opinionated_lints_config_set_updates_rule_level() {
+        let mut config = OpinionatedLintsConfig::default();
+        assert_that!(
+            config.set("no_wildcard_imports", RuleLevel::Allow),
+            eq(Ok(()))
+        );
+        assert_that!(config.no_wildcard_imports, eq(RuleLevel::Allow));
+        assert_that!(
+            config.get("no_wildcard_imports"),
+            eq(Some(RuleLevel::Allow))
+        );
+        assert_that!(
+            config.get("opinionated::no_wildcard_imports"),
+            eq(Some(RuleLevel::Allow))
+        );
+        assert_that!(
+            config.set("unknown_rule", RuleLevel::Deny),
+            eq(Err(UnrecognizedRule))
         );
     }
 }

@@ -686,10 +686,7 @@ mod tests {
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
         assert_that!(&diag.rule, eq("opinionated::deprecated_rule"));
-        assert_that!(
-            config.rules.clap_struct_encapsulation,
-            eq(Some(RuleLevel::Allow))
-        );
+        assert_that!(config.rules.clap_struct_encapsulation, eq(RuleLevel::Allow));
         Ok(())
     }
 
