@@ -151,23 +151,24 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_short_test_name_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn short_test_name_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[test]\nfn test_parse() {}\n";
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = TestPatternsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::test_patterns"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("does not conform to '<verb>_<description>_<outcome>'")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_valid_three_part_test_name_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn valid_three_part_test_name_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[test]\nfn parse_valid_manifest_succeeds() {}\n";
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
         let ast = syn::parse_file(source)?;
@@ -178,23 +179,24 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_assert_eq_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn assert_eq_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[test]\nfn verify_result_matches_expected() {\n    assert_eq!(1, 1);\n}\n";
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = TestPatternsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::test_patterns"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("Usage of 'assert_eq!' in test")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_unwrap_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn unwrap_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source =
             "#[test]\nfn check_parse_returns_value() {\n    let val = Some(42).unwrap();\n}\n";
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
@@ -202,9 +204,10 @@ mod tests {
         let diags = TestPatternsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::test_patterns"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("Avoid calling '.unwrap()' in test bodies")
         );
         Ok(())

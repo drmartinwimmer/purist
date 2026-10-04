@@ -173,7 +173,7 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_nested_redundant_conversion_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn nested_redundant_conversion_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 fn duplicate(data: &MyData) -> MyData {
     serde_json::from_str(&serde_json::to_string(data).unwrap()).unwrap()
@@ -184,15 +184,13 @@ fn duplicate(data: &MyData) -> MyData {
         let diags = NoRedundantConversionsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(
-            diags[0].rule.as_str(),
-            eq("opinionated::no_redundant_conversions")
-        );
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::no_redundant_conversions"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_sequential_redundant_conversion_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn sequential_redundant_conversion_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 fn convert(data: &MyData) -> MyData {
     let serialized = serde_json::to_string(data).unwrap();
@@ -205,19 +203,14 @@ fn convert(data: &MyData) -> MyData {
         let diags = NoRedundantConversionsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(
-            diags[0].rule.as_str(),
-            eq("opinionated::no_redundant_conversions")
-        );
-        assert_that!(
-            diags[0].message,
-            contains_substring("variable 'serialized'")
-        );
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::no_redundant_conversions"));
+        assert_that!(&diag.message, contains_substring("variable 'serialized'"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_unrelated_json_operations_are_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn unrelated_json_operations_are_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 fn parse_incoming(raw: &str) -> MyData {
     serde_json::from_str(raw).unwrap()

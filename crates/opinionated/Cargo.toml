@@ -17,6 +17,7 @@ syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
 code-review-diagnostics = { workspace = true }
+toml_edit = { workspace = true }
 
 [dev-dependencies]
 googletest = { workspace = true }

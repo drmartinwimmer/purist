@@ -233,7 +233,7 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_relative_path_new_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn relative_path_new_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 use std::path::Path;
 
@@ -246,16 +246,17 @@ pub fn load() {
         let diags = PathResolutionRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::path_resolution"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::path_resolution"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("Unanchored relative path 'config/settings.json'")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_relative_fs_read_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn relative_fs_read_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub fn read_data() {
     let _ = std::fs::read_to_string("data.toml");
@@ -266,12 +267,13 @@ pub fn read_data() {
         let diags = PathResolutionRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::path_resolution"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::path_resolution"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_absolute_path_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn absolute_path_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub fn load() {
     let _ = std::path::Path::new("/etc/config.json");
@@ -286,10 +288,10 @@ pub fn load() {
     }
 
     #[googletest::test]
-    fn test_path_in_test_fn_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn path_in_test_fn_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 #[test]
-fn test_something() {
+fn sample_action() {
     let _ = std::path::Path::new("test_data.json");
 }
 "#;
@@ -302,7 +304,7 @@ fn test_something() {
     }
 
     #[googletest::test]
-    fn test_path_in_cfg_test_mod_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn path_in_cfg_test_mod_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 #[cfg(test)]
 mod tests {

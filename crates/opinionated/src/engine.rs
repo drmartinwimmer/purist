@@ -1,130 +1,115 @@
+use crate::cargo::{LintConfig, RuleLevel, discover_rust_files};
 use code_review_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
-use proc_macro2::Span as ProcMacroSpan;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use syn::spanned::Spanned;
+use syn::visit::{self, Visit};
 
-/// Evaluation context provided to each rule during file analysis.
+/// Context provided to lint rules during AST traversal.
 #[derive(Debug)]
 pub struct LintContext<'a> {
     file_path: &'a Path,
     source: &'a str,
     lines: Vec<&'a str>,
-    is_main_or_lib: bool,
-    is_test_file: bool,
 }
 
 impl<'a> LintContext<'a> {
-    /// Creates a new `LintContext` for a source file.
+    /// Creates a new `LintContext` for the given file and source text.
     pub fn new(file_path: &'a Path, source: &'a str) -> Self {
-        let lines: Vec<&'a str> = source.lines().collect();
-        let file_name = file_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-
-        let is_main_or_lib = file_name == "main.rs"
-            || file_name == "lib.rs"
-            || file_path.components().any(|c| c.as_os_str() == "bin");
-
-        let is_test_file = file_path
-            .components()
-            .any(|c| c.as_os_str() == "tests" || c.as_os_str() == "test")
-            || file_name.ends_with("_test.rs")
-            || file_name.starts_with("test_");
-
+        let lines = source.lines().collect();
         Self {
             file_path,
             source,
             lines,
-            is_main_or_lib,
-            is_test_file,
         }
     }
 
     /// Returns the target file path.
-    pub fn file_path(&self) -> &Path {
+    pub fn file_path(&self) -> &'a Path {
         self.file_path
     }
 
-    /// Returns the raw source code.
-    pub fn source(&self) -> &str {
+    /// Returns the entire source code of the file.
+    pub fn source(&self) -> &'a str {
         self.source
     }
 
-    /// Returns the split source lines.
-    pub fn lines(&self) -> &[&'a str] {
-        &self.lines
-    }
-
-    /// Returns whether this file is an entry point (`main.rs` or `lib.rs`).
+    /// Returns true if the current file is `main.rs` or `lib.rs`.
     pub fn is_main_or_lib(&self) -> bool {
-        self.is_main_or_lib
+        self.file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == "main.rs" || name == "lib.rs")
+            .unwrap_or(false)
     }
 
-    /// Returns whether this file is an integration test or test file.
+    /// Returns true if the file is in a `tests/` directory or has a test suffix.
     pub fn is_test_file(&self) -> bool {
-        self.is_test_file
-    }
-
-    /// Returns the 1-indexed line content, if within bounds.
-    pub fn line_content(&self, line_number: usize) -> Option<&'a str> {
-        if line_number == 0 || line_number > self.lines.len() {
-            None
-        } else {
-            self.lines.get(line_number - 1).copied()
-        }
+        let path_str = self.file_path.to_string_lossy();
+        path_str.contains("/tests/")
+            || path_str.ends_with("_test.rs")
+            || path_str.ends_with("tests.rs")
     }
 
     /// Converts a `proc_macro2::Span` into a `code_review_diagnostics::Span`.
-    pub fn to_span(&self, span: ProcMacroSpan) -> Span {
+    pub fn to_span(&self, span: proc_macro2::Span) -> Span {
         let start = span.start();
         let end = span.end();
         Span::new(
             self.file_path,
             start.line,
-            start.column + 1,
+            start.column.saturating_add(1),
             end.line,
-            end.column + 1,
+            end.column.saturating_add(1),
         )
     }
 
-    /// Checks whether the line immediately preceding `line_number` contains an explanatory comment.
-    /// Blank lines immediately preceding the target are ignored when searching upward for a comment.
+    /// Checks if the line immediately preceding `line_number` contains a comment (`// ...`).
+    /// Line numbers are 1-indexed.
     pub fn has_preceding_comment(&self, line_number: usize) -> bool {
         if line_number <= 1 {
             return false;
         }
 
-        let mut current_line = line_number - 1;
-        while current_line >= 1 {
-            if let Some(line) = self.line_content(current_line) {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    current_line -= 1;
-                    continue;
-                }
-                return trimmed.starts_with("//")
-                    || trimmed.starts_with("/*")
-                    || trimmed.starts_with('*');
-            }
-            break;
+        let prev_index = line_number.saturating_sub(2);
+        if let Some(prev_line) = self.lines.get(prev_index) {
+            let trimmed = prev_line.trim_start();
+            trimmed.starts_with("//") || trimmed.starts_with("/*")
+        } else {
+            false
         }
-        false
+    }
+
+    /// Returns the content of a specific line (1-indexed).
+    pub fn line_content(&self, line_number: usize) -> Option<&'a str> {
+        if line_number == 0 {
+            return None;
+        }
+        self.lines.get(line_number.saturating_sub(1)).copied()
     }
 }
 
-/// A static analysis rule capable of inspecting parsed Rust syntax.
+/// Trait defining an opinionated static analysis rule.
 pub trait Rule: Send + Sync {
-    /// Returns the unique rule identifier (e.g. `opinionated::no_inline_mods`).
+    /// Returns the unique rule identifier (e.g. "opinionated::no_inline_mods").
     fn name(&self) -> &'static str;
 
     /// Analyzes the parsed AST file and reports any diagnostics found.
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic>;
 }
 
+/// In-code suppression directive parsed from attributes.
+#[derive(Debug, Clone)]
+pub struct CodeSuppression {
+    pub rule: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
 /// Static analysis engine running registered opinionated rules over Rust source files.
 pub struct OpinionatedEngine {
     rules: Vec<Box<dyn Rule>>,
+    config: Option<LintConfig>,
 }
 
 impl Default for OpinionatedEngine {
@@ -136,14 +121,24 @@ impl Default for OpinionatedEngine {
 impl OpinionatedEngine {
     /// Creates a new engine instance with no rules registered.
     pub fn empty() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            config: None,
+        }
     }
 
     /// Creates a new engine instance with default opinionated rules registered.
     pub fn new() -> Self {
         Self {
             rules: crate::rules::default_rules(),
+            config: None,
         }
+    }
+
+    /// Sets the project-level lint configuration.
+    pub fn with_config(mut self, config: LintConfig) -> Self {
+        self.config = Some(config);
+        self
     }
 
     /// Registers a custom or built-in rule.
@@ -170,11 +165,41 @@ impl OpinionatedEngine {
 
         match syn::parse_file(source) {
             Ok(ast) => {
+                let suppressions = collect_code_suppressions(&ast, &ctx);
+                let mut raw_diags = Vec::new();
+
                 for rule in &self.rules {
-                    let diags = rule.check_file(&ctx, &ast);
-                    for diag in diags {
-                        report.add(diag);
+                    // Skip rule if globally allowed in config
+                    if let Some(cfg) = &self.config
+                        && cfg.level_for(rule.name()) == Some(RuleLevel::Allow)
+                    {
+                        continue;
                     }
+
+                    raw_diags.extend(rule.check_file(&ctx, &ast));
+                }
+
+                for mut diag in raw_diags {
+                    // Check in-code suppression (e.g. #[allow(opinionated::...)] or #[expect(...)])
+                    if is_suppressed(&diag, &suppressions) {
+                        continue;
+                    }
+
+                    // Apply config overrides (e.g. deny upgrades warning to error)
+                    if let Some(cfg) = &self.config {
+                        match cfg.level_for(&diag.rule) {
+                            Some(RuleLevel::Allow) => continue,
+                            Some(RuleLevel::Deny | RuleLevel::Forbid) => {
+                                diag.severity = Severity::Error;
+                            }
+                            Some(RuleLevel::Warn) => {
+                                diag.severity = Severity::Warning;
+                            }
+                            None => {}
+                        }
+                    }
+
+                    report.add(diag);
                 }
             }
             Err(parse_err) => {
@@ -195,11 +220,35 @@ impl OpinionatedEngine {
 
     /// Analyzes all Rust files in the specified path (file or directory).
     pub fn check_path(&self, target_path: &Path) -> Result<DiagnosticReport, std::io::Error> {
-        let mut report = DiagnosticReport::default();
-        let mut files = Vec::new();
+        if !target_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Path '{}' does not exist", target_path.display()),
+            ));
+        }
 
-        collect_rust_files(target_path, &mut files)?;
-        files.sort();
+        let mut report = DiagnosticReport::default();
+        let files = discover_rust_files(target_path);
+
+        // If no explicit config was supplied, discover from target path
+        let engine_with_config = if self.config.is_none() {
+            let discovered_cfg = LintConfig::discover_for_path(target_path);
+            Self {
+                rules: crate::rules::default_rules(),
+                config: Some(discovered_cfg),
+            }
+        } else {
+            Self {
+                rules: Vec::new(),
+                config: self.config.clone(),
+            }
+        };
+
+        let active_engine = if self.config.is_none() {
+            &engine_with_config
+        } else {
+            self
+        };
 
         let mut targets_scanned = 0;
         for path in &files {
@@ -219,7 +268,7 @@ impl OpinionatedEngine {
             };
 
             targets_scanned += 1;
-            let file_report = self.check_source(path, &content);
+            let file_report = active_engine.check_source(path, &content);
             for diag in file_report.diagnostics {
                 report.add(diag);
             }
@@ -230,60 +279,192 @@ impl OpinionatedEngine {
     }
 }
 
-/// Recursively collects `.rs` files while pruning build artifacts and VCS metadata.
-fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
-    if !path.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("Path '{}' does not exist", path.display()),
-        ));
-    }
+/// Collects in-code suppression attributes (`allow` and `expect`) and comment directives.
+fn collect_code_suppressions(file: &syn::File, ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
+    let mut visitor = SuppressionVisitor {
+        suppressions: Vec::new(),
+    };
+    visitor.visit_file(file);
+    visitor
+        .suppressions
+        .extend(collect_comment_suppressions(ctx));
+    visitor.suppressions
+}
 
-    if path.is_file() {
-        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            files.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
+fn collect_comment_suppressions(ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
+    let mut suppressions = Vec::new();
 
-    let file_name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
+    for (line_idx, line) in ctx.lines.iter().enumerate() {
+        let line_num = line_idx + 1; // 1-indexed
+        let trimmed = line.trim();
 
-    // Skip build directories, VCS directories, and hidden directories
-    if file_name == "target"
-        || file_name == ".git"
-        || file_name == ".jj"
-        || file_name == ".direnv"
-        || file_name == ".cargo"
-        || (file_name.starts_with('.') && !file_name.is_empty())
-    {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        if entry_path.is_dir() {
-            let dir_name = entry.file_name();
-            let dir_name_str = dir_name.to_str().unwrap_or_default();
-            if dir_name_str == "target"
-                || dir_name_str == ".git"
-                || dir_name_str == ".jj"
-                || dir_name_str == ".direnv"
-                || dir_name_str == ".cargo"
-                || dir_name_str.starts_with('.')
-            {
-                continue;
+        // 1. Module/file-level inner comments: //! opinionated:allow(...)
+        if let Some(comment) = trimmed.strip_prefix("//!") {
+            if let Some(rule) = extract_directive_rule(comment.trim()) {
+                suppressions.push(CodeSuppression {
+                    rule,
+                    start_line: 1,
+                    end_line: usize::MAX,
+                });
             }
-            collect_rust_files(&entry_path, files)?;
-        } else if entry_path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            files.push(entry_path);
+        } else if let Some(idx) = line.find("//") {
+            let comment = line.get(idx + 2..).map(str::trim).unwrap_or("");
+            if let Some(rule) = extract_directive_rule(comment) {
+                if trimmed.starts_with("//") {
+                    // Line-leading comment: suppresses next line (or whole file if file-allow)
+                    if comment.starts_with("opinionated:file-allow") {
+                        suppressions.push(CodeSuppression {
+                            rule,
+                            start_line: 1,
+                            end_line: usize::MAX,
+                        });
+                    } else {
+                        suppressions.push(CodeSuppression {
+                            rule,
+                            start_line: line_num + 1,
+                            end_line: line_num + 1,
+                        });
+                    }
+                } else {
+                    // Trailing comment on same line: suppresses current line
+                    suppressions.push(CodeSuppression {
+                        rule,
+                        start_line: line_num,
+                        end_line: line_num,
+                    });
+                }
+            }
         }
     }
 
-    Ok(())
+    suppressions
+}
+
+fn extract_directive_rule(comment: &str) -> Option<String> {
+    for prefix in &[
+        "opinionated:allow",
+        "opinionated:disable",
+        "opinionated:ignore",
+        "opinionated:file-allow",
+    ] {
+        if let Some(rest) = comment.strip_prefix(prefix) {
+            let rest = rest.trim();
+            if rest.starts_with('(') && rest.ends_with(')') {
+                let inner = rest
+                    .get(1..rest.len().saturating_sub(1))
+                    .map(str::trim)
+                    .unwrap_or("");
+                let rule = inner.strip_prefix("opinionated::").unwrap_or(inner);
+                return Some(if rule.is_empty() {
+                    "all".to_string()
+                } else {
+                    rule.to_string()
+                });
+            } else if rest.is_empty() {
+                return Some("all".to_string());
+            }
+        }
+    }
+    None
+}
+
+struct SuppressionVisitor {
+    suppressions: Vec<CodeSuppression>,
+}
+
+impl SuppressionVisitor {
+    fn check_attr(&mut self, attr: &syn::Attribute, start: usize, end: usize) {
+        if !attr.path().is_ident("allow") && !attr.path().is_ident("expect") {
+            return;
+        }
+
+        let _result = attr.parse_nested_meta(|meta| {
+            let path_str = meta
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect::<Vec<_>>()
+                .join("::");
+
+            if path_str == "opinionated" {
+                self.suppressions.push(CodeSuppression {
+                    rule: "all".to_string(),
+                    start_line: start,
+                    end_line: end,
+                });
+            } else if let Some(rule_name) = path_str.strip_prefix("opinionated::") {
+                self.suppressions.push(CodeSuppression {
+                    rule: rule_name.to_string(),
+                    start_line: start,
+                    end_line: end,
+                });
+            } else {
+                self.suppressions.push(CodeSuppression {
+                    rule: path_str,
+                    start_line: start,
+                    end_line: end,
+                });
+            }
+            Ok(())
+        });
+    }
+}
+
+impl<'ast> Visit<'ast> for SuppressionVisitor {
+    fn visit_file(&mut self, file: &'ast syn::File) {
+        for attr in &file.attrs {
+            self.check_attr(attr, 1, usize::MAX);
+        }
+        visit::visit_file(self, file);
+    }
+
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let span = item.span();
+        let start = span.start().line;
+        let end = span.end().line;
+        for attr in get_item_attrs(item) {
+            self.check_attr(attr, start, end);
+        }
+        visit::visit_item(self, item);
+    }
+}
+
+fn get_item_attrs(item: &syn::Item) -> &[syn::Attribute] {
+    match item {
+        syn::Item::Fn(i) => &i.attrs,
+        syn::Item::Mod(i) => &i.attrs,
+        syn::Item::Struct(i) => &i.attrs,
+        syn::Item::Enum(i) => &i.attrs,
+        syn::Item::Impl(i) => &i.attrs,
+        syn::Item::Trait(i) => &i.attrs,
+        syn::Item::Const(i) => &i.attrs,
+        syn::Item::Static(i) => &i.attrs,
+        syn::Item::Type(i) => &i.attrs,
+        syn::Item::Use(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+fn is_suppressed(diag: &Diagnostic, suppressions: &[CodeSuppression]) -> bool {
+    let Some(span) = &diag.span else {
+        return false;
+    };
+    let stripped = diag
+        .rule
+        .strip_prefix("opinionated::")
+        .unwrap_or(&diag.rule);
+
+    for s in suppressions {
+        if (s.rule == "all" || s.rule == diag.rule || s.rule == stripped)
+            && span.start_line >= s.start_line
+            && span.start_line <= s.end_line
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -297,16 +478,21 @@ mod tests {
             "opinionated::dummy"
         }
 
-        fn check_file(&self, ctx: &LintContext<'_>, _file: &syn::File) -> Vec<Diagnostic> {
+        fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+            let line = file
+                .items
+                .first()
+                .map(|i| i.span().start().line)
+                .unwrap_or(1);
             vec![
                 Diagnostic::new(self.name(), Severity::Warning, "Dummy finding for testing")
-                    .with_span(Span::new(ctx.file_path(), 1, 1, 1, 5)),
+                    .with_span(Span::new(ctx.file_path(), line, 1, line, 5)),
             ]
         }
     }
 
     #[googletest::test]
-    fn test_lint_context_detects_entry_points_and_comments() -> googletest::Result<()> {
+    fn lint_context_detects_entry_points_and_comments() -> googletest::Result<()> {
         let source = "// Preceding explanation\nfn main() {}\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
 
@@ -321,7 +507,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_lint_context_detects_test_file() -> googletest::Result<()> {
+    fn lint_context_detects_test_file() -> googletest::Result<()> {
         let source = "fn helper() {}\n";
         let ctx = LintContext::new(Path::new("tests/integration_test.rs"), source);
 
@@ -331,61 +517,110 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_engine_check_source_syntax_error_produces_diagnostic() -> googletest::Result<()> {
+    fn engine_check_source_syntax_error_produces_diagnostic()
+    -> Result<(), Box<dyn std::error::Error>> {
         let engine = OpinionatedEngine::empty();
         let report = engine.check_source(Path::new("bad.rs"), "fn broken syntax {{{");
 
         assert_that!(report.has_errors(), is_true());
         assert_that!(report.diagnostics.len(), eq(1));
-        assert_that!(
-            report.diagnostics[0].rule.as_str(),
-            eq("opinionated::syntax_error")
-        );
+        let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::syntax_error"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_engine_runs_registered_rule() -> googletest::Result<()> {
+    fn engine_runs_registered_rule() -> Result<(), Box<dyn std::error::Error>> {
         let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.has_errors(), is_false());
         assert_that!(report.warning_count(), eq(1));
-        assert_that!(
-            report.diagnostics[0].rule.as_str(),
-            eq("opinionated::dummy")
-        );
+        let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::dummy"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_collect_rust_files_skips_target_and_hidden() -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = std::env::temp_dir().join(format!("test_collect_{}", std::process::id()));
-        fs::create_dir_all(temp_dir.join("src"))?;
-        fs::create_dir_all(temp_dir.join("target"))?;
-        fs::create_dir_all(temp_dir.join(".git"))?;
+    fn in_code_suppression_via_allow_attribute() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let source = "#![allow(opinionated::dummy)]\nfn ok() {}\n";
+        let report = engine.check_source(Path::new("clean.rs"), source);
 
-        fs::write(temp_dir.join("src/lib.rs"), "pub fn a() {}")?;
-        fs::write(temp_dir.join("target/ignored.rs"), "pub fn b() {}")?;
-        fs::write(temp_dir.join(".git/hook.rs"), "pub fn c() {}")?;
-
-        let mut files = Vec::new();
-        collect_rust_files(&temp_dir, &mut files)?;
-
-        let _ = fs::remove_dir_all(&temp_dir);
-
-        assert_that!(files.len(), eq(1));
-        assert_that!(
-            files[0].file_name().and_then(|s| s.to_str()),
-            eq(Some("lib.rs"))
-        );
+        assert_that!(report.is_empty(), is_true());
         Ok(())
     }
 
     #[googletest::test]
-    fn test_engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
+    fn in_code_suppression_via_expect_attribute() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let source = "#![expect(dummy, reason = \"test\")]\nfn ok() {}\n";
+        let report = engine.check_source(Path::new("clean.rs"), source);
+
+        assert_that!(report.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn in_code_suppression_via_comment_next_line() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let source = "// opinionated:allow(dummy)\nfn ok() {}\n";
+        let report = engine.check_source(Path::new("clean.rs"), source);
+
+        assert_that!(report.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn in_code_suppression_via_comment_same_line() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let source = "fn ok() {} // opinionated:allow(dummy)\n";
+        let report = engine.check_source(Path::new("clean.rs"), source);
+
+        assert_that!(report.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn in_code_suppression_via_file_comment() -> Result<(), Box<dyn std::error::Error>> {
+        let engine = OpinionatedEngine::empty().with_rule(Box::new(DummyRule));
+        let source = "//! opinionated:allow(dummy)\nfn ok() {}\n";
+        let report = engine.check_source(Path::new("clean.rs"), source);
+
+        assert_that!(report.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn config_disables_rule() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = LintConfig::empty();
+        config.set_rule("dummy", RuleLevel::Allow);
+        let engine = OpinionatedEngine::empty()
+            .with_config(config)
+            .with_rule(Box::new(DummyRule));
+        let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
+
+        assert_that!(report.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn config_upgrades_rule_to_deny() -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = LintConfig::empty();
+        config.set_rule("opinionated::dummy", RuleLevel::Deny);
+        let engine = OpinionatedEngine::empty()
+            .with_config(config)
+            .with_rule(Box::new(DummyRule));
+        let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
+
+        assert_that!(report.error_count(), eq(1));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = OpinionatedEngine::new();
-        assert_that!(engine.rules().len(), eq(7));
+        assert_that!(engine.rules().len(), eq(22));
         Ok(())
     }
 }

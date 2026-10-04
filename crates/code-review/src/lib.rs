@@ -300,7 +300,7 @@ mod tests {
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
         let code = cli.run();
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _result = std::fs::remove_dir_all(&temp_dir);
         expect_that!(code, eq(ExitCode::SUCCESS));
         Ok(())
     }
@@ -320,7 +320,7 @@ mod tests {
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
         let code = cli.run();
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _result = std::fs::remove_dir_all(&temp_dir);
         expect_that!(code, eq(ExitCode::from(1)));
         Ok(())
     }

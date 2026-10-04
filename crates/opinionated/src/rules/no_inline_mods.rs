@@ -78,20 +78,18 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_inline_mod_in_main_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn inline_mod_in_main_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "mod helpers { pub fn run() {} }\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoInlineModsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::no_inline_mods"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::no_inline_mods"));
+        assert_that!(&diag.message, contains_substring("Inline module 'helpers'"));
         assert_that!(
-            diags[0].message,
-            contains_substring("Inline module 'helpers'")
-        );
-        assert_that!(
-            diags[0].suggested_fix.as_deref(),
+            diag.suggested_fix.as_deref(),
             eq(Some(
                 "Move module content to 'helpers.rs' or 'helpers/mod.rs' and declare 'mod helpers;'."
             ))
@@ -100,7 +98,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_cfg_test_inline_mod_in_lib_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn cfg_test_inline_mod_in_lib_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn it_works() {}\n}\n";
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
@@ -111,7 +109,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_external_mod_declaration_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn external_mod_declaration_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = "pub mod cli;\npub mod tools;\n";
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
@@ -122,7 +120,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_inline_mod_in_submodule_is_ignored() -> Result<(), Box<dyn std::error::Error>> {
+    fn inline_mod_in_submodule_is_ignored() -> Result<(), Box<dyn std::error::Error>> {
         let source = "mod inner { pub fn helper() {} }\n";
         let ctx = LintContext::new(Path::new("src/utils/math.rs"), source);
         let ast = syn::parse_file(source)?;

@@ -116,7 +116,7 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_dummy_namespace_struct_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn dummy_namespace_struct_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub struct Parser;
 
@@ -131,16 +131,17 @@ impl Parser {
         let diags = FreeFunctionsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::free_functions"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::free_functions"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("Struct 'Parser' is stateless")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_struct_with_receiver_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn struct_with_receiver_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub struct Service;
 
@@ -157,7 +158,7 @@ impl Service {
     }
 
     #[googletest::test]
-    fn test_struct_implementing_trait_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn struct_implementing_trait_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub struct Visitor;
 
@@ -182,7 +183,7 @@ impl Visitor {
     }
 
     #[googletest::test]
-    fn test_struct_with_fields_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn struct_with_fields_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 pub struct Config {
     pub timeout: u64,

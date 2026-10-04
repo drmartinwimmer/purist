@@ -184,39 +184,41 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_result_string_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn result_string_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "pub fn compute() -> Result<i32, String> { Ok(42) }\n";
         let ctx = LintContext::new(Path::new("src/compute.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ErrorTypesRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::error_types"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::error_types"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("returns unstructured error type 'String'")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_result_str_ref_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn result_str_ref_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "pub fn lookup() -> Result<usize, &'static str> { Ok(0) }\n";
         let ctx = LintContext::new(Path::new("src/lookup.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ErrorTypesRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(diags[0].rule.as_str(), eq("opinionated::error_types"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::error_types"));
         assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("returns unstructured error type '&str'")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_result_custom_error_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn result_custom_error_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = "pub fn execute() -> Result<(), MyError> { Ok(()) }\n";
         let ctx = LintContext::new(Path::new("src/exec.rs"), source);
         let ast = syn::parse_file(source)?;
@@ -227,8 +229,8 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_result_string_in_test_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
-        let source = "#[test]\nfn test_something() -> Result<(), String> { Ok(()) }\n";
+    fn result_string_in_test_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = "#[test]\nfn parse_action() -> Result<(), String> { Ok(()) }\n";
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ErrorTypesRule.check_file(&ctx, &ast);

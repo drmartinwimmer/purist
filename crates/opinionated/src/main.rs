@@ -50,7 +50,7 @@ mod tests {
         };
         let code = cli.run();
 
-        let _ = fs::remove_dir_all(&temp_dir);
+        let _result = fs::remove_dir_all(&temp_dir);
         assert_that!(code, eq(ExitCode::SUCCESS));
         Ok(())
     }
@@ -67,7 +67,7 @@ mod tests {
         };
         let code = cli.run();
 
-        let _ = fs::remove_dir_all(&temp_dir);
+        let _result = fs::remove_dir_all(&temp_dir);
         assert_that!(code, eq(ExitCode::from(1)));
         Ok(())
     }

@@ -88,7 +88,7 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_unhygienic_allow_without_reason_or_comment_is_flagged()
+    fn unhygienic_allow_without_reason_or_comment_is_flagged()
     -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[allow(clippy::unwrap_used)]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
@@ -96,56 +96,48 @@ mod tests {
         let diags = ClippySuppressRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
-        assert_that!(
-            diags[0].rule.as_str(),
-            eq("opinionated::clippy_suppression_hygiene")
-        );
-        assert_that!(diags[0].message, contains_substring("lacks both a 'reason"));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
+        assert_that!(&diag.message, contains_substring("lacks both a 'reason"));
         Ok(())
     }
 
     #[googletest::test]
-    fn test_allow_with_reason_but_no_comment_is_flagged() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn allow_with_reason_but_no_comment_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[allow(clippy::unwrap_used, reason = \"safe\")]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ClippySuppressRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
         assert_that!(
-            diags[0].rule.as_str(),
-            eq("opinionated::clippy_suppression_hygiene")
-        );
-        assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("lacks an accompanying code comment")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_allow_with_comment_but_no_reason_is_flagged() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn allow_with_comment_but_no_reason_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "// Reason explained here\n#[allow(clippy::unwrap_used)]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ClippySuppressRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("opinionated::clippy_suppression_hygiene"));
         assert_that!(
-            diags[0].rule.as_str(),
-            eq("opinionated::clippy_suppression_hygiene")
-        );
-        assert_that!(
-            diags[0].message,
+            &diag.message,
             contains_substring("lacks a 'reason = \"...\"' parameter")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn test_hygienic_expect_with_both_comment_and_reason_is_permitted()
+    fn hygienic_expect_with_both_comment_and_reason_is_permitted()
     -> Result<(), Box<dyn std::error::Error>> {
         let source = "// Tested invariant guarantees no panic here\n#[expect(clippy::unwrap_used, reason = \"infallible after check\")]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);

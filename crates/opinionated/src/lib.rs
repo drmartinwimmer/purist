@@ -1,6 +1,8 @@
+pub mod cargo;
 pub mod engine;
 pub mod rules;
 
+pub use cargo::{LintConfig, RuleLevel};
 use clap::Args;
 use code_review_diagnostics::{DiagnosticReport, OutputFormat, render_report};
 pub use engine::{LintContext, OpinionatedEngine, Rule};
@@ -143,7 +145,7 @@ mod tests {
         let cmd = OpinionatedCommand::new(Some(file_path), true);
         let report = cmd.execute()?;
 
-        let _ = fs::remove_dir_all(&temp_dir);
+        let _result = fs::remove_dir_all(&temp_dir);
 
         assert_that!(report.is_empty(), is_true());
         Ok(())
@@ -162,7 +164,7 @@ mod tests {
         let cmd = OpinionatedCommand::new(Some(file_path), true);
         let result = cmd.run();
 
-        let _ = fs::remove_dir_all(&temp_dir);
+        let _result = fs::remove_dir_all(&temp_dir);
 
         match result {
             Err(OpinionatedError::LintViolationsFound { count }) => {

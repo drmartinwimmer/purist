@@ -181,6 +181,7 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "thiserror",
+ "toml_edit",
 ]
 
 [[package]]
