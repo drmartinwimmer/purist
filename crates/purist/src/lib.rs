@@ -1,7 +1,9 @@
 pub mod cargo;
 pub mod diagnostics;
+pub mod discovery;
 pub mod engine;
 pub mod reporter;
+pub mod rule_config;
 pub mod rules;
 
 pub use cargo::{LintConfig, OpinionatedLintsConfig, PuristLintsConfig, RuleLevel};
