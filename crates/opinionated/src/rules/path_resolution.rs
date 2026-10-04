@@ -136,10 +136,8 @@ impl PathVisitor<'_> {
 
     fn check_method_call(&mut self, call: &syn::ExprMethodCall) {
         let method_name = call.method.to_string();
-        if method_name == "join"
-            && let Some(first_arg) = call.args.first()
-        {
-            // If joining on a bare relative path literal directly
+        if method_name == "join" {
+            // If joining on a bare relative path literal directly (e.g. "relative/dir".join(...))
             if let syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(lit_str),
                 ..
@@ -147,7 +145,6 @@ impl PathVisitor<'_> {
             {
                 self.inspect_lit_str(lit_str);
             }
-            self.inspect_path_arg(first_arg);
         }
     }
 
@@ -315,6 +312,24 @@ mod tests {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = PathResolutionRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn path_join_with_relative_component_on_variable_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+use std::path::{Path, PathBuf};
+
+pub fn find_manifest(base: &Path) -> PathBuf {
+    base.join("Cargo.toml")
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/config.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = PathResolutionRule.check_file(&ctx, &ast);
 
