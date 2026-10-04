@@ -146,7 +146,11 @@ name = "code-review-check"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "code-review-diagnostics",
+ "code-review-opinionated",
  "googletest",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

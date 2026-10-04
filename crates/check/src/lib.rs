@@ -1,3 +1,5 @@
+pub mod tools;
+
 use clap::Args;
 use std::path::{Path, PathBuf};
 
