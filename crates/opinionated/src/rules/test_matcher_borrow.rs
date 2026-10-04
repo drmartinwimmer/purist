@@ -1,6 +1,7 @@
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::Token;
+use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -45,7 +46,7 @@ impl<'ast> Visit<'ast> for MatcherBorrowVisitor<'_> {
 impl MatcherBorrowVisitor<'_> {
     fn check_assertion_macro(&mut self, mac: &syn::Macro) {
         let parser = Punctuated::<syn::Expr, Token![,]>::parse_terminated;
-        if let Ok(exprs) = syn::parse::Parser::parse2(parser, mac.tokens.clone()) {
+        if let Ok(exprs) = Parser::parse2(parser, mac.tokens.clone()) {
             for expr in &exprs {
                 let mut method_visitor = BorrowMethodVisitor {
                     ctx: self.ctx,

@@ -1,5 +1,7 @@
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
 
 /// Rule detecting trivial wrapper functions that merely forward arguments to an associated method.
 pub struct NoRedundantWrappersRule;
@@ -101,9 +103,7 @@ fn detect_redundant_forwarding(item_fn: &syn::ItemFn) -> Option<String> {
     None
 }
 
-fn extract_param_names(
-    inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>,
-) -> Vec<String> {
+fn extract_param_names(inputs: &Punctuated<syn::FnArg, Comma>) -> Vec<String> {
     let mut names = Vec::new();
     for input in inputs {
         if let syn::FnArg::Typed(pat_type) = input
@@ -115,9 +115,7 @@ fn extract_param_names(
     names
 }
 
-fn extract_arg_names(
-    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
-) -> Vec<String> {
+fn extract_arg_names(args: &Punctuated<syn::Expr, Comma>) -> Vec<String> {
     let mut names = Vec::new();
     for arg in args {
         match arg {

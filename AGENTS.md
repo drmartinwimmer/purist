@@ -14,6 +14,20 @@ The user uses **Jujutsu (`jj`)** for version control.
   ```
 - If you need to start a new logical change, use `jj new`.
 
+## 2. Opinionated AST Linter
+
+Review agents must always run the opinionated AST linter to identify and resolve architectural, style, and hygiene issues:
+```bash
+cargo run -p code-review -- opinionated --path .
+```
+Ensure zero violations (errors or warnings) are reported before submitting changes.
+
+## 3. Testing & Formatting
+
+- Keep all unit and integration tests passing (`cargo test --all-targets --all-features`).
+- Format code with `cargo fmt --check`.
+- Ensure zero Clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`).
+
 ## 4. Coding & Cleanliness
 
 - Do not introduce unnecessary dependencies. Keep the codebase lightweight.

@@ -1,5 +1,6 @@
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
+use syn::ReturnType;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -100,8 +101,8 @@ impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
 impl ErrorTypesVisitor<'_> {
     fn check_signature(&mut self, fn_name: &str, sig: &syn::Signature) {
         let return_type = match &sig.output {
-            syn::ReturnType::Type(_, ty) => ty.as_ref(),
-            syn::ReturnType::Default => return,
+            ReturnType::Type(_, ty) => ty.as_ref(),
+            ReturnType::Default => return,
         };
 
         if let Some((error_ty, err_desc)) = detect_string_error_type(return_type) {

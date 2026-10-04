@@ -117,7 +117,7 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn test_prefix_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn prefix_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = "#[test]\nfn test_parse_manifest() {}\n";
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
         let ast = syn::parse_file(source)?;

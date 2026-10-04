@@ -1,4 +1,5 @@
-use crate::cargo::{LintConfig, RuleLevel, discover_rust_files};
+use crate::cargo::{LintConfig, RuleLevel, discover_rust_files, find_cargo_toml};
+use crate::rules::default_rules;
 use code_review_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
 use std::fs;
 use std::path::Path;
@@ -72,12 +73,10 @@ impl<'a> LintContext<'a> {
         }
 
         let prev_index = line_number.saturating_sub(2);
-        if let Some(prev_line) = self.lines.get(prev_index) {
+        self.lines.get(prev_index).is_some_and(|prev_line| {
             let trimmed = prev_line.trim_start();
             trimmed.starts_with("//") || trimmed.starts_with("/*")
-        } else {
-            false
-        }
+        })
     }
 
     /// Returns the content of a specific line (1-indexed).
@@ -130,7 +129,7 @@ impl OpinionatedEngine {
     /// Creates a new engine instance with default opinionated rules registered.
     pub fn new() -> Self {
         Self {
-            rules: crate::rules::default_rules(),
+            rules: default_rules(),
             config: None,
         }
     }
@@ -265,7 +264,7 @@ impl OpinionatedEngine {
 
         // Report manifest-level configuration warnings once for the target path
         let manifest_path =
-            crate::cargo::find_cargo_toml(target_path).unwrap_or_else(|| target_path.to_path_buf());
+            find_cargo_toml(target_path).unwrap_or_else(|| target_path.to_path_buf());
         for warning in config.warnings() {
             let rule = if warning.starts_with("Rule 'opinionated::") {
                 "opinionated::deprecated_rule"

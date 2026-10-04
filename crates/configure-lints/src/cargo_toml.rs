@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use toml_edit::{Item, Table, TomlError, value};
 
 /// Profile defining which preset of Clippy lints to inject.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize, Deserialize)]
@@ -59,7 +60,7 @@ pub enum CargoTomlError {
     #[error("Failed to parse TOML manifest: {source}")]
     Parse {
         #[from]
-        source: toml_edit::TomlError,
+        source: TomlError,
     },
 
     /// Returned when an expected table (such as `[workspace]`, `[package]`, `[lints]`,
@@ -337,9 +338,9 @@ pub fn configure_lints(
             })?;
 
         if !ws.contains_key("lints") {
-            let mut lints_table = toml_edit::Table::new();
+            let mut lints_table = Table::new();
             lints_table.set_implicit(true);
-            ws.insert("lints", toml_edit::Item::Table(lints_table));
+            ws.insert("lints", Item::Table(lints_table));
         }
 
         let ws_lints = ws
@@ -350,9 +351,9 @@ pub fn configure_lints(
             })?;
 
         if !ws_lints.contains_key("clippy") {
-            let mut clippy_table = toml_edit::Table::new();
+            let mut clippy_table = Table::new();
             clippy_table.set_implicit(false);
-            ws_lints.insert("clippy", toml_edit::Item::Table(clippy_table));
+            ws_lints.insert("clippy", Item::Table(clippy_table));
         }
 
         let clippy_table = ws_lints
@@ -367,9 +368,9 @@ pub fn configure_lints(
         if has_package {
             // Case 2: Ensure [lints] workspace = true
             if !doc.contains_key("lints") {
-                let mut lints_table = toml_edit::Table::new();
-                lints_table.insert("workspace", toml_edit::value(true));
-                doc.insert("lints", toml_edit::Item::Table(lints_table));
+                let mut lints_table = Table::new();
+                lints_table.insert("workspace", value(true));
+                doc.insert("lints", Item::Table(lints_table));
             } else {
                 let lints_item =
                     doc.get_mut("lints")
@@ -388,16 +389,16 @@ pub fn configure_lints(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 if !is_ws_true {
-                    lints_table.insert("workspace", toml_edit::value(true));
+                    lints_table.insert("workspace", value(true));
                 }
             }
         }
     } else {
         // Case 3: Single crate or member crate
         if !doc.contains_key("lints") {
-            let mut lints_table = toml_edit::Table::new();
+            let mut lints_table = Table::new();
             lints_table.set_implicit(true);
-            doc.insert("lints", toml_edit::Item::Table(lints_table));
+            doc.insert("lints", Item::Table(lints_table));
         }
 
         let lints_table = doc
@@ -408,9 +409,9 @@ pub fn configure_lints(
             })?;
 
         if !lints_table.contains_key("clippy") {
-            let mut clippy_table = toml_edit::Table::new();
+            let mut clippy_table = Table::new();
             clippy_table.set_implicit(false);
-            lints_table.insert("clippy", toml_edit::Item::Table(clippy_table));
+            lints_table.insert("clippy", Item::Table(clippy_table));
         }
 
         let clippy_table = lints_table
@@ -550,7 +551,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_configure_lints_with_comments_and_whitespace_preserves_formatting()
+    fn configure_lints_with_comments_and_whitespace_preserves_formatting()
     -> Result<(), Box<dyn std::error::Error>> {
         let original = r#"# Top-level comment
 [package]
@@ -595,7 +596,7 @@ serde = "1.0" # inline dep comment
     }
 
     #[googletest::test]
-    fn test_configure_lints_twice_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+    fn configure_lints_twice_is_idempotent() -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
 version = "0.1.0"
@@ -617,7 +618,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_configure_lints_virtual_workspace_injects_only_workspace_clippy()
+    fn configure_lints_virtual_workspace_injects_only_workspace_clippy()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[workspace]
 members = ["crates/*"]
@@ -635,7 +636,7 @@ members = ["crates/*"]
     }
 
     #[googletest::test]
-    fn test_configure_lints_root_package_with_workspace_injects_workspace_clippy_and_workspace_true()
+    fn configure_lints_root_package_with_workspace_injects_workspace_clippy_and_workspace_true()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "root"
@@ -656,8 +657,8 @@ members = ["crates/*"]
     }
 
     #[googletest::test]
-    fn test_configure_lints_single_crate_injects_lints_clippy()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn configure_lints_single_crate_injects_lints_clippy() -> Result<(), Box<dyn std::error::Error>>
+    {
         let initial = r#"[package]
 name = "single"
 version = "0.1.0"
@@ -674,7 +675,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_configure_lints_profile_differences_strict_34_and_standard_31()
+    fn configure_lints_profile_differences_strict_34_and_standard_31()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
@@ -725,7 +726,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_remove_lints_cleans_clippy_and_prunes_empty_parent_table()
+    fn remove_lints_cleans_clippy_and_prunes_empty_parent_table()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
@@ -752,7 +753,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_remove_lints_with_existing_rust_lints_preserves_parent_table()
+    fn remove_lints_with_existing_rust_lints_preserves_parent_table()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
@@ -786,7 +787,7 @@ unsafe_code = "forbid"
     }
 
     #[googletest::test]
-    fn test_configure_lints_missing_file_returns_manifest_not_found()
+    fn configure_lints_missing_file_returns_manifest_not_found()
     -> Result<(), Box<dyn std::error::Error>> {
         let missing = PathBuf::from("/non/existent/path/Cargo.toml");
         match configure_lints(&missing, LintProfile::Strict) {
@@ -799,8 +800,8 @@ unsafe_code = "forbid"
     }
 
     #[googletest::test]
-    fn test_configure_lints_malformed_toml_returns_parse_error()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn configure_lints_malformed_toml_returns_parse_error() -> Result<(), Box<dyn std::error::Error>>
+    {
         let malformed = "this is not valid toml = [[";
         let manifest = TempManifest::new(malformed)?;
         match configure_lints(&manifest.path, LintProfile::Strict) {
@@ -810,7 +811,7 @@ unsafe_code = "forbid"
     }
 
     #[googletest::test]
-    fn test_configure_lints_scalar_lints_or_workspace_returns_invalid_structure()
+    fn configure_lints_scalar_lints_or_workspace_returns_invalid_structure()
     -> Result<(), Box<dyn std::error::Error>> {
         let invalid_lints = r#"lints = "invalid_scalar"
 
@@ -844,7 +845,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_remove_lints_with_empty_clippy_table_prunes_empty_tables_on_disk()
+    fn remove_lints_with_empty_clippy_table_prunes_empty_tables_on_disk()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"
@@ -864,7 +865,7 @@ version = "0.1.0"
     }
 
     #[googletest::test]
-    fn test_remove_lints_virtual_workspace_prunes_workspace_lints()
+    fn remove_lints_virtual_workspace_prunes_workspace_lints()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[workspace]
 members = ["crates/*"]
@@ -893,7 +894,7 @@ members = ["crates/*"]
     }
 
     #[googletest::test]
-    fn test_remove_lints_root_package_with_workspace_prunes_workspace_lints_and_root_lints()
+    fn remove_lints_root_package_with_workspace_prunes_workspace_lints_and_root_lints()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "root"
@@ -924,7 +925,7 @@ members = ["crates/*"]
     }
 
     #[googletest::test]
-    fn test_configure_lints_downgrade_to_standard_preserves_category_comments()
+    fn configure_lints_downgrade_to_standard_preserves_category_comments()
     -> Result<(), Box<dyn std::error::Error>> {
         let initial = r#"[package]
 name = "demo"

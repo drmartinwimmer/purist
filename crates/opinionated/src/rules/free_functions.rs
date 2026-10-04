@@ -1,6 +1,7 @@
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use std::collections::{HashMap, HashSet};
+use syn::Fields;
 
 /// Rule detecting stateless dummy structs used solely as static namespaces.
 pub struct FreeFunctionsRule;
@@ -18,9 +19,9 @@ impl Rule for FreeFunctionsRule {
         for item in &file.items {
             if let syn::Item::Struct(item_struct) = item {
                 let is_empty = match &item_struct.fields {
-                    syn::Fields::Unit => true,
-                    syn::Fields::Named(f) => f.named.is_empty(),
-                    syn::Fields::Unnamed(f) => f.unnamed.is_empty(),
+                    Fields::Unit => true,
+                    Fields::Named(f) => f.named.is_empty(),
+                    Fields::Unnamed(f) => f.unnamed.is_empty(),
                 };
                 if is_empty {
                     empty_structs.insert(item_struct.ident.to_string(), item_struct.ident.span());
@@ -39,9 +40,8 @@ impl Rule for FreeFunctionsRule {
 
         for item in &file.items {
             if let syn::Item::Impl(item_impl) = item {
-                let struct_name = match extract_type_ident(&item_impl.self_ty) {
-                    Some(name) => name,
-                    None => continue,
+                let Some(struct_name) = extract_type_ident(&item_impl.self_ty) else {
+                    continue;
                 };
 
                 if !empty_structs.contains_key(&struct_name) {
