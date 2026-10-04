@@ -54,10 +54,13 @@ mod tests {
         let _guard = TempDirGuard(temp_dir.clone());
 
         let cmd = CheckCommand::new(Some(temp_dir), true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_opinionated(true)
-            .with_skip_audit(true);
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_purist(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false);
 
         let cli = Cli { cmd };
         assert_that!(cli.run(), eq(ExitCode::SUCCESS));

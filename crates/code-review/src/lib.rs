@@ -264,10 +264,13 @@ mod tests {
     #[googletest::test]
     fn run_cli_check_command_returns_success() {
         let cmd = CheckCommand::new(None, true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_opinionated(true)
-            .with_skip_audit(true);
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_purist(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false);
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Check(cmd));
         expect_that!(cli.run(), eq(ExitCode::SUCCESS));
     }
@@ -286,8 +289,11 @@ mod tests {
             "--changed-only",
             "--skip-fmt",
             "--skip-clippy",
-            "--skip-opinionated",
+            "--skip-purist",
             "--skip-audit",
+            "--skip-markdown",
+            "--skip-toml",
+            "--skip-json",
             "--quiet",
         ];
         let cli = Cli::try_parse_from(args)?;
@@ -297,11 +303,30 @@ mod tests {
                 expect_that!(cmd.path(), eq(Some(Path::new("crates/check"))));
                 expect_that!(cmd.fail_on(), eq(code_review_check::FailOn::Errors));
                 expect_that!(cmd.is_changed_only(), is_true());
-                expect_that!(cmd.is_skip_fmt(), is_true());
-                expect_that!(cmd.is_skip_clippy(), is_true());
-                expect_that!(cmd.is_skip_opinionated(), is_true());
-                expect_that!(cmd.is_skip_audit(), is_true());
+                expect_that!(cmd.is_fmt_enabled(), is_false());
+                expect_that!(cmd.is_clippy_enabled(), is_false());
+                expect_that!(cmd.is_purist_enabled(), is_false());
+                expect_that!(cmd.is_opinionated_enabled(), is_false());
+                expect_that!(cmd.is_audit_enabled(), is_false());
+                expect_that!(cmd.is_markdown_enabled(), is_false());
+                expect_that!(cmd.is_toml_enabled(), is_false());
+                expect_that!(cmd.is_json_enabled(), is_false());
                 expect_that!(cmd.is_quiet(), is_true());
+            }
+            _ => return Err("Expected Check subcommand".into()),
+        }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn parse_cli_check_subcommand_supports_skip_opinionated_alias()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let args = ["code-review", "check", "--skip-opinionated"];
+        let cli = Cli::try_parse_from(args)?;
+        match cli.command() {
+            Commands::Check(cmd) => {
+                expect_that!(cmd.is_purist_enabled(), is_false());
+                expect_that!(cmd.is_opinionated_enabled(), is_false());
             }
             _ => return Err("Expected Check subcommand".into()),
         }

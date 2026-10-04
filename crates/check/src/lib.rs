@@ -4,7 +4,8 @@ use clap::Args;
 use code_review_diagnostics::{DiagnosticReport, OutputFormat, render_report};
 use std::path::{Path, PathBuf};
 pub use tools::{
-    AuditRunner, ClippyRunner, FmtRunner, JjError, JjVcs, OpinionatedRunner, aggregate_diagnostics,
+    AuditRunner, ClippyRunner, FmtRunner, JjError, JjVcs, JsonRunner, MarkdownRunner,
+    OpinionatedRunner, PuristRunner, TomlRunner, aggregate_diagnostics,
     filter_diagnostics_by_changed_files,
 };
 
@@ -72,13 +73,25 @@ pub struct CheckCommand {
     #[arg(long)]
     skip_clippy: bool,
 
-    /// Skip running opinionated AST linter
-    #[arg(long)]
-    skip_opinionated: bool,
+    /// Skip running purist AST linter
+    #[arg(long, alias = "skip-opinionated")]
+    skip_purist: bool,
 
     /// Skip running cargo audit
     #[arg(long)]
     skip_audit: bool,
+
+    /// Skip running markdown format/lint checks
+    #[arg(long)]
+    skip_markdown: bool,
+
+    /// Skip running TOML format/lint checks
+    #[arg(long)]
+    skip_toml: bool,
+
+    /// Skip running JSON format/lint checks
+    #[arg(long)]
+    skip_json: bool,
 
     /// Silence non-essential logging output
     #[arg(short, long)]
@@ -95,8 +108,11 @@ impl CheckCommand {
             changed_only: false,
             skip_fmt: false,
             skip_clippy: false,
-            skip_opinionated: false,
+            skip_purist: false,
             skip_audit: false,
+            skip_markdown: false,
+            skip_toml: false,
+            skip_json: false,
             quiet,
         }
     }
@@ -119,27 +135,50 @@ impl CheckCommand {
         self
     }
 
-    /// Sets skip-fmt flag.
-    pub fn with_skip_fmt(mut self, skip: bool) -> Self {
-        self.skip_fmt = skip;
+    /// Enables or disables cargo fmt checks.
+    pub fn with_fmt(mut self, enabled: bool) -> Self {
+        self.skip_fmt = !enabled;
         self
     }
 
-    /// Sets skip-clippy flag.
-    pub fn with_skip_clippy(mut self, skip: bool) -> Self {
-        self.skip_clippy = skip;
+    /// Enables or disables cargo clippy checks.
+    pub fn with_clippy(mut self, enabled: bool) -> Self {
+        self.skip_clippy = !enabled;
         self
     }
 
-    /// Sets skip-opinionated flag.
-    pub fn with_skip_opinionated(mut self, skip: bool) -> Self {
-        self.skip_opinionated = skip;
+    /// Enables or disables purist AST linter checks.
+    pub fn with_purist(mut self, enabled: bool) -> Self {
+        self.skip_purist = !enabled;
         self
     }
 
-    /// Sets skip-audit flag.
-    pub fn with_skip_audit(mut self, skip: bool) -> Self {
-        self.skip_audit = skip;
+    /// Backwards compatibility alias for `with_purist`.
+    pub fn with_opinionated(self, enabled: bool) -> Self {
+        self.with_purist(enabled)
+    }
+
+    /// Enables or disables cargo audit dependency security scan.
+    pub fn with_audit(mut self, enabled: bool) -> Self {
+        self.skip_audit = !enabled;
+        self
+    }
+
+    /// Enables or disables markdown format/lint checks.
+    pub fn with_markdown(mut self, enabled: bool) -> Self {
+        self.skip_markdown = !enabled;
+        self
+    }
+
+    /// Enables or disables TOML format/lint checks.
+    pub fn with_toml(mut self, enabled: bool) -> Self {
+        self.skip_toml = !enabled;
+        self
+    }
+
+    /// Enables or disables JSON format/lint checks.
+    pub fn with_json(mut self, enabled: bool) -> Self {
+        self.skip_json = !enabled;
         self
     }
 
@@ -163,24 +202,44 @@ impl CheckCommand {
         self.changed_only
     }
 
-    /// Returns whether cargo fmt is skipped.
-    pub fn is_skip_fmt(&self) -> bool {
-        self.skip_fmt
+    /// Returns whether cargo fmt is enabled.
+    pub fn is_fmt_enabled(&self) -> bool {
+        !self.skip_fmt
     }
 
-    /// Returns whether cargo clippy is skipped.
-    pub fn is_skip_clippy(&self) -> bool {
-        self.skip_clippy
+    /// Returns whether cargo clippy is enabled.
+    pub fn is_clippy_enabled(&self) -> bool {
+        !self.skip_clippy
     }
 
-    /// Returns whether opinionated linter is skipped.
-    pub fn is_skip_opinionated(&self) -> bool {
-        self.skip_opinionated
+    /// Returns whether purist AST linter is enabled.
+    pub fn is_purist_enabled(&self) -> bool {
+        !self.skip_purist
     }
 
-    /// Returns whether cargo audit is skipped.
-    pub fn is_skip_audit(&self) -> bool {
-        self.skip_audit
+    /// Backwards compatibility alias for `is_purist_enabled`.
+    pub fn is_opinionated_enabled(&self) -> bool {
+        !self.skip_purist
+    }
+
+    /// Returns whether cargo audit is enabled.
+    pub fn is_audit_enabled(&self) -> bool {
+        !self.skip_audit
+    }
+
+    /// Returns whether markdown checks are enabled.
+    pub fn is_markdown_enabled(&self) -> bool {
+        !self.skip_markdown
+    }
+
+    /// Returns whether TOML checks are enabled.
+    pub fn is_toml_enabled(&self) -> bool {
+        !self.skip_toml
+    }
+
+    /// Returns whether JSON checks are enabled.
+    pub fn is_json_enabled(&self) -> bool {
+        !self.skip_json
     }
 
     /// Returns whether logging output is suppressed.
@@ -210,10 +269,10 @@ impl CheckCommand {
             runner.run()?
         };
 
-        let op_report = if self.skip_opinionated {
+        let purist_report = if self.skip_purist {
             DiagnosticReport::default()
         } else {
-            let runner = OpinionatedRunner::new(target_dir);
+            let runner = PuristRunner::new(target_dir);
             runner.run()?
         };
 
@@ -224,7 +283,36 @@ impl CheckCommand {
             runner.run()?
         };
 
-        let aggregated = aggregate_diagnostics(fmt_diags, clippy_diags, op_report, audit_diags);
+        let markdown_diags = if self.skip_markdown {
+            Vec::new()
+        } else {
+            let runner = MarkdownRunner::new(target_dir);
+            runner.run()?
+        };
+
+        let toml_diags = if self.skip_toml {
+            Vec::new()
+        } else {
+            let runner = TomlRunner::new(target_dir);
+            runner.run()?
+        };
+
+        let json_diags = if self.skip_json {
+            Vec::new()
+        } else {
+            let runner = JsonRunner::new(target_dir);
+            runner.run()?
+        };
+
+        let aggregated = aggregate_diagnostics(
+            fmt_diags,
+            clippy_diags,
+            purist_report,
+            audit_diags,
+            markdown_diags,
+            toml_diags,
+            json_diags,
+        );
 
         if self.changed_only {
             let vcs = JjVcs::new(target_dir);
@@ -276,19 +364,26 @@ mod tests {
             .with_format(OutputFormat::Json)
             .with_fail_on(FailOn::Errors)
             .with_changed_only(true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_opinionated(true)
-            .with_skip_audit(true);
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_purist(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false);
 
         assert_that!(cmd.path(), eq(Some(Path::new("crates/check"))));
         assert_that!(cmd.format(), eq(Some(OutputFormat::Json)));
         assert_that!(cmd.fail_on(), eq(FailOn::Errors));
         assert_that!(cmd.is_changed_only(), is_true());
-        assert_that!(cmd.is_skip_fmt(), is_true());
-        assert_that!(cmd.is_skip_clippy(), is_true());
-        assert_that!(cmd.is_skip_opinionated(), is_true());
-        assert_that!(cmd.is_skip_audit(), is_true());
+        assert_that!(cmd.is_fmt_enabled(), is_false());
+        assert_that!(cmd.is_clippy_enabled(), is_false());
+        assert_that!(cmd.is_purist_enabled(), is_false());
+        assert_that!(cmd.is_opinionated_enabled(), is_false());
+        assert_that!(cmd.is_audit_enabled(), is_false());
+        assert_that!(cmd.is_markdown_enabled(), is_false());
+        assert_that!(cmd.is_toml_enabled(), is_false());
+        assert_that!(cmd.is_json_enabled(), is_false());
         assert_that!(cmd.is_quiet(), is_false());
         Ok(())
     }
@@ -324,10 +419,13 @@ mod tests {
         let _guard = TempDirGuard(temp_dir.clone());
 
         let cmd = CheckCommand::new(Some(temp_dir), true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_opinionated(true)
-            .with_skip_audit(true);
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_purist(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false);
 
         let report = cmd.execute()?;
         assert_that!(report.is_empty(), is_true());
@@ -342,10 +440,13 @@ mod tests {
         let _guard = TempDirGuard(temp_dir.clone());
 
         let cmd = CheckCommand::new(Some(temp_dir), true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_opinionated(true)
-            .with_skip_audit(true);
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_purist(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false);
 
         assert_that!(cmd.run(), ok(anything()));
         Ok(())
@@ -364,9 +465,12 @@ mod tests {
         )?;
 
         let cmd = CheckCommand::new(Some(temp_dir), true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_audit(true)
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false)
             .with_fail_on(FailOn::Warnings);
 
         match cmd.run() {
@@ -391,9 +495,12 @@ mod tests {
         )?;
 
         let cmd = CheckCommand::new(Some(temp_dir), true)
-            .with_skip_fmt(true)
-            .with_skip_clippy(true)
-            .with_skip_audit(true)
+            .with_fmt(false)
+            .with_clippy(false)
+            .with_audit(false)
+            .with_markdown(false)
+            .with_toml(false)
+            .with_json(false)
             .with_fail_on(FailOn::Errors);
 
         assert_that!(cmd.run(), ok(anything()));

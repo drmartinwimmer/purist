@@ -36,8 +36,8 @@ impl AuditRunner {
             )]);
         }
 
-        // Try standard invocation first
-        let output = match self.invoke_audit(false) {
+        // Try standard invocation first (with fetching enabled)
+        let output = match self.invoke_audit(true) {
             Ok(out) => out,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(vec![Diagnostic::new(
@@ -52,9 +52,9 @@ impl AuditRunner {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
 
-        // If fetch/lock failed, retry with --no-fetch
+        // If fetch/lock failed, retry offline without fetching (--no-fetch)
         if !output.status.success() && stdout.trim().is_empty() {
-            if let Ok(retry_output) = self.invoke_audit(true) {
+            if let Ok(retry_output) = self.invoke_audit(false) {
                 let retry_stdout = String::from_utf8_lossy(&retry_output.stdout);
                 if !retry_stdout.trim().is_empty() {
                     return Ok(parse_audit_json(&retry_stdout, &lock_file));
@@ -76,11 +76,11 @@ impl AuditRunner {
         Ok(parse_audit_json(&stdout, &lock_file))
     }
 
-    fn invoke_audit(&self, no_fetch: bool) -> Result<std::process::Output, std::io::Error> {
+    fn invoke_audit(&self, fetch: bool) -> Result<std::process::Output, std::io::Error> {
         let mut cmd = Command::new("cargo");
         cmd.arg("audit").arg("--json");
 
-        if no_fetch {
+        if !fetch {
             cmd.arg("--no-fetch");
         }
 

@@ -5,6 +5,7 @@
 **Goal:** Establish an end-to-end code review ecosystem consisting of modular agent skills, high-performance Rust-based CLI tools, an automated release and SemVer verification pipeline, and an automated evaluation suite powered by Inspect AI and the `fence` sandbox to systematically detect, flag, and prevent code quality, security, and API issues in agent-generated code.
 
 **Architecture:**
+
 1. **Rust CLI Toolkit (`code-review` crate):** A modular binary offering:
    - `code-review check`: Aggregates and runs `cargo fmt`, `cargo clippy`, custom linters, `cargo audit`, and API drift/coverage gates, reporting normalized diagnostics.
    - `code-review configure-lints`: Modifies `Cargo.toml` using `toml_edit` to configure strict clippy lints while preserving formatting and comments.
@@ -33,21 +34,24 @@
 In modern software development and especially in the Rust ecosystem, several established practices govern public API surfaces, automated releases, and supply chain security:
 
 ### 1. Library Public APIs & Breaking Change Detection
+
 - **Golden File Pattern (`public-api.txt` / `API.md`):** Tools like [`cargo-public-api`](https://github.com/cargo-public-api/cargo-public-api) leverage `rustdoc-json` to emit a normalized, sorted textual listing of all public items (types, traits, functions, methods, re-exports). Checking this file into version control ensures every PR changing the public API surface produces an explicit diff.
 - **Breaking Change Detection (`cargo-semver-checks`):** [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) inspects the rustdoc JSON output across releases or git revisions to mechanically enforce Semantic Versioning rules, flagging accidental breaking changes (e.g. adding a non-default method to a trait, altering type signatures, or removing public items).
 
 ### 2. Automated SemVer Governance: Release Please + `cargo-semver-checks`
+
 - **Intent vs. Reality Verification Loop:**
   - **Release Please** operates on **Developer Intent**: it parses commit messages written according to Conventional Commits (`feat:`, `fix:`, `feat!:`, `BREAKING CHANGE:`) and calculates version bumps in `Cargo.toml`.
   - **`cargo-semver-checks`** operates on **Code Reality**: it analyzes the compiled public API via `rustdoc` JSON to determine what level of SemVer bump the actual code changes legally require.
 - **Workflow Synergy:**
-  1. *Feature PRs:* `cargo-semver-checks check-release --baseline-rev origin/main` runs in CI. If a PR contains an unannotated breaking change (e.g. labeled `feat:` instead of `feat!:`), CI blocks the PR.
-  2. *Release Candidate PRs:* When Release Please opens an automated release PR bumping `Cargo.toml`, `cargo-semver-checks check-release` verifies that the bumped version matches the actual API difference against the last crates.io release or git tag before merging and publishing.
+  1. _Feature PRs:_ `cargo-semver-checks check-release --baseline-rev origin/main` runs in CI. If a PR contains an unannotated breaking change (e.g. labeled `feat:` instead of `feat!:`), CI blocks the PR.
+  2. _Release Candidate PRs:_ When Release Please opens an automated release PR bumping `Cargo.toml`, `cargo-semver-checks check-release` verifies that the bumped version matches the actual API difference against the last crates.io release or git tag before merging and publishing.
 - **Tooling Options:**
   - The official GitHub Action [`obi1kenobi/cargo-semver-checks-action@v2`](https://github.com/obi1kenobi/cargo-semver-checks-action) is maintained by the author of `cargo-semver-checks`, provides automatic toolchain resolution, and caches the crates.io index and rustdoc JSON artifacts.
   - Alternatively, [`taiki-e/install-action@v2`](https://github.com/taiki-e/install-action) with `tool: cargo-semver-checks` installs pre-built binaries instantly, allowing direct execution in workflow steps (consistent with `aiw`'s toolchain setup).
 
 ### 3. Dependency Hygiene & Supply Chain Security
+
 - **Security Vulnerability Audits (`cargo-audit`):** Checks `Cargo.lock` against the RustSec Advisory Database for known CVEs, unmaintained crate alerts, and yanked releases.
 - **Dependency Minimization (YAGNI):** Agents frequently add heavy third-party crates for trivial tasks (e.g. pulling in an entire async runtime, regex engine, or base64 crate when a 10-line helper or standard library suffices). A dedicated dependency review gate prevents code bloat.
 - **Transitive Tree Budgeting (`cargo tree`):** Reviewing the depth and breadth of transitive dependencies to prevent supply chain explosion.
@@ -55,18 +59,22 @@ In modern software development and especially in the Rust ecosystem, several est
 - **License Compliance (`cargo-deny`):** Enforcing allowed license expressions (e.g. MIT, Apache-2.0) and blocking copyleft contamination (GPL/AGPL) in commercial or permissive libraries.
 
 ### 4. Binary & CLI Surfaces
+
 - **CLI Schema / Manpage Snapshots:** In tools built with `clap`, common practice involves using `clap::Command` reflection or `clap_mangen` to generate structured JSON manifests (`cli.json`) or markdown documentation (`docs/cli.md`).
 - **Snapshot Testing (`trycmd` / `insta`):** CLI suites snapshot help output, command trees, argument parsers, and error messages to ensure flags or subcommands aren't added, renamed, or dropped unintentionally.
 
 ### 5. HTTP Server Endpoints
+
 - **OpenAPI / Route Manifests:** Frameworks like Axum or Actix leverage crates like `utoipa` or `aide` to generate `openapi.json` at test or build time. Checking this specification into version control ensures that endpoint modifications (URL paths, HTTP methods, headers, request bodies, response status codes) are reviewed explicitly.
 
 ### 6. Deprecation Lifecycle & Minimalism
+
 - **Least-Privilege Visibility:** A core principle in library design is keeping visibility internal (`pub(crate)`) unless external consumers strictly require access.
 - **Deprecation Attributes:** When an API is superseded, the idiomatic pattern in Rust is decorating it with `#[deprecated(since = "x.y.z", note = "use `new_api` instead")]`.
 - **Planned Sunset:** Established APIs maintain backwards compatibility for at least one minor release cycle (or major release cycle if breaking), pairing deprecation warnings with a documented migration guide before final removal.
 
 ### 7. Source-Based Code Coverage
+
 - **`cargo-llvm-cov`:** The established standard for Rust code coverage, utilizing LLVM source-based code coverage instrumentation (`-C instrument-coverage`). It produces accurate line, branch, and region metrics without requiring debug-unfriendly ptrace wrappers, seamlessly outputting LCOV, JSON, and summary tables.
 
 ---
@@ -183,6 +191,7 @@ In modern software development and especially in the Rust ecosystem, several est
 ## Detailed Component Specifications
 
 ### 1. Tool 1: Linter & Formatter Runner Aggregator (`code-review check`)
+
 - **Purpose:** Automatically detect project structure (standalone crate or multi-crate Cargo workspace), execute all relevant linters and formatters, and present an aggregated, unified diagnostic report.
 - **Checks Executed:**
   - `cargo fmt --check`: Formatting compliance.
@@ -197,6 +206,7 @@ In modern software development and especially in the Rust ecosystem, several est
   - Filtering: `--fail-on [warnings|errors]`, `--path <dir>`, `--changed-only` (inspecting Jujutsu modified files via `jj diff --summary`).
 
 ### 2. Tool 2: Cargo.toml Linter Configurator (`code-review configure-lints`)
+
 - **Purpose:** Programmatically update `Cargo.toml` to inject or update strict, production-grade linter configurations without breaking comments, existing table formatting, or custom configurations.
 - **Implementation:** Built using `toml_edit` to ensure precise preservation of formatting, whitespace, and inline comments.
 - **Configured Lint Categories:**
@@ -209,6 +219,7 @@ In modern software development and especially in the Rust ecosystem, several est
 - **Target Placement:** Automatically detects workspace root vs single crate and updates `[workspace.lints.clippy]` or `[lints.clippy]`. Supports preset profiles (`--profile strict`, `--profile standard`).
 
 ### 3. Tool 3: Opinionated Static Analysis Linter (`code-review opinionated`)
+
 - **Purpose:** Check for stylistic, architectural, and behavioral anti-patterns that standard Clippy intentionally avoids checking or cannot inspect at the AST level.
 - **AST Parsing Engine:** Implemented with `syn` and `quote` to inspect the syntax tree of Rust source files.
 - **Opinionated Rules:**
@@ -224,6 +235,7 @@ In modern software development and especially in the Rust ecosystem, several est
   7. `no_redundant_conversions`: Flags redundant double-serialization patterns (e.g. `serde_json::to_string` followed immediately by `serde_json::from_str` within the same scope).
 
 ### 4. Tool 4: API Manifest Generator & Auditor (`code-review api`)
+
 - **Purpose:** Provide a unified mechanism to generate and verify a checked-in API surface manifest (`API.md` or `.api/api-manifest.json`), ensuring all API changes are intentional, reviewed, and properly versioned.
 - **Subcommands:**
   - `code-review api dump` (or `generate`): Auto-detects the project targets, extracts the public API surface, and generates or updates `API.md`.
@@ -246,6 +258,7 @@ In modern software development and especially in the Rust ecosystem, several est
   - Generates clear, human-readable markdown diffs suitable for PR reviews.
 
 ### 5. Tool 5: LLVM Source-Based Coverage Engine (`code-review coverage`)
+
 - **Purpose:** Automate source-based code coverage collection, reporting, and threshold enforcement using `cargo-llvm-cov`.
 - **Features:**
   - Non-interactive execution of `cargo llvm-cov` across `--all-targets` and `--all-features`.
@@ -255,6 +268,7 @@ In modern software development and especially in the Rust ecosystem, several est
   - Outputs formats: Console summary table, LCOV (`--lcov`), and structured JSON (`--json`).
 
 ### 6. Automated SemVer & Release Pipeline: Release Please + `cargo-semver-checks`
+
 - **Purpose:** Seamless, tamper-proof versioning and publishing on GitHub and Crates.io.
 - **Components:**
   1. **`release-please-config.json` & `.release-please-manifest.json`:**
@@ -273,6 +287,7 @@ In modern software development and especially in the Rust ecosystem, several est
 ### 7. Skill Suite: Thematic Subagent Review Skills
 
 #### Skill 1: Feedback Reflection & Guideline Distillation (`skills/distilling-feedback`)
+
 - **Purpose:** Provide agents with a repeatable methodology to analyze past agent session transcripts, identify user corrections and recurring failure patterns, and distill them into actionable review rules.
 - **Workflow:**
   1. **Scan Transcripts:** Parse `transcript.jsonl` files for user intervention events, course corrections ("stop", "don't do that", "revert"), tool command exit errors, and manual user commits.
@@ -282,6 +297,7 @@ In modern software development and especially in the Rust ecosystem, several est
   5. **Generate Eval Cases:** Abstract the incident into a minimal, reproducible test case for the Inspect AI eval suite.
 
 #### Skill 2: API Surface & Deprecation Review (`skills/reviewing-api-surface`)
+
 - **Purpose:** Explicitly focuses on reviewing public API changes in `API.md` (and underlying code), enforcing minimalism, and managing the deprecation lifecycle of superseded APIs.
 - **Review Checklist:**
   1. **API Minimalism (Least Privilege):** Are any internal helpers accidentally exposed as `pub` instead of `pub(crate)`? Are new CLI options strictly required?
@@ -290,6 +306,7 @@ In modern software development and especially in the Rust ecosystem, several est
   4. **Ergonomics & Naming:** Are names idiomatic and consistent with RFC 430?
 
 #### Skill 3: Dependency Hygiene & Security Review (`skills/reviewing-dependencies`)
+
 - **Purpose:** Review any proposed changes to dependencies in `Cargo.toml`, ensuring the codebase stays lightweight, YAGNI-compliant, and secure from supply chain vulnerabilities.
 - **Review Checklist:**
   1. **Necessity & YAGNI:**
@@ -312,6 +329,7 @@ In modern software development and especially in the Rust ecosystem, several est
      - Is the crate licensed under an MIT/Apache-2.0 compatible permissive license? Strictly flag copyleft (GPL/AGPL) licenses that would contaminate the project.
 
 #### Remaining Thematic Review Skills:
+
 - **`reviewing-spec-compliance`**: Verifies that implementation strictly satisfies requirements and invariants in `SPEC.md` and module specs without out-of-scope feature creep.
 - **`reviewing-rust-modularity`**: Verifies single responsibility, separate submodule files, free functions over dummy structs, and lightweight dependencies.
 - **`reviewing-rust-robustness`**: Enforces strict error handling, absence of unwraps/panics in production code, proper error enums, and no ignored results.
@@ -323,6 +341,7 @@ In modern software development and especially in the Rust ecosystem, several est
 When an agent reviews code, it dispatches specialized review subagents in parallel with dedicated review prompts, then aggregates their structured feedback into a consolidated report.
 
 ### 8. Evaluation Suite: Inspect AI + Fence Sandbox (`evals/`)
+
 - **Environment:** Isolated Python virtual environment managed via `uv` (`uv run inspect eval ...`).
 - **Sandbox Architecture (`fence`):**
   - Uses the `fence` CLI sandbox (`fence -t code -- ...`) to contain the agent under test.
@@ -346,6 +365,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 ## Implementation Milestones & Roadmap
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
+
 - **Description:** Initialize the Rust CLI crate structure with `clap`, create unified diagnostic data structures, and implement `code-review configure-lints` using `toml_edit` to inject and update strict Clippy lint configurations in `Cargo.toml`.
 - **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-05
@@ -355,6 +375,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M1.md`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
+
 - **Description:** Implement the `code-review opinionated` tool with `syn` AST traversal, implementing rules for inline modules, dummy unit structs, VCS path resolution, raw string errors, and clippy suppression hygiene.
 - **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-09
@@ -364,6 +385,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M2.md`
 
 ### Milestone 3: Linter & Formatter Runner Aggregator (`code-review check`)
+
 - **Description:** Implement `code-review check` to run `cargo fmt --check`, `cargo clippy`, `code-review opinionated`, and `cargo audit`, aggregating diagnostic outputs into console, JSON, and Markdown formats. Add Jujutsu changed-file filtering (`--changed-only`).
 - **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-12
@@ -373,6 +395,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M3.md`
 
 ### Milestone 4: API Manifest Engine & Auditor (`code-review api`)
+
 - **Description:** Implement `code-review api dump` and `code-review api check` to inspect and dump public API surfaces for libraries (public items), binary CLIs (subcommands/flags), and HTTP services (endpoints). Integrate manifest drift checks into `code-review check`.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-15
@@ -382,6 +405,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M4.md`
 
 ### Milestone 5: Code Coverage Engine (`code-review coverage`) & CI Integration
+
 - **Description:** Implement `code-review coverage` wrapping `cargo-llvm-cov` to measure source-based coverage, enforce thresholds, report uncovered error paths, and add a dedicated coverage check to the CI workflow.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-18
@@ -391,6 +415,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M5.md`
 
 ### Milestone 6: Release Pipeline & Automated SemVer Verification
+
 - **Description:** Configure Release Please (`release-please-config.json`, `.release-please-manifest.json`, `.github/workflows/release.yml`) and integrate `cargo-semver-checks` into the CI pipeline (evaluating feature PRs against `origin/main` and release candidate PRs against crates.io).
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-21
@@ -400,6 +425,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M6.md`
 
 ### Milestone 7: Feedback Distillation & Reflection Skill
+
 - **Description:** Create `skills/distilling-feedback/SKILL.md` and `SPEC.md` defining the workflow for analyzing past session transcripts (`transcript.jsonl`), categorizing failures, and distilling new review guidelines and test cases.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-24
@@ -409,6 +435,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M7.md`
 
 ### Milestone 8: Thematic Subagent Review Skills Suite (including API & Dependencies)
+
 - **Description:** Create thematic review skills under `skills/` (`reviewing-spec-compliance`, `reviewing-rust-modularity`, `reviewing-rust-robustness`, `reviewing-rust-testing`, `reviewing-rust-lint-hygiene`, `reviewing-containment-safety`, `reviewing-api-surface`, and `reviewing-dependencies`) with frontmatter, checklists, rationalization tables, and subagent prompts.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-27
@@ -418,6 +445,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M8.md`
 
 ### Milestone 9: Inspect AI Eval Harness with Fence Sandbox
+
 - **Description:** Initialize Python environment via `uv`, configure `pyproject.toml` with `inspect-ai`, build the `fence` sandbox runner, and create Inspect AI tasks, solvers, and scorers to evaluate agents reviewing code examples.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-10-30
@@ -427,6 +455,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - **Feedback File:** `plan/FEEDBACK_M9.md`
 
 ### Milestone 10: Curated Datasets (API Drift, Dependency Bloat) & Verification
+
 - **Description:** Extract real historical feedback examples into `evals/datasets/` (including API leaks, superseded APIs without deprecation, unneeded dependencies, and coverage gaps), run baseline Inspect AI benchmarks on configured agents (e.g., `agy`), verify detection accuracy and tool integration, and finalize documentation.
 - **Status:** `[ ] Pending`
 - **Target Completion Date:** 2026-11-02
@@ -440,6 +469,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 ## Detailed Task Breakdown
 
 ### Milestone 1: Core CLI Architecture & Cargo.toml Lint Configurator Tool
+
 - [x] **M1-T0: Update Specifications (`SPEC.md`, `src/tools/cargo_toml.spec.md`)**
   - Define invariants for `code-review` CLI subcommands and `Cargo.toml` modification safety (no comment stripping, preserving existing tables, idempotency).
   - Describe Jujutsu change: `jj describe -m "plan-M1-T0: docs: add specs for core CLI and cargo-toml configurator"`
@@ -463,6 +493,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M1-T3: docs: add cli and common specs, tighten visibility, and complete milestone 1"`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
+
 - [x] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`)**
   - Document the contract, AST patterns, and false-positive criteria for each custom lint rule.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T0: docs: add spec for opinionated linter rules"`
@@ -487,13 +518,14 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M2-T3: feat: connect opinionated linter to code-review CLI"`
 
 ### Milestone 3: Linter & Formatter Runner Aggregator (`code-review check`)
+
 - [x] **M3-T0: Update Specifications (`crates/check/SPEC.md`, `plan/M3.md`, `plan/FEEDBACK_M3.md`)**
   - Document runner behavior, exit code aggregation, and multi-format reporting.
   - Describe Jujutsu change: `jj describe -m "plan-M3-T0: docs: add spec for check aggregator and initialize milestone 3"`
 - [x] **M3-T1: Subprocess Runners & Diagnostic Parsers (`crates/check/src/tools/`)**
   - Implement runners for `cargo fmt --all --check` and `cargo clippy --message-format=json`.
   - Implement JSON output parser converting rustc/clippy JSON compiler messages into `Diagnostic`.
-  - Implement runner for `code-review opinionated`.
+  - Implement runner for `code-review purist`.
   - Implement runner for `cargo audit --json`.
   - Aggregate all diagnostics into `DiagnosticReport`.
   - Describe Jujutsu change: `jj describe -m "plan-M3-T1: feat: implement subprocess runners and compiler json parser"`
@@ -504,11 +536,12 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 - [x] **M3-T3: CLI Integration, Multi-Format Reporting & Failure Thresholds**
   - Connect all runners into `CheckCommand` and top-level `code-review` CLI with multi-format and exit code support.
   - Describe Jujutsu change: `jj describe -m "plan-M3-T3: feat: connect check aggregator to CLI and support multi-format reporting"`
-- [x] **M3-T4: Milestone Completion & Feedback Template**
-  - Complete milestone 3, verify all quality gates, and update feedback template.
+- [x] **M3-T4: Milestone Completion, Purist Rename & Markdown/TOML/JSON Checkers**
+  - Complete milestone 3, reflect `purist` rename, add markdown/toml/json formatters/checks, verify all quality gates, and update feedback template.
   - Describe Jujutsu change: `jj describe -m "plan-M3-T4: docs: complete milestone 3 and update plan"`
 
 ### Milestone 4: API Manifest Engine & Auditor (`code-review api`)
+
 - [ ] **M4-T0: Update Specifications (`src/tools/api/SPEC.md`)**
   - Define invariants for API surface extraction, manifest formatting in `API.md`, drift comparison rules, and breaking change classification.
   - Describe Jujutsu change: `jj describe -m "plan-M4-T0: docs: add spec for API manifest engine"`
@@ -526,6 +559,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M4-T2: feat: implement API.md manifest formatting, drift differ, and CLI commands"`
 
 ### Milestone 5: Code Coverage Engine (`code-review coverage`) & CI Integration
+
 - [ ] **M5-T0: Update Specifications (`src/tools/coverage.spec.md`)**
   - Define coverage metrics, reporting formats, and threshold enforcement rules.
   - Describe Jujutsu change: `jj describe -m "plan-M5-T0: docs: add spec for code coverage tool"`
@@ -540,6 +574,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M5-T2: ci: add cargo-llvm-cov coverage job to CI workflow"`
 
 ### Milestone 6: Release Pipeline & Automated SemVer Verification
+
 - [ ] **M6-T0: Release Pipeline Specification (`docs/release_pipeline.spec.md`)**
   - Document Release Please configuration, conventional commit contracts, and `cargo-semver-checks` gating invariants.
   - Describe Jujutsu change: `jj describe -m "plan-M6-T0: docs: add spec for release pipeline and semver verification"`
@@ -555,6 +590,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M6-T2: ci: add cargo-semver-checks verification steps to CI workflow"`
 
 ### Milestone 7: Feedback Distillation & Reflection Skill
+
 - [ ] **M7-T0: Skill Specification (`skills/distilling-feedback/SPEC.md`)**
   - Specify the distillation process contracts, transcript parsing schemas, and output artifact requirements.
   - Describe Jujutsu change: `jj describe -m "plan-M7-T0: docs: add spec for distilling-feedback skill"`
@@ -564,6 +600,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M7-T1: feat: create distilling-feedback skill playbook"`
 
 ### Milestone 8: Thematic Subagent Review Skills Suite
+
 - [ ] **M8-T0: Skills Specifications (`skills/reviewing-*/SPEC.md`)**
   - Write module specs for each of the 8 thematic review skills (including `reviewing-api-surface`, `reviewing-dependencies`, and `reviewing-rust-testing`).
   - Describe Jujutsu change: `jj describe -m "plan-M8-T0: docs: add specs for thematic review skills"`
@@ -586,6 +623,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M8-T3: feat: author remaining thematic review skill playbooks"`
 
 ### Milestone 9: Inspect AI Eval Harness with Fence Sandbox
+
 - [ ] **M9-T0: Eval Suite Specification (`evals/SPEC.md`)**
   - Document eval contracts, fence isolation guarantees, sample schema, and scoring formulas.
   - Describe Jujutsu change: `jj describe -m "plan-M9-T0: docs: add spec for Inspect AI eval suite"`
@@ -601,6 +639,7 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M9-T2: feat: implement Inspect AI tasks, solvers, and scorers"`
 
 ### Milestone 10: Curated Datasets (API Drift, Dependency Bloat) & Baseline Benchmarks
+
 - [ ] **M10-T0: Curate Abstracted Examples from Past Feedback (`evals/datasets/`)**
   - Build minimal codebases representing:
     - Inline modules (`inline_mods/`).
@@ -629,5 +668,6 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 Plan complete and saved to `PLAN.md`.
 
 Two execution options:
+
 1. **Subagent-Driven (Recommended):** Dispatch a fresh subagent for each bite-sized task in the milestones, reviewing diffs between tasks.
 2. **Inline Execution:** Execute tasks step-by-step in the current session.

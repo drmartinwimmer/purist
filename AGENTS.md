@@ -17,11 +17,13 @@ The user uses **Jujutsu (`jj`)** for version control.
 ## 2. Purist AST Linter
 
 Review agents must always run the Purist AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
+
 ```bash
 cargo run -p code-review -- purist --path .
 # or directly:
 cargo run -p purist -- --path .
 ```
+
 Ensure zero violations (errors or warnings) are reported before submitting changes.
 
 ## 3. Testing & Formatting
