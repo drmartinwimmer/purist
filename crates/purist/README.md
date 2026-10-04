@@ -1,6 +1,13 @@
 # Purist
 
-A fast, purist AST-based static analysis tool and linter for enforcing strict Rust code hygiene, idiomatic patterns, and clean architecture.
+> **A fast, purist AST-based static analysis tool and linter for enforcing strict Rust code hygiene, idiomatic patterns, and clean architecture.**
+
+[![CI](https://github.com/drmartinwimmer/review/actions/workflows/ci.yml/badge.svg)](https://github.com/drmartinwimmer/review/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/purist.svg)](https://crates.io/crates/purist)
+[![Docs.rs](https://docs.rs/purist/badge.svg)](https://docs.rs/purist)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/drmartinwimmer/review/blob/main/LICENSE)
+[![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
+[![MSRV: 1.85+](https://img.shields.io/badge/MSRV-1.85%2B-blue.svg?logo=rust)](https://www.rust-lang.org/)
 
 ## Installation
 
