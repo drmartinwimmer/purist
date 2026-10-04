@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Diagnostic representation and multi-format reporting engine for code-review"
+publish = false
 
 [dependencies]
 annotate-snippets = { workspace = true }

@@ -3,8 +3,7 @@ use code_review_api::{ApiCommand, ApiError};
 use code_review_check::{CheckCommand, CheckError};
 use code_review_configure_lints::{CargoTomlError, ConfigureLintsCommand};
 use code_review_coverage::{CoverageCommand, CoverageError};
-use code_review_diagnostics::OutputFormat;
-use code_review_opinionated::{OpinionatedCommand, OpinionatedError};
+use purist::{OpinionatedCommand, OpinionatedError, OutputFormat};
 use std::process::ExitCode;
 use thiserror::Error;
 
