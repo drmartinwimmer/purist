@@ -14,6 +14,7 @@ anstyle-query = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+purist = { workspace = true }
 
 [dev-dependencies]
 googletest = { workspace = true }
