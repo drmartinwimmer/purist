@@ -62,7 +62,12 @@ impl Commands {
     pub fn run_with_format(self, format: OutputFormat) -> Result<(), CodeReviewError> {
         match self {
             Self::ConfigureLints(cmd) => Ok(cmd.run()?),
-            Self::Check(cmd) => Ok(cmd.run()?),
+            Self::Check(mut cmd) => {
+                if cmd.format().is_none() {
+                    cmd = cmd.with_format(format);
+                }
+                Ok(cmd.run()?)
+            }
             Self::Purist(mut cmd) => {
                 if cmd.format().is_none() {
                     cmd = cmd.with_format(format);
@@ -134,7 +139,8 @@ impl Cli {
     pub fn run(self) -> ExitCode {
         match self.command.run_with_format(self.format) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(CodeReviewError::Purist(PuristError::LintViolationsFound { .. })) => {
+            Err(CodeReviewError::Check(CheckError::ViolationsFound { .. }))
+            | Err(CodeReviewError::Purist(PuristError::LintViolationsFound { .. })) => {
                 ExitCode::from(1)
             }
             Err(err) => {
@@ -150,7 +156,7 @@ mod tests {
     use super::*;
     use code_review_configure_lints::LintProfile;
     use googletest::prelude::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[googletest::test]
     fn parse_cli_default_global_flags_sets_console_format_and_zero_verbosity()
@@ -160,7 +166,12 @@ mod tests {
         expect_that!(cli.format(), eq(OutputFormat::Console));
         expect_that!(cli.verbose(), eq(0));
         expect_that!(cli.is_quiet(), is_false());
-        expect_that!(cli.command(), eq(&Commands::Check(CheckCommand::default())));
+        expect_that!(
+            cli.command(),
+            eq(&Commands::Check(
+                CheckCommand::default().with_format(OutputFormat::Console)
+            ))
+        );
         Ok(())
     }
 
@@ -252,9 +263,49 @@ mod tests {
 
     #[googletest::test]
     fn run_cli_check_command_returns_success() {
-        let cmd = CheckCommand::new(None, true);
+        let cmd = CheckCommand::new(None, true)
+            .with_skip_fmt(true)
+            .with_skip_clippy(true)
+            .with_skip_opinionated(true)
+            .with_skip_audit(true);
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Check(cmd));
         expect_that!(cli.run(), eq(ExitCode::SUCCESS));
+    }
+
+    #[googletest::test]
+    fn parse_cli_check_subcommand_parses_all_flags() -> Result<(), Box<dyn std::error::Error>> {
+        let args = [
+            "code-review",
+            "--format",
+            "json",
+            "check",
+            "--path",
+            "crates/check",
+            "--fail-on",
+            "errors",
+            "--changed-only",
+            "--skip-fmt",
+            "--skip-clippy",
+            "--skip-opinionated",
+            "--skip-audit",
+            "--quiet",
+        ];
+        let cli = Cli::try_parse_from(args)?;
+        expect_that!(cli.format(), eq(OutputFormat::Json));
+        match cli.command() {
+            Commands::Check(cmd) => {
+                expect_that!(cmd.path(), eq(Some(Path::new("crates/check"))));
+                expect_that!(cmd.fail_on(), eq(code_review_check::FailOn::Errors));
+                expect_that!(cmd.is_changed_only(), is_true());
+                expect_that!(cmd.is_skip_fmt(), is_true());
+                expect_that!(cmd.is_skip_clippy(), is_true());
+                expect_that!(cmd.is_skip_opinionated(), is_true());
+                expect_that!(cmd.is_skip_audit(), is_true());
+                expect_that!(cmd.is_quiet(), is_true());
+            }
+            _ => return Err("Expected Check subcommand".into()),
+        }
+        Ok(())
     }
 
     #[googletest::test]

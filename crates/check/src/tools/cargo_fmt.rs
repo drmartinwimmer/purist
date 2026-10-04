@@ -24,7 +24,7 @@ impl FmtRunner {
         };
 
         let mut cmd = Command::new("cargo");
-        cmd.arg("fmt").arg("--check");
+        cmd.arg("fmt").arg("--all").arg("--check");
 
         if manifest_path.exists() {
             cmd.arg("--manifest-path").arg(&manifest_path);
