@@ -62,6 +62,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::no_unsafe_in_tests`: Forbids raw `unsafe` blocks and functions in test suites without explicit suppression.
   - `purist::raii_temp_directories`: Requires RAII temporary directory guards over manual `fs::remove_dir_all`.
   - `purist::test_matcher_borrow_simplification`: Disallows redundant `.as_str()` / `.as_slice()` in GoogleTest assertions.
+  - `purist::googletest_conventions`: Enforces idiomatic GoogleTest conventions (`#[googletest::test]`, `assert_that!`, `?` over `.expect()`, and direct expressive matchers).
 
 ## License
 

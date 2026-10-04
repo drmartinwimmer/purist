@@ -51,6 +51,7 @@ pub struct PuristLintsConfig {
     pub no_println_in_libraries: RuleLevel,
     pub cli_run_consumes_self: RuleLevel,
     pub no_double_negation: RuleLevel,
+    pub googletest_conventions: RuleLevel,
 }
 
 /// Backwards compatibility alias for `PuristLintsConfig`.
@@ -89,6 +90,7 @@ impl PuristLintsConfig {
             "no_println_in_libraries" => Some(self.no_println_in_libraries),
             "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
             "no_double_negation" | "no_negative_boolean_names" => Some(self.no_double_negation),
+            "googletest_conventions" => Some(self.googletest_conventions),
             _ => None,
         }
     }
@@ -125,6 +127,7 @@ impl PuristLintsConfig {
             "no_println_in_libraries" => self.no_println_in_libraries = level,
             "cli_run_consumes_self" => self.cli_run_consumes_self = level,
             "no_double_negation" | "no_negative_boolean_names" => self.no_double_negation = level,
+            "googletest_conventions" => self.googletest_conventions = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -448,7 +451,7 @@ mod tests {
     use googletest::prelude::*;
 
     #[googletest::test]
-    fn parse_lint_config_from_manifest() {
+    fn parse_lint_config_from_manifest() -> Result<(), Box<dyn std::error::Error>> {
         let manifest = r#"
 [package]
 name = "my-crate"
@@ -459,7 +462,7 @@ no_wildcard_imports = "allow"
 no_boxed_dyn_error = "deny"
 exit_code_hygiene = { level = "warn" }
 "#;
-        let config = LintConfig::from_manifest_content(manifest).expect("valid manifest");
+        let config = LintConfig::from_manifest_content(manifest).ok_or("valid manifest")?;
         assert_that!(
             config.level_for("no_wildcard_imports"),
             eq(Some(RuleLevel::Allow))
@@ -481,10 +484,11 @@ exit_code_hygiene = { level = "warn" }
             eq(Some(RuleLevel::Warn))
         );
         assert_that!(config.level_for("unknown_rule"), eq(None));
+        Ok(())
     }
 
     #[googletest::test]
-    fn parse_workspace_metadata_lint_config() {
+    fn parse_workspace_metadata_lint_config() -> Result<(), Box<dyn std::error::Error>> {
         let manifest = r#"
 [workspace]
 members = ["crates/*"]
@@ -492,7 +496,7 @@ members = ["crates/*"]
 [workspace.metadata.purist.lints]
 centralized_command_execution = "allow"
 "#;
-        let config = LintConfig::from_manifest_content(manifest).expect("valid manifest");
+        let config = LintConfig::from_manifest_content(manifest).ok_or("valid manifest")?;
         assert_that!(
             config.level_for("purist::centralized_command_execution"),
             eq(Some(RuleLevel::Allow))
@@ -501,6 +505,7 @@ centralized_command_execution = "allow"
             config.level_for("opinionated::centralized_command_execution"),
             eq(Some(RuleLevel::Allow))
         );
+        Ok(())
     }
 
     #[googletest::test]
@@ -513,6 +518,8 @@ centralized_command_execution = "allow"
         assert_that!(config.cli_run_consumes_self, eq(RuleLevel::Warn));
         assert_that!(config.no_wildcard_imports, eq(RuleLevel::Warn));
         assert_that!(config.no_println_in_libraries, eq(RuleLevel::Warn));
+        assert_that!(config.no_double_negation, eq(RuleLevel::Warn));
+        assert_that!(config.googletest_conventions, eq(RuleLevel::Warn));
     }
 
     #[googletest::test]
