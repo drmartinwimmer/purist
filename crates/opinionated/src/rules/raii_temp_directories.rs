@@ -16,6 +16,7 @@ impl Rule for RaiiTempDirectoriesRule {
             ctx,
             diagnostics: Vec::new(),
             in_test_scope: ctx.is_test_file(),
+            in_drop_scope: false,
         };
 
         visitor.visit_file(file);
@@ -27,6 +28,7 @@ struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     in_test_scope: bool,
+    in_drop_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
@@ -54,6 +56,32 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
+        let is_drop = item_impl
+            .trait_
+            .as_ref()
+            .is_some_and(|(_, path, _)| path.segments.last().is_some_and(|s| s.ident == "Drop"));
+
+        let prev = self.in_drop_scope;
+        if is_drop {
+            self.in_drop_scope = true;
+        }
+
+        visit::visit_item_impl(self, item_impl);
+        self.in_drop_scope = prev;
+    }
+
+    fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
+        let is_drop_fn = method.sig.ident == "drop";
+        let prev = self.in_drop_scope;
+        if is_drop_fn {
+            self.in_drop_scope = true;
+        }
+
+        visit::visit_impl_item_fn(self, method);
+        self.in_drop_scope = prev;
+    }
+
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let is_test = item_fn.attrs.iter().any(|attr| {
             attr.path().is_ident("test")
@@ -76,6 +104,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
         if self.in_test_scope
+            && !self.in_drop_scope
             && let syn::Expr::Path(expr_path) = &*call.func
             && is_remove_dir_all_path(&expr_path.path)
         {
@@ -157,6 +186,28 @@ pub fn clean_cache(dir: &std::path::Path) -> std::io::Result<()> {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/cache.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = RaiiTempDirectoriesRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn remove_dir_all_in_drop_impl_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[cfg(test)]
+mod tests {
+    struct TempDir(std::path::PathBuf);
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tests.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = RaiiTempDirectoriesRule.check_file(&ctx, &ast);
 
