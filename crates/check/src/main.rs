@@ -14,7 +14,7 @@ struct Cli {
 }
 
 impl Cli {
-    fn run(&self) -> ExitCode {
+    fn run(self) -> ExitCode {
         if let Err(err) = self.cmd.run() {
             eprintln!("Error: {err}");
             ExitCode::from(2)

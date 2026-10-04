@@ -36,7 +36,7 @@ impl CoverageCommand {
     }
 
     /// Runs the code coverage measurement and threshold verification.
-    pub fn run(&self) -> Result<(), CoverageError> {
+    pub fn run(self) -> Result<(), CoverageError> {
         if !self.quiet {
             eprintln!("Notice: coverage runner is scheduled for future milestones.");
         }

@@ -356,9 +356,9 @@ When an agent reviews code, it dispatches specialized review subagents in parall
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
 - **Description:** Implement the `code-review opinionated` tool with `syn` AST traversal, implementing rules for inline modules, dummy unit structs, VCS path resolution, raw string errors, and clippy suppression hygiene.
-- **Status:** `[ ] Pending`
+- **Status:** `[x] Completed`
 - **Target Completion Date:** 2026-10-09
-- **Actual Completion Date:** -
+- **Actual Completion Date:** 2026-10-03
 - **Dependencies:** Milestone 1
 - **Tasks File:** `plan/M2.md`
 - **Feedback File:** `plan/FEEDBACK_M2.md`
@@ -463,26 +463,27 @@ When an agent reviews code, it dispatches specialized review subagents in parall
   - Describe Jujutsu change: `jj describe -m "plan-M1-T3: docs: add cli and common specs, tighten visibility, and complete milestone 1"`
 
 ### Milestone 2: Opinionated Static Analysis Linter Engine & Rules
-- [ ] **M2-T0: Update Specifications (`src/tools/opinionated/SPEC.md`)**
+- [x] **M2-T0: Update Specifications (`crates/opinionated/SPEC.md`)**
   - Document the contract, AST patterns, and false-positive criteria for each custom lint rule.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T0: docs: add spec for opinionated linter rules"`
-- [ ] **M2-T1: AST Visitor Framework (`src/tools/opinionated/engine.rs`)**
+- [x] **M2-T1: AST Visitor Framework (`crates/opinionated/src/engine.rs`)**
   - Add `syn` and `quote` dependencies to `Cargo.toml`.
   - Implement visitor engine traversing Rust files, handling syntax errors gracefully, and delegating to rule checkers.
   - Unit tests for AST traversal.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T1: feat: implement opinionated AST visitor engine"`
-- [ ] **M2-T2: Rule Implementations (`src/tools/opinionated/rules/`)**
+- [x] **M2-T2: Rule Implementations (`crates/opinionated/src/rules/`)**
   - Implement `no_inline_mods.rs`: Detect non-test inline modules in `main.rs`/`lib.rs`.
   - Implement `free_functions.rs`: Detect unit structs with pure associated methods.
   - Implement `path_resolution.rs`: Detect non-manifest relative paths.
   - Implement `error_types.rs`: Detect raw `Result<T, String>` signatures.
   - Implement `clippy_suppress.rs`: Detect `#[expect]` or `#[allow]` lacking `reason` or comments.
   - Implement `test_patterns.rs`: Detect test naming and assertion violations.
+  - Implement `no_redundant_conversions.rs`: Detect redundant serialization roundtrips.
   - Unit test each rule with positive and negative snippets.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T2: feat: implement opinionated static analysis rules"`
-- [ ] **M2-T3: Opinionated Linter CLI Integration**
+- [x] **M2-T3: Opinionated Linter CLI Integration**
   - Connect engine to `code-review opinionated` CLI command.
-  - Support `--path`, `--json`, and `--fix` stubs.
+  - Support `--path`, `--format`, and `--fix` stubs with exit codes 0, 1, 2.
   - Describe Jujutsu change: `jj describe -m "plan-M2-T3: feat: connect opinionated linter to code-review CLI"`
 
 ### Milestone 3: Linter & Formatter Runner Aggregator (`code-review check`)
