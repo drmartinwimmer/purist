@@ -1,4 +1,6 @@
 use super::diagnostics::{Diagnostic, DiagnosticReport, Severity};
+use annotate_snippets::{Group, Level, Origin, Renderer};
+use anstyle::Style;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
@@ -24,14 +26,27 @@ pub enum OutputFormat {
 }
 
 /// Renders a diagnostic report to the specified writer in the chosen format.
-/// Automatically detects color support based on the `NO_COLOR` environment variable.
+/// Automatically detects color support based on standard environment and terminal conventions.
 pub fn render_report(
     report: &DiagnosticReport,
     format: OutputFormat,
     writer: &mut dyn io::Write,
 ) -> io::Result<()> {
-    let use_color = std::env::var_os("NO_COLOR").is_none();
+    let use_color = auto_detect_color();
     render_report_with_options(report, format, writer, use_color)
+}
+
+fn auto_detect_color() -> bool {
+    if anstyle_query::no_color() {
+        return false;
+    }
+    if anstyle_query::clicolor_force() {
+        return true;
+    }
+    if anstyle_query::clicolor() == Some(false) {
+        return false;
+    }
+    true
 }
 
 /// Renders a diagnostic report with explicit control over ANSI colorization.
@@ -58,6 +73,12 @@ fn render_console(
         return Ok(());
     }
 
+    let renderer = if use_color {
+        Renderer::styled()
+    } else {
+        Renderer::plain()
+    };
+
     // Group diagnostics by file path (None represents global diagnostics)
     let mut by_file: BTreeMap<Option<&Path>, Vec<&Diagnostic>> = BTreeMap::new();
     for diag in &report.diagnostics {
@@ -65,52 +86,33 @@ fn render_console(
         by_file.entry(file).or_default().push(diag);
     }
 
-    for (file_opt, diags) in by_file {
-        if let Some(file) = file_opt {
-            if use_color {
-                writeln!(writer, "\x1b[1m--> {}\x1b[0m", file.display())?;
-            } else {
-                writeln!(writer, "--> {}", file.display())?;
-            }
-        } else if use_color {
-            writeln!(writer, "\x1b[1m--> (global)\x1b[0m")?;
-        } else {
-            writeln!(writer, "--> (global)")?;
-        }
-
+    for (_file_opt, diags) in by_file {
         for diag in diags {
-            let (sev_str, sev_color) = match diag.severity {
-                Severity::Error => ("error", "\x1b[1;31m"),
-                Severity::Warning => ("warning", "\x1b[1;33m"),
-                Severity::Info => ("info", "\x1b[1;36m"),
-                Severity::Hint => ("hint", "\x1b[1;34m"),
+            let level = match diag.severity {
+                Severity::Error => Level::ERROR,
+                Severity::Warning => Level::WARNING,
+                Severity::Info => Level::INFO,
+                Severity::Hint => Level::HELP,
             };
 
-            if use_color {
-                writeln!(
-                    writer,
-                    "  [{sev_color}{sev_str}\x1b[0m] \x1b[1m{}\x1b[0m: {}",
-                    diag.rule, diag.message
-                )?;
-            } else {
-                writeln!(writer, "  [{sev_str}] {}: {}", diag.rule, diag.message)?;
-            }
+            let title = level.primary_title(&diag.message).id(&diag.rule);
+            let mut group = Group::with_title(title);
 
             if let Some(span) = &diag.span {
-                writeln!(
-                    writer,
-                    "    --> {}:{}:{}",
-                    span.file.display(),
-                    span.start_line,
-                    span.start_col
-                )?;
+                let path_str = span.file.display().to_string();
+                let origin = Origin::path(path_str)
+                    .line(span.start_line)
+                    .char_column(span.start_col);
+                group = group.element(origin);
             }
-            if let Some(fix) = &diag.suggested_fix {
-                writeln!(writer, "    = help: {fix}")?;
-            }
-        }
 
-        writeln!(writer)?;
+            if let Some(fix) = &diag.suggested_fix {
+                group = group.element(Level::HELP.message(fix));
+            }
+
+            let rendered = renderer.render(&[group]);
+            writeln!(writer, "{rendered}")?;
+        }
     }
 
     let summary_line = format!(
@@ -122,7 +124,8 @@ fn render_console(
     );
 
     if use_color {
-        writeln!(writer, "\x1b[1m{summary_line}\x1b[0m")?;
+        let bold = Style::new().bold();
+        writeln!(writer, "{bold}{summary_line}{bold:#}")?;
     } else {
         writeln!(writer, "{summary_line}")?;
     }
@@ -225,11 +228,11 @@ mod tests {
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, false)?;
         let output = String::from_utf8(buffer)?;
 
-        expect_that!(output, contains_substring("--> src/main.rs"));
-        expect_that!(output, contains_substring("--> (global)"));
-        expect_that!(output, contains_substring("[error]"));
-        expect_that!(output, contains_substring("[hint]"));
-        expect_that!(output, contains_substring("[warning]"));
+        expect_that!(output, contains_substring("--> src/main.rs:15:2"));
+        expect_that!(output, contains_substring("--> src/main.rs:20:1"));
+        expect_that!(output, contains_substring("error[rule::test]"));
+        expect_that!(output, contains_substring("help[rule::hint]"));
+        expect_that!(output, contains_substring("warning[rule::global]"));
         expect_that!(output, contains_substring("rule::test"));
         expect_that!(output, contains_substring("src/main.rs:15:2"));
         expect_that!(output, contains_substring("add semicolon"));
@@ -257,7 +260,7 @@ mod tests {
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, true)?;
         let output = String::from_utf8(buffer)?;
 
-        expect_that!(output, contains_substring("\x1b[1;31m"));
+        expect_that!(output, contains_substring("\x1b["));
         expect_that!(output, contains_substring("\x1b[0m"));
         Ok(())
     }
@@ -343,6 +346,27 @@ mod tests {
             output,
             contains_substring("`first line \\| second line third line`")
         );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn render_report_renders_console_successfully() -> Result<(), Box<dyn std::error::Error>> {
+        let mut report = DiagnosticReport::default();
+        report.add(
+            Diagnostic::new("rule::test", Severity::Warning, "Check code").with_span(Span::new(
+                "src/lib.rs",
+                10,
+                5,
+                10,
+                15,
+            )),
+        );
+        let mut buffer = Vec::new();
+        render_report(&report, OutputFormat::Console, &mut buffer)?;
+        let output = String::from_utf8(buffer)?;
+        expect_that!(output, contains_substring("rule::test"));
+        expect_that!(output, contains_substring("Check code"));
+        expect_that!(output, contains_substring("src/lib.rs:10:5"));
         Ok(())
     }
 }
