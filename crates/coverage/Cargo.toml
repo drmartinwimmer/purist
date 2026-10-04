@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Code coverage engine subcommand for code-review"
+publish = false
 
 [[bin]]
 name = "coverage"

@@ -23,7 +23,7 @@ googletest = "0.14"
 code-review-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
 code-review-configure-lints = { path = "crates/configure-lints", version = "0.1.0" }
 code-review-check = { path = "crates/check", version = "0.1.0" }
-code-review-opinionated = { path = "crates/opinionated", version = "0.1.0" }
+purist = { path = "crates/purist", version = "0.1.0" }
 code-review-api = { path = "crates/api", version = "0.1.0" }
 code-review-coverage = { path = "crates/coverage", version = "0.1.0" }
 syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }

@@ -127,9 +127,8 @@ dependencies = [
  "code-review-check",
  "code-review-configure-lints",
  "code-review-coverage",
- "code-review-diagnostics",
- "code-review-opinionated",
  "googletest",
+ "purist",
  "thiserror",
 ]
 
@@ -182,20 +181,6 @@ dependencies = [
  "googletest",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "code-review-opinionated"
-version = "0.1.0"
-dependencies = [
- "clap",
- "code-review-diagnostics",
- "googletest",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "thiserror",
- "toml_edit",
 ]
 
 [[package]]
@@ -295,6 +280,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "purist"
+version = "0.1.0"
+dependencies = [
+ "annotate-snippets",
+ "anstyle",
+ "anstyle-query",
+ "clap",
+ "googletest",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "thiserror",
+ "toml_edit",
 ]
 
 [[package]]

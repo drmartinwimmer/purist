@@ -16,9 +16,11 @@ The user uses **Jujutsu (`jj`)** for version control.
 
 ## 2. Opinionated AST Linter
 
-Review agents must always run the opinionated AST linter to identify and resolve architectural, style, and hygiene issues:
+Review agents must always run the opinionated AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
 ```bash
 cargo run -p code-review -- opinionated --path .
+# or directly:
+cargo run -p purist -- --path .
 ```
 Ensure zero violations (errors or warnings) are reported before submitting changes.
 

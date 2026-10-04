@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Configure strict Clippy lints in Cargo.toml"
+publish = false
 
 [[bin]]
 name = "configure-lints"
