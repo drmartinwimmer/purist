@@ -14,7 +14,34 @@ The user uses **Jujutsu (`jj`)** for version control.
   ```
 - If you need to start a new logical change, use `jj new`.
 
-## 2. Purist AST Linter
+## 2. Comprehensive Quality Checks (`code-review check`)
+
+Before submitting changes or opening pull requests, review agents must ensure that all automated checks pass cleanly.
+
+### Unified Check Aggregator
+
+Run the unified check aggregator to run all linters, formatters, AST rules, and security audits across the codebase:
+
+```bash
+cargo run -p code-review -- check
+```
+
+The aggregator invokes:
+
+- **Rust formatting**: `cargo fmt --check`
+- **Rust compiler & Clippy lints**: `cargo clippy --all-targets --all-features -- -D warnings`
+- **Purist AST linter**: `cargo run -p code-review -- purist --path .`
+- **Dependency security audit**: `cargo audit`
+- **TOML formatting**: `taplo fmt --check`
+- **Markdown & JSON formatting**: `prettier --check "**/*.{md,json}"` (or `mdformat`)
+
+You can also filter checks to only files modified in the active Jujutsu change:
+
+```bash
+cargo run -p code-review -- check --changed-only
+```
+
+## 3. Purist AST Linter
 
 Review agents must always run the Purist AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
 
@@ -26,12 +53,22 @@ cargo run -p purist -- --path .
 
 Ensure zero violations (errors or warnings) are reported before submitting changes.
 
-## 3. Testing & Formatting
+## 4. Testing & Verification
 
-- Keep all unit and integration tests passing (`cargo test --all-targets --all-features`).
-- Format code with `cargo fmt --check`.
-- Ensure zero Clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`).
+- **Unit & Integration Tests**: Keep all tests passing:
+  ```bash
+  cargo test --all-targets --all-features
+  ```
+- **Rust Formatting**: Format Rust code with `cargo fmt --check` (or `cargo fmt` to apply).
+- **Clippy**: Ensure zero Clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`).
+- **TOML Formatting**: Ensure all `.toml` files are formatted using Taplo (`taplo fmt --check` or `taplo fmt`).
+- **Markdown & JSON Formatting**: Ensure all `.md` and `.json` files match Prettier style (`prettier --check "**/*.{md,json}"`).
+- **Dependency Audit**: Ensure no known security advisories exist (`cargo audit`).
+- **Nix Flake & Build**: In environments with Nix, verify that the flake checks and builds cleanly:
+  ```bash
+  nix flake check && nix build
+  ```
 
-## 4. Coding & Cleanliness
+## 5. Coding & Cleanliness
 
 - Do not introduce unnecessary dependencies. Keep the codebase lightweight.

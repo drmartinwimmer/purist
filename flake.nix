@@ -41,6 +41,8 @@
             buildInputs = [
               toolchain
               (cargo-audit.override { inherit rustPlatform; })
+              taplo
+              prettier
             ];
           };
 
