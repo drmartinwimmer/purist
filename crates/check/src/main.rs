@@ -5,7 +5,7 @@ use std::process::ExitCode;
 #[derive(Parser, Debug)]
 #[command(
     name = "check",
-    about = "Aggregates formatters, clippy, opinionated, audit, and coverage checks",
+    about = "Aggregates formatters, clippy, purist, audit, and coverage checks",
     version
 )]
 struct Cli {

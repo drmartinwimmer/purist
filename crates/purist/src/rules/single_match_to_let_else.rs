@@ -1,4 +1,4 @@
-//! # Rule: opinionated::single_match_to_let_else
+//! # Rule: purist::single_match_to_let_else
 //!
 //! ## What This Rule Does
 //! Recommends `let ... = ... else { ... };` over two-arm `match` statements where one arm matches
@@ -36,7 +36,7 @@ pub struct SingleMatchToLetElseRule;
 
 impl Rule for SingleMatchToLetElseRule {
     fn name(&self) -> &'static str {
-        "opinionated::single_match_to_let_else"
+        "purist::single_match_to_let_else"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -90,7 +90,7 @@ fn check_match_to_let_else(
             let span = ctx.to_span(expr_match.span());
             return Some(
                 Diagnostic::new(
-                    "opinionated::single_match_to_let_else",
+                    "purist::single_match_to_let_else",
                     Severity::Warning,
                     "Match expression can be simplified using idiomatic 'let ... = ... else { ... };' construct.",
                 )
@@ -273,7 +273,7 @@ pub fn parse_val(opt: Option<i32>) -> i32 {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::single_match_to_let_else"));
+        assert_that!(&diag.rule, eq("purist::single_match_to_let_else"));
         assert_that!(
             &diag.message,
             contains_substring("let ... = ... else { ... };")

@@ -1,4 +1,4 @@
-//! Rule: `opinionated::centralized_command_execution`
+//! Rule: `purist::centralized_command_execution`
 //!
 //! # What This Rule Does
 //! Flags direct invocations of `std::process::Command::new` outside of dedicated command execution
@@ -42,7 +42,7 @@ pub struct CentralizedCommandsRule;
 
 impl Rule for CentralizedCommandsRule {
     fn name(&self) -> &'static str {
-        "opinionated::centralized_command_execution"
+        "purist::centralized_command_execution"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -181,7 +181,7 @@ fn is_command_new_path(path: &syn::Path) -> bool {
 fn build_diagnostic(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Diagnostic {
     let span = ctx.to_span(call.span());
     Diagnostic::new(
-        "opinionated::centralized_command_execution",
+        "purist::centralized_command_execution",
         Severity::Warning,
         "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
     )
@@ -208,7 +208,7 @@ pub fn check_git() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::centralized_command_execution"));
+        assert_that!(&diag.rule, eq("purist::centralized_command_execution"));
         Ok(())
     }
 

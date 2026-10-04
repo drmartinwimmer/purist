@@ -1,4 +1,4 @@
-//! # Rule: opinionated::test_matcher_borrow_simplification
+//! # Rule: purist::test_matcher_borrow_simplification
 //!
 //! ## What This Rule Does
 //! Flags redundant `.as_str()` or `.as_slice()` conversion calls inside GoogleTest assertions
@@ -35,7 +35,7 @@ pub struct TestMatcherBorrowRule;
 
 impl Rule for TestMatcherBorrowRule {
     fn name(&self) -> &'static str {
-        "opinionated::test_matcher_borrow_simplification"
+        "purist::test_matcher_borrow_simplification"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -120,7 +120,7 @@ fn check_redundant_borrow_call(
         let span = ctx.to_span(call.span());
         Some(
             Diagnostic::new(
-                "opinionated::test_matcher_borrow_simplification",
+                "purist::test_matcher_borrow_simplification",
                 Severity::Warning,
                 format!(
                     "Redundant '.{method_name}()' in GoogleTest assertion. GoogleTest matchers accept borrowed references directly."
@@ -156,10 +156,7 @@ fn sample_test() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(
-            &diag.rule,
-            eq("opinionated::test_matcher_borrow_simplification")
-        );
+        assert_that!(&diag.rule, eq("purist::test_matcher_borrow_simplification"));
         assert_that!(&diag.message, contains_substring("Redundant '.as_str()'"));
         Ok(())
     }
@@ -178,10 +175,7 @@ fn sample_test() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(
-            &diag.rule,
-            eq("opinionated::test_matcher_borrow_simplification")
-        );
+        assert_that!(&diag.rule, eq("purist::test_matcher_borrow_simplification"));
         assert_that!(&diag.message, contains_substring("Redundant '.as_slice()'"));
         Ok(())
     }

@@ -1,4 +1,4 @@
-//! # Rule: opinionated::idiomatic_option_bool_mapping
+//! # Rule: purist::idiomatic_option_bool_mapping
 //!
 //! ## What This Rule Does
 //! Flags verbose `if let Some(...) = ... else { false }` or `{ None }` constructs that can
@@ -33,7 +33,7 @@ pub struct OptionBoolMappingRule;
 
 impl Rule for OptionBoolMappingRule {
     fn name(&self) -> &'static str {
-        "opinionated::idiomatic_option_bool_mapping"
+        "purist::idiomatic_option_bool_mapping"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -81,7 +81,7 @@ fn check_option_mapping(ctx: &LintContext<'_>, expr_if: &syn::ExprIf) -> Option<
         match else_kind {
             ElseKind::False => Some(
                 Diagnostic::new(
-                    "opinionated::idiomatic_option_bool_mapping",
+                    "purist::idiomatic_option_bool_mapping",
                     Severity::Warning,
                     "Manual 'if let Some(...) = ... else { false }' construct. Use '.is_some_and(...)' instead.",
                 )
@@ -90,7 +90,7 @@ fn check_option_mapping(ctx: &LintContext<'_>, expr_if: &syn::ExprIf) -> Option<
             ),
             ElseKind::NoneVal => Some(
                 Diagnostic::new(
-                    "opinionated::idiomatic_option_bool_mapping",
+                    "purist::idiomatic_option_bool_mapping",
                     Severity::Warning,
                     "Manual 'if let Some(...) = ... else { None }' construct. Use functional combinators like '.and_then(...)' or '.map(...)'.",
                 )
@@ -190,7 +190,7 @@ pub fn check(val: Option<i32>) -> bool {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::idiomatic_option_bool_mapping"));
+        assert_that!(&diag.rule, eq("purist::idiomatic_option_bool_mapping"));
         assert_that!(
             &diag.message,
             contains_substring("Manual 'if let Some(...) = ... else { false }' construct")
@@ -215,7 +215,7 @@ pub fn transform(val: Option<i32>) -> Option<i32> {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::idiomatic_option_bool_mapping"));
+        assert_that!(&diag.rule, eq("purist::idiomatic_option_bool_mapping"));
         assert_that!(
             &diag.message,
             contains_substring("Manual 'if let Some(...) = ... else { None }' construct")

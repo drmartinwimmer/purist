@@ -1,4 +1,4 @@
-//! # Rule: opinionated::raii_temp_directories
+//! # Rule: purist::raii_temp_directories
 //!
 //! ## What This Rule Does
 //! Flags manual `fs::remove_dir_all` calls in test scopes (such as unit test functions or
@@ -40,7 +40,7 @@ pub struct RaiiTempDirectoriesRule;
 
 impl Rule for RaiiTempDirectoriesRule {
     fn name(&self) -> &'static str {
-        "opinionated::raii_temp_directories"
+        "purist::raii_temp_directories"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -183,7 +183,7 @@ fn check_remove_dir_all_call(
         let span = ctx.to_span(call.span());
         Some(
             Diagnostic::new(
-                "opinionated::raii_temp_directories",
+                "purist::raii_temp_directories",
                 Severity::Warning,
                 "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures.",
             )
@@ -242,7 +242,7 @@ fn file_creation_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::raii_temp_directories"));
+        assert_that!(&diag.rule, eq("purist::raii_temp_directories"));
         assert_that!(
             &diag.message,
             contains_substring("Manual 'fs::remove_dir_all' in test context")

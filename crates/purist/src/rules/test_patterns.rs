@@ -1,4 +1,4 @@
-//! # Rule: opinionated::test_patterns
+//! # Rule: purist::test_patterns
 //!
 //! ## What This Rule Does
 //! Enforces three key testing conventions across test suites:
@@ -44,7 +44,7 @@ pub struct TestPatternsRule;
 
 impl Rule for TestPatternsRule {
     fn name(&self) -> &'static str {
-        "opinionated::test_patterns"
+        "purist::test_patterns"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -158,7 +158,7 @@ fn check_test_name(ctx: &LintContext<'_>, ident: &syn::Ident) -> Option<Diagnost
         let span = ctx.to_span(ident.span());
         Some(
             Diagnostic::new(
-                "opinionated::test_patterns",
+                "purist::test_patterns",
                 Severity::Warning,
                 format!(
                     "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
@@ -180,7 +180,7 @@ fn check_assertion_macro(ctx: &LintContext<'_>, mac: &syn::Macro) -> Option<Diag
         let span = ctx.to_span(mac.path.span());
         Some(
             Diagnostic::new(
-                "opinionated::test_patterns",
+                "purist::test_patterns",
                 Severity::Warning,
                 format!(
                     "Usage of '{name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
@@ -203,7 +203,7 @@ fn check_unwrap_method_call(
         let span = ctx.to_span(call.method.span());
         Some(
             Diagnostic::new(
-                "opinionated::test_patterns",
+                "purist::test_patterns",
                 Severity::Warning,
                 "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
             )
@@ -230,7 +230,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
+        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
             &diag.message,
             contains_substring("does not conform to '<verb>_<description>_<outcome>'")
@@ -258,7 +258,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
+        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
             &diag.message,
             contains_substring("Usage of 'assert_eq!' in test")
@@ -276,7 +276,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::test_patterns"));
+        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
             &diag.message,
             contains_substring("Avoid calling '.unwrap()' in test bodies")

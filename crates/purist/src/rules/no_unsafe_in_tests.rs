@@ -1,4 +1,4 @@
-//! # Rule: opinionated::no_unsafe_in_tests
+//! # Rule: purist::no_unsafe_in_tests
 //!
 //! ## What This Rule Does
 //! Forbids the use of `unsafe` blocks and `unsafe fn` declarations within test code
@@ -9,7 +9,7 @@
 //! raw `unsafe` in test suites bypasses safety invariants, conceals defects in API encapsulation,
 //! and introduces potential undefined behavior into the test runner. If `unsafe` is strictly
 //! required for specific tests (such as low-level FFI integration), it must be explicitly suppressed
-//! with `#[expect(opinionated::no_unsafe_in_tests, reason = "...")]`.
+//! with `#[expect(purist::no_unsafe_in_tests, reason = "...")]`.
 //!
 //! ## Non-Compliant Example
 //! ```rust,ignore
@@ -42,7 +42,7 @@ pub struct NoUnsafeInTestsRule;
 
 impl Rule for NoUnsafeInTestsRule {
     fn name(&self) -> &'static str {
-        "opinionated::no_unsafe_in_tests"
+        "purist::no_unsafe_in_tests"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -191,7 +191,7 @@ fn check_unsafe_fn(ctx: &LintContext<'_>, item_fn: &syn::ItemFn) -> Option<Diagn
         let span = ctx.to_span(item_fn.sig.fn_token.span());
         Some(
             Diagnostic::new(
-                "opinionated::no_unsafe_in_tests",
+                "purist::no_unsafe_in_tests",
                 Severity::Error,
                 format!(
                     "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
@@ -210,7 +210,7 @@ fn check_unsafe_fn(ctx: &LintContext<'_>, item_fn: &syn::ItemFn) -> Option<Diagn
 fn check_unsafe_block(ctx: &LintContext<'_>, expr_unsafe: &syn::ExprUnsafe) -> Diagnostic {
     let span = ctx.to_span(expr_unsafe.unsafe_token.span());
     Diagnostic::new(
-        "opinionated::no_unsafe_in_tests",
+        "purist::no_unsafe_in_tests",
         Severity::Error,
         "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions.",
     )
@@ -242,7 +242,7 @@ fn test_foo() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::no_unsafe_in_tests"));
+        assert_that!(&diag.rule, eq("purist::no_unsafe_in_tests"));
         assert_that!(diag.severity, eq(Severity::Error));
         Ok(())
     }
@@ -251,7 +251,7 @@ fn test_foo() {
     fn suppressed_unsafe_in_test_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 #[test]
-#[expect(opinionated::no_unsafe_in_tests, reason = "FFI test requirement")]
+#[expect(purist::no_unsafe_in_tests, reason = "FFI test requirement")]
 fn test_ffi_boundary() {
     unsafe {
         let _ = libc::getpid();

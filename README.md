@@ -1,6 +1,6 @@
 # Code Review Toolkit (`code-review`)
 
-> **Developer skills, opinionated Rust linters, and Inspect AI evaluations for reviewing agent-generated code.**
+> **Developer skills, purist Rust AST linter, and Inspect AI evaluations for reviewing agent-generated code.**
 
 [![CI](https://github.com/drmartinwimmer/review/actions/workflows/ci.yml/badge.svg)](https://github.com/drmartinwimmer/review/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -21,7 +21,7 @@
 
 - **`code-review check`**: Runs all relevant linters and formatters (`cargo fmt`, `cargo clippy`, and custom linters), aggregating findings into a normalized diagnostic report (terminal, JSON, or Markdown) with Jujutsu changed-file filtering (`--changed-only`).
 - **`code-review configure-lints`**: Programmatically updates `Cargo.toml` using `toml_edit` to inject strict Clippy rules (Don't Panic, Don't Fail Silently, Memory Safety, Numerics, Suppression Bans) while preserving formatting and comments.
-- **`code-review opinionated`**: AST static analysis engine (powered by `syn`) enforcing patterns beyond Clippy's scope (e.g. forbidding inline `mod` declarations in `main.rs`/`lib.rs`, enforcing free functions over dummy structs, requiring VCS/manifest-relative paths, forbidding raw `Result<T, String>`, and validating `#[expect]`/`#[allow]` comments).
+- **`code-review purist`**: AST static analysis engine (powered by `purist` and `syn`) enforcing patterns beyond Clippy's scope (e.g. forbidding inline `mod` declarations in `main.rs`/`lib.rs`, enforcing free functions over dummy structs, requiring VCS/manifest-relative paths, forbidding raw `Result<T, String>`, and validating `#[expect]`/`#[allow]` comments).
 
 ### 2. Developer & Review Skills (`skills/`)
 

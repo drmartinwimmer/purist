@@ -1,4 +1,4 @@
-//! Rule: `opinionated::error_types`
+//! Rule: `purist::error_types`
 //!
 //! # What This Rule Does
 //! Flags production functions that return unstructured string error types (`Result<T, String>` or
@@ -42,7 +42,7 @@ pub struct ErrorTypesRule;
 
 impl Rule for ErrorTypesRule {
     fn name(&self) -> &'static str {
-        "opinionated::error_types"
+        "purist::error_types"
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -167,7 +167,7 @@ fn check_fn_return_type(ctx: &LintContext<'_>, sig: &syn::Signature) -> Option<D
 
     Some(
         Diagnostic::new(
-            "opinionated::error_types",
+            "purist::error_types",
             Severity::Warning,
             format!(
                 "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
@@ -248,7 +248,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::error_types"));
+        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
             &diag.message,
             contains_substring("returns unstructured error type 'String'")
@@ -265,7 +265,7 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("opinionated::error_types"));
+        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
             &diag.message,
             contains_substring("returns unstructured error type '&str'")
