@@ -5,7 +5,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule flagging redundant `.as_str()`, `.as_slice()`, or `.as_ref()` conversions inside GoogleTest assertions.
+/// Rule flagging redundant `.as_str()` or `.as_slice()` conversions inside GoogleTest assertions.
 pub struct TestMatcherBorrowRule;
 
 impl Rule for TestMatcherBorrowRule {
@@ -70,7 +70,7 @@ impl<'ast> Visit<'ast> for BorrowMethodVisitor<'_> {
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
         let method_name = call.method.to_string();
-        if method_name == "as_str" || method_name == "as_slice" || method_name == "as_ref" {
+        if method_name == "as_str" || method_name == "as_slice" {
             let span = self.ctx.to_span(call.span());
             self.diagnostics.push(
                 Diagnostic::new(
@@ -120,11 +120,11 @@ fn sample_test() {
     }
 
     #[googletest::test]
-    fn as_ref_in_matcher_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn as_slice_in_matcher_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 #[test]
 fn sample_test() {
-    expect_that!(actual, eq(expected.as_ref()));
+    expect_that!(actual, eq(expected.as_slice()));
 }
 "#;
         let ctx = LintContext::new(Path::new("src/tests.rs"), source);
@@ -137,7 +137,23 @@ fn sample_test() {
             &diag.rule,
             eq("opinionated::test_matcher_borrow_simplification")
         );
-        assert_that!(&diag.message, contains_substring("Redundant '.as_ref()'"));
+        assert_that!(&diag.message, contains_substring("Redundant '.as_slice()'"));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn as_ref_in_matcher_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[test]
+fn sample_test() {
+    expect_that!(actual.as_ref(), eq(Some(&expected)));
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tests.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = TestMatcherBorrowRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
         Ok(())
     }
 
