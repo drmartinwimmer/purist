@@ -1,8 +1,9 @@
 use crate::cargo::{LintConfig, RuleLevel, discover_rust_files, find_cargo_toml};
 use crate::diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
 use crate::rules::default_rules;
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -12,6 +13,7 @@ pub struct LintContext<'a> {
     file_path: &'a Path,
     source: &'a str,
     lines: Vec<&'a str>,
+    config: Option<&'a LintConfig>,
 }
 
 impl<'a> LintContext<'a> {
@@ -22,7 +24,19 @@ impl<'a> LintContext<'a> {
             file_path,
             source,
             lines,
+            config: None,
         }
+    }
+
+    /// Sets the lint configuration for this context.
+    pub fn with_config(mut self, config: &'a LintConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Returns the active lint configuration, if available.
+    pub fn config(&self) -> Option<&'a LintConfig> {
+        self.config
     }
 
     /// Returns the target file path.
@@ -173,7 +187,10 @@ impl PuristEngine {
         emit_config_warnings: bool,
     ) -> DiagnosticReport {
         let mut report = DiagnosticReport::default();
-        let ctx = LintContext::new(file_path, source);
+        let mut ctx = LintContext::new(file_path, source);
+        if let Some(cfg) = config {
+            ctx = ctx.with_config(cfg);
+        }
 
         match syn::parse_file(source) {
             Ok(ast) => {
@@ -289,6 +306,7 @@ impl PuristEngine {
             );
         }
 
+        let mut config_cache: HashMap<PathBuf, LintConfig> = HashMap::new();
         let mut targets_scanned = 0;
         for path in &files {
             let content = match fs::read_to_string(path) {
@@ -307,7 +325,16 @@ impl PuristEngine {
             };
 
             targets_scanned += 1;
-            let file_report = self.check_source_internal(path, &content, Some(config), false);
+            let file_config = if let Some(cfg) = &self.config {
+                cfg
+            } else {
+                let manifest_key = find_cargo_toml(path).unwrap_or_else(|| path.clone());
+                config_cache
+                    .entry(manifest_key)
+                    .or_insert_with(|| LintConfig::discover_for_path(path))
+            };
+
+            let file_report = self.check_source_internal(path, &content, Some(file_config), false);
             for diag in file_report.diagnostics {
                 report.add(diag);
             }
@@ -712,7 +739,7 @@ mod tests {
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::new();
-        assert_that!(engine.rules().len(), eq(25));
+        assert_that!(engine.rules().len(), eq(26));
         Ok(())
     }
 }

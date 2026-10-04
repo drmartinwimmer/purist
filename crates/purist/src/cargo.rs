@@ -52,6 +52,7 @@ pub struct PuristLintsConfig {
     pub cli_run_consumes_self: RuleLevel,
     pub no_double_negation: RuleLevel,
     pub googletest_conventions: RuleLevel,
+    pub max_file_lines: RuleLevel,
 }
 
 /// Backwards compatibility alias for `PuristLintsConfig`.
@@ -91,6 +92,7 @@ impl PuristLintsConfig {
             "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
             "no_double_negation" | "no_negative_boolean_names" => Some(self.no_double_negation),
             "googletest_conventions" => Some(self.googletest_conventions),
+            "max_file_lines" => Some(self.max_file_lines),
             _ => None,
         }
     }
@@ -128,6 +130,7 @@ impl PuristLintsConfig {
             "cli_run_consumes_self" => self.cli_run_consumes_self = level,
             "no_double_negation" | "no_negative_boolean_names" => self.no_double_negation = level,
             "googletest_conventions" => self.googletest_conventions = level,
+            "max_file_lines" => self.max_file_lines = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -148,12 +151,20 @@ const DEPRECATED_ALIASES: &[(&str, &str)] = &[
     ("no_negative_boolean_names", "no_double_negation"),
 ];
 
+/// Configuration options specific to `max_file_lines`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MaxFileLinesConfig {
+    pub max_production_lines: Option<usize>,
+    pub max_total_lines: Option<usize>,
+}
+
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
     pub rules: PuristLintsConfig,
     pub unrecognized: Vec<String>,
     pub deprecated: Vec<String>,
+    pub max_file_lines: MaxFileLinesConfig,
 }
 
 impl LintConfig {
@@ -200,10 +211,24 @@ impl LintConfig {
         warnings
     }
 
-    /// Loads lint configuration from the nearest `Cargo.toml` at or above `path`.
+    /// Loads lint configuration from the nearest `Cargo.toml` at or above `path`,
+    /// inheriting workspace defaults if within a Cargo workspace.
     pub fn discover_for_path(path: &Path) -> Self {
         if let Some(cargo_toml) = find_cargo_toml(path) {
-            Self::from_manifest_file(&cargo_toml).unwrap_or_default()
+            let mut config = Self::from_manifest_file(&cargo_toml).unwrap_or_default();
+            if let Some(ws_toml) = find_workspace_cargo_toml(&cargo_toml)
+                && let Some(ws_config) = Self::from_manifest_file(&ws_toml)
+            {
+                if config.max_file_lines.max_production_lines.is_none() {
+                    config.max_file_lines.max_production_lines =
+                        ws_config.max_file_lines.max_production_lines;
+                }
+                if config.max_file_lines.max_total_lines.is_none() {
+                    config.max_file_lines.max_total_lines =
+                        ws_config.max_file_lines.max_total_lines;
+                }
+            }
+            config
         } else {
             Self::empty()
         }
@@ -234,7 +259,7 @@ impl LintConfig {
             parse_rules_table(table, &mut config);
         }
 
-        // 2. Check [package.metadata.purist.lints] or [workspace.metadata.purist.lints]
+        // 2. Check [package.metadata.purist] or [workspace.metadata.purist]
         // (with metadata.opinionated fallback)
         if let Some(pkg) = doc.get("package").and_then(|p| p.as_table())
             && let Some(meta) = pkg.get("metadata").and_then(|m| m.as_table())
@@ -242,9 +267,11 @@ impl LintConfig {
                 .get("purist")
                 .or_else(|| meta.get("opinionated"))
                 .and_then(|o| o.as_table())
-            && let Some(lints) = op.get("lints").and_then(|l| l.as_table())
         {
-            parse_rules_table(lints, &mut config);
+            parse_metadata_purist(op, &mut config);
+            if let Some(lints) = op.get("lints").and_then(|l| l.as_table()) {
+                parse_rules_table(lints, &mut config);
+            }
         }
 
         if let Some(ws) = doc.get("workspace").and_then(|w| w.as_table())
@@ -253,9 +280,11 @@ impl LintConfig {
                 .get("purist")
                 .or_else(|| meta.get("opinionated"))
                 .and_then(|o| o.as_table())
-            && let Some(lints) = op.get("lints").and_then(|l| l.as_table())
         {
-            parse_rules_table(lints, &mut config);
+            parse_metadata_purist(op, &mut config);
+            if let Some(lints) = op.get("lints").and_then(|l| l.as_table()) {
+                parse_rules_table(lints, &mut config);
+            }
         }
 
         Some(config)
@@ -264,6 +293,26 @@ impl LintConfig {
     pub fn from_manifest_file(file: &Path) -> Option<Self> {
         let content = fs::read_to_string(file).ok()?;
         Self::from_manifest_content(&content)
+    }
+}
+
+fn parse_metadata_purist(table: &toml_edit::Table, config: &mut LintConfig) {
+    if let Some(val) = table
+        .get("max_production_lines")
+        .and_then(|v| v.as_integer())
+    {
+        config.max_file_lines.max_production_lines = usize::try_from(val).ok();
+    }
+    if let Some(val) = table.get("max_total_lines").and_then(|v| v.as_integer()) {
+        config.max_file_lines.max_total_lines = usize::try_from(val).ok();
+    }
+    if let Some(sub) = table.get("max_file_lines").and_then(|t| t.as_table()) {
+        if let Some(val) = sub.get("max_production_lines").and_then(|v| v.as_integer()) {
+            config.max_file_lines.max_production_lines = usize::try_from(val).ok();
+        }
+        if let Some(val) = sub.get("max_total_lines").and_then(|v| v.as_integer()) {
+            config.max_file_lines.max_total_lines = usize::try_from(val).ok();
+        }
     }
 }
 
@@ -279,11 +328,34 @@ fn parse_rules_table(table: &toml_edit::Table, config: &mut LintConfig) {
             {
                 config.set_rule(key, level);
             }
-        } else if let Some(tbl) = item.as_table()
-            && let Some(level_str) = tbl.get("level").and_then(|l| l.as_str())
-            && let Some(level) = RuleLevel::parse(level_str)
-        {
-            config.set_rule(key, level);
+            if key == "max_file_lines" {
+                if let Some(val) = inline_table
+                    .get("max_production_lines")
+                    .and_then(|v| v.as_integer())
+                {
+                    config.max_file_lines.max_production_lines = usize::try_from(val).ok();
+                }
+                if let Some(val) = inline_table
+                    .get("max_total_lines")
+                    .and_then(|v| v.as_integer())
+                {
+                    config.max_file_lines.max_total_lines = usize::try_from(val).ok();
+                }
+            }
+        } else if let Some(tbl) = item.as_table() {
+            if let Some(level_str) = tbl.get("level").and_then(|l| l.as_str())
+                && let Some(level) = RuleLevel::parse(level_str)
+            {
+                config.set_rule(key, level);
+            }
+            if key == "max_file_lines" {
+                if let Some(val) = tbl.get("max_production_lines").and_then(|v| v.as_integer()) {
+                    config.max_file_lines.max_production_lines = usize::try_from(val).ok();
+                }
+                if let Some(val) = tbl.get("max_total_lines").and_then(|v| v.as_integer()) {
+                    config.max_file_lines.max_total_lines = usize::try_from(val).ok();
+                }
+            }
         }
     }
 }
@@ -445,6 +517,27 @@ pub fn find_cargo_toml(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Finds the enclosing workspace `Cargo.toml` if `start` is located within a workspace member.
+pub fn find_workspace_cargo_toml(start: &Path) -> Option<PathBuf> {
+    let mut current = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+
+    while current.pop() {
+        let candidate = current.join("Cargo.toml");
+        if candidate.is_file()
+            && let Ok(content) = fs::read_to_string(&candidate)
+            && content.contains("[workspace]")
+        {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,6 +613,7 @@ centralized_command_execution = "allow"
         assert_that!(config.no_println_in_libraries, eq(RuleLevel::Warn));
         assert_that!(config.no_double_negation, eq(RuleLevel::Warn));
         assert_that!(config.googletest_conventions, eq(RuleLevel::Warn));
+        assert_that!(config.max_file_lines, eq(RuleLevel::Warn));
     }
 
     #[googletest::test]
