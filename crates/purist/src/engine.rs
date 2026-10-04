@@ -712,7 +712,7 @@ mod tests {
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::new();
-        assert_that!(engine.rules().len(), eq(23));
+        assert_that!(engine.rules().len(), eq(24));
         Ok(())
     }
 }

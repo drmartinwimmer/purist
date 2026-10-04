@@ -50,6 +50,7 @@ pub struct PuristLintsConfig {
     pub raii_temp_directories: RuleLevel,
     pub no_println_in_libraries: RuleLevel,
     pub cli_run_consumes_self: RuleLevel,
+    pub no_double_negation: RuleLevel,
 }
 
 /// Backwards compatibility alias for `PuristLintsConfig`.
@@ -87,6 +88,7 @@ impl PuristLintsConfig {
             "raii_temp_directories" => Some(self.raii_temp_directories),
             "no_println_in_libraries" => Some(self.no_println_in_libraries),
             "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
+            "no_double_negation" | "no_negative_boolean_names" => Some(self.no_double_negation),
             _ => None,
         }
     }
@@ -122,6 +124,7 @@ impl PuristLintsConfig {
             "raii_temp_directories" => self.raii_temp_directories = level,
             "no_println_in_libraries" => self.no_println_in_libraries = level,
             "cli_run_consumes_self" => self.cli_run_consumes_self = level,
+            "no_double_negation" | "no_negative_boolean_names" => self.no_double_negation = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -139,6 +142,7 @@ const DEPRECATED_ALIASES: &[(&str, &str)] = &[
     ("clap_encapsulation", "clap_struct_encapsulation"),
     ("option_bool_mapping", "idiomatic_option_bool_mapping"),
     ("test_matcher_borrow", "test_matcher_borrow_simplification"),
+    ("no_negative_boolean_names", "no_double_negation"),
 ];
 
 /// Project-level lint configuration parsed from `Cargo.toml`.
