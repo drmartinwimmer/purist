@@ -37,6 +37,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::no_wildcard_imports`: Wildcard imports (`use foo::*`) are prohibited outside test contexts and preludes.
   - `purist::no_redundant_wrappers`: Functions that merely forward arguments without additional logic are flagged.
   - `purist::no_println_in_libraries`: Libraries must use structured returns, diagnostic collectors, or logging facades rather than raw `println!`.
+  - `purist::no_double_negation`: Prohibits negative boolean naming (such as `with_skip_*`, `is_skip_*`, `skip: bool`) to prevent double negations.
   - `purist::clippy_suppression_hygiene`: Every `#[allow(...)]` or `#[expect(...)]` attribute requires a documented `reason`.
 - **Idiomatic Patterns**:
   - `purist::single_match_to_let_else`: Recommends `let ... = ... else { ... };` over single-variant `match` with early exits.
