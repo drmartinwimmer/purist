@@ -32,6 +32,9 @@ jobs:
       - name: Check Clippy lints
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Run opinionated AST linter
+        run: cargo run -p code-review -- opinionated --path .
+
       - name: Verify package & metadata
         run: |
           cargo metadata --format-version 1 --no-deps > /dev/null

@@ -200,8 +200,8 @@ mod tests {
     use googletest::prelude::*;
 
     #[googletest::test]
-    fn test_check_empty_report_returns_empty_and_zero_counts()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn check_empty_report_returns_empty_and_zero_counts() -> Result<(), Box<dyn std::error::Error>>
+    {
         let report = DiagnosticReport::default();
         expect_that!(report.is_empty(), is_true());
         expect_that!(report.has_errors(), is_false());
@@ -215,8 +215,8 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_add_diagnostics_updates_error_and_warning_counts()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn add_diagnostics_updates_error_and_warning_counts() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut report = DiagnosticReport::default();
         report.add(Diagnostic::new(
             "rule::error",
@@ -254,8 +254,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_create_span_stores_coordinates_and_byte_offsets()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn create_span_stores_coordinates_and_byte_offsets() -> Result<(), Box<dyn std::error::Error>> {
         let span = Span::new("src/lib.rs", 12, 4, 12, 18).with_byte_offsets(120, 134);
         expect_that!(span.file, eq(&PathBuf::from("src/lib.rs")));
         expect_that!(span.start_line, eq(12));
@@ -268,7 +267,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_serialize_diagnostic_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
+    fn serialize_diagnostic_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
         let span = Span::new("src/main.rs", 10, 5, 10, 20).with_byte_offsets(85, 100);
         let diag = Diagnostic::new("rule::style", Severity::Warning, "Avoid raw unwrap")
             .with_span(span.clone())
@@ -287,8 +286,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_serialize_report_with_summary_roundtrips_json() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn serialize_report_with_summary_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
         let report = DiagnosticReport::new(vec![
             Diagnostic::new("rule::one", Severity::Error, "First issue")
                 .with_span(Span::new("foo.rs", 1, 1, 1, 10)),
@@ -309,7 +307,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_display_severity_formats_lowercase() -> Result<(), Box<dyn std::error::Error>> {
+    fn display_severity_formats_lowercase() -> Result<(), Box<dyn std::error::Error>> {
         expect_that!(Severity::Error.to_string(), eq("error"));
         expect_that!(Severity::Warning.to_string(), eq("warning"));
         expect_that!(Severity::Info.to_string(), eq("info"));

@@ -86,7 +86,7 @@ impl OpinionatedCommand {
     }
 
     /// Executes the opinionated rules against the target path and returns the report.
-    pub fn execute(&self) -> Result<DiagnosticReport, OpinionatedError> {
+    pub fn execute(self) -> Result<DiagnosticReport, OpinionatedError> {
         let target_path = self.path.as_deref().unwrap_or_else(|| Path::new("."));
 
         if !target_path.exists() {
@@ -100,8 +100,8 @@ impl OpinionatedCommand {
 
     /// Runs the opinionated static analysis checks and renders diagnostics.
     pub fn run(self) -> Result<(), OpinionatedError> {
-        let report = self.execute()?;
         let format = self.format.unwrap_or(OutputFormat::Console);
+        let report = self.execute()?;
 
         render_report(&report, format, &mut std::io::stdout())?;
 
@@ -135,17 +135,24 @@ mod tests {
         Ok(())
     }
 
+    struct TempDirGuard(PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.0));
+        }
+    }
+
     #[googletest::test]
     fn run_opinionated_command_on_clean_file_succeeds() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!("test_clean_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("clean.rs");
         fs::write(&file_path, "pub fn add(a: i32, b: i32) -> i32 { a + b }\n")?;
 
         let cmd = OpinionatedCommand::new(Some(file_path), true);
         let report = cmd.execute()?;
-
-        let _result = fs::remove_dir_all(&temp_dir);
 
         assert_that!(report.is_empty(), is_true());
         Ok(())
@@ -155,6 +162,7 @@ mod tests {
     fn run_opinionated_command_detects_violations() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!("test_violations_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("bad.rs");
         fs::write(
             &file_path,
@@ -163,8 +171,6 @@ mod tests {
 
         let cmd = OpinionatedCommand::new(Some(file_path), true);
         let result = cmd.run();
-
-        let _result = fs::remove_dir_all(&temp_dir);
 
         match result {
             Err(OpinionatedError::LintViolationsFound { count }) => {

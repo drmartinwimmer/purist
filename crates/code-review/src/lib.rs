@@ -284,6 +284,14 @@ mod tests {
         Ok(())
     }
 
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            drop(std::fs::remove_dir_all(&self.0));
+        }
+    }
+
     #[googletest::test]
     fn run_cli_opinionated_command_on_clean_target_returns_success()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -292,6 +300,7 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("clean.rs");
         std::fs::write(&file_path, "pub fn helper() -> i32 { 10 }\n")?;
 
@@ -299,7 +308,6 @@ mod tests {
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
         let code = cli.run();
 
-        let _result = std::fs::remove_dir_all(&temp_dir);
         expect_that!(code, eq(ExitCode::SUCCESS));
         Ok(())
     }
@@ -312,6 +320,7 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("main.rs");
         std::fs::write(&file_path, "mod helpers { pub fn broken() {} }\n")?;
 
@@ -319,7 +328,6 @@ mod tests {
         let cli = Cli::new(OutputFormat::Console, 0, true, Commands::Opinionated(cmd));
         let code = cli.run();
 
-        let _result = std::fs::remove_dir_all(&temp_dir);
         expect_that!(code, eq(ExitCode::from(1)));
         Ok(())
     }

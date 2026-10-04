@@ -1,5 +1,7 @@
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
@@ -93,11 +95,7 @@ impl<'ast> Visit<'ast> for PathVisitor<'_> {
 }
 
 impl PathVisitor<'_> {
-    fn check_call(
-        &mut self,
-        func: &syn::Expr,
-        args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
-    ) {
+    fn check_call(&mut self, func: &syn::Expr, args: &Punctuated<syn::Expr, Comma>) {
         let path = match func {
             syn::Expr::Path(expr_path) => &expr_path.path,
             _ => return,

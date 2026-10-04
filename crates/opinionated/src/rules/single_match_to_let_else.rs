@@ -77,23 +77,17 @@ fn is_single_variant_pattern(pat: &syn::Pat) -> bool {
 fn is_diverging_expr(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Return(_) | syn::Expr::Break(_) | syn::Expr::Continue(_) => true,
-        syn::Expr::Macro(mac) => {
-            if let Some(ident) = mac.mac.path.segments.last() {
-                matches!(
-                    ident.ident.to_string().as_str(),
-                    "panic" | "bail" | "todo" | "unreachable"
-                )
-            } else {
-                false
-            }
-        }
-        syn::Expr::Block(b) => {
-            if let Some(syn::Stmt::Expr(e, _)) = b.block.stmts.last() {
-                is_diverging_expr(e)
-            } else {
-                false
-            }
-        }
+        syn::Expr::Macro(mac) => mac.mac.path.segments.last().is_some_and(|ident| {
+            matches!(
+                ident.ident.to_string().as_str(),
+                "panic" | "bail" | "todo" | "unreachable"
+            )
+        }),
+        syn::Expr::Block(b) => b
+            .block
+            .stmts
+            .last()
+            .is_some_and(|stmt| matches!(stmt, syn::Stmt::Expr(e, _) if is_diverging_expr(e))),
         _ => false,
     }
 }

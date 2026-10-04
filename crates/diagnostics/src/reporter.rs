@@ -195,8 +195,7 @@ mod tests {
     use googletest::prelude::*;
 
     #[googletest::test]
-    fn test_render_console_empty_report_reports_no_issues() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn render_console_empty_report_reports_no_issues() -> Result<(), Box<dyn std::error::Error>> {
         let report = DiagnosticReport::default();
         let mut buffer = Vec::new();
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, false)?;
@@ -206,7 +205,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_console_diagnostics_formats_grouped_by_file_and_summary()
+    fn render_console_diagnostics_formats_grouped_by_file_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
         report.add(
@@ -243,7 +242,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_console_with_color_includes_ansi_escape_codes()
+    fn render_console_with_color_includes_ansi_escape_codes()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
         report.add(
@@ -266,8 +265,8 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_json_outputs_valid_pretty_json_with_summary()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn render_json_outputs_valid_pretty_json_with_summary() -> Result<(), Box<dyn std::error::Error>>
+    {
         let mut report = DiagnosticReport::default();
         report.add(Diagnostic::new(
             "rule::json",
@@ -294,7 +293,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_markdown_empty_report_outputs_clean_markdown()
+    fn render_markdown_empty_report_outputs_clean_markdown()
     -> Result<(), Box<dyn std::error::Error>> {
         let report = DiagnosticReport::default();
         let mut buffer = Vec::new();
@@ -306,7 +305,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_markdown_diagnostics_outputs_table_and_summary()
+    fn render_markdown_diagnostics_outputs_table_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
         report.add(
@@ -332,7 +331,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn test_render_markdown_sanitizes_pipes_and_newlines_in_suggested_fix()
+    fn render_markdown_sanitizes_pipes_and_newlines_in_suggested_fix()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
         report.add(

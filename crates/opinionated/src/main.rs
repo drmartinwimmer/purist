@@ -38,10 +38,19 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    struct TempDirGuard(PathBuf);
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            drop(fs::remove_dir_all(&self.0));
+        }
+    }
+
     #[googletest::test]
     fn run_cli_clean_file_returns_success() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!("test_cli_clean_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("clean.rs");
         fs::write(&file_path, "pub fn add(x: i32) -> i32 { x + 1 }\n")?;
 
@@ -50,7 +59,6 @@ mod tests {
         };
         let code = cli.run();
 
-        let _result = fs::remove_dir_all(&temp_dir);
         assert_that!(code, eq(ExitCode::SUCCESS));
         Ok(())
     }
@@ -59,6 +67,7 @@ mod tests {
     fn run_cli_with_violations_returns_exit_code_1() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = std::env::temp_dir().join(format!("test_cli_viol_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
+        let _guard = TempDirGuard(temp_dir.clone());
         let file_path = temp_dir.join("main.rs");
         fs::write(&file_path, "mod helpers { pub fn foo() {} }\n")?;
 
@@ -67,7 +76,6 @@ mod tests {
         };
         let code = cli.run();
 
-        let _result = fs::remove_dir_all(&temp_dir);
         assert_that!(code, eq(ExitCode::from(1)));
         Ok(())
     }
