@@ -1,10 +1,43 @@
+//! Rule: `opinionated::error_types`
+//!
+//! # What This Rule Does
+//! Flags production functions that return unstructured string error types (`Result<T, String>` or
+//! `Result<T, &str>`).
+//!
+//! # Why This Rule Exists
+//! Returning unstructured string errors discards semantic error types, preventing callers from
+//! programmatically inspecting, matching on, or recovering from specific failure modes. It forces
+//! callers into fragile string-matching anti-patterns, destroys error cause chains (`#[source]`),
+//! and introduces unnecessary heap allocations. Production code should define typed error enums
+//! using `thiserror` (or return `anyhow::Result` in top-level application binaries).
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! pub fn parse_config(path: &Path) -> Result<Config, String> {
+//!     Err("file not found".to_string())
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! #[derive(Debug, thiserror::Error)]
+//! pub enum ConfigError {
+//!     #[error("configuration file not found: {0}")]
+//!     NotFound(PathBuf),
+//! }
+//!
+//! pub fn parse_config(path: &Path) -> Result<Config, ConfigError> {
+//!     Err(ConfigError::NotFound(path.to_path_buf()))
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::ReturnType;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule flagging unstructured string error types (Result<T, String> or Result<T, &str>) in production functions.
+/// Rule flagging unstructured string error types (`Result<T, String>` or `Result<T, &str>`) in production functions.
 pub struct ErrorTypesRule;
 
 impl Rule for ErrorTypesRule {
@@ -28,105 +61,127 @@ impl Rule for ErrorTypesRule {
     }
 }
 
+/// Visitor that inspects function return types for unstructured string errors while tracking test scopes.
 struct ErrorTypesVisitor<'a> {
+    /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
+    /// Indicates whether the traversal is inside a test function or `#[cfg(test)]` module.
     in_test_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
+    /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
-
-        let previous_test_scope = self.in_test_scope;
+        let is_test = has_cfg_test_attr(&item_mod.attrs);
+        let prev = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
         }
 
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = previous_test_scope;
+        self.in_test_scope = prev;
     }
 
+    /// Inspects free function return types and marks test scope active if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
-
-        if !self.in_test_scope && !is_test {
-            self.check_signature(&item_fn.sig.ident.to_string(), &item_fn.sig);
+        let is_test = has_test_attr(&item_fn.attrs);
+        if !self.in_test_scope
+            && !is_test
+            && let Some(diag) = check_fn_return_type(self.ctx, &item_fn.sig)
+        {
+            self.diagnostics.push(diag);
         }
 
-        let previous_test_scope = self.in_test_scope;
+        let prev = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
         }
 
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = previous_test_scope;
+        self.in_test_scope = prev;
     }
 
+    /// Inspects methods in inherent or trait implementations outside test scopes.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        if !self.in_test_scope {
-            self.check_signature(&impl_fn.sig.ident.to_string(), &impl_fn.sig);
+        if !self.in_test_scope
+            && let Some(diag) = check_fn_return_type(self.ctx, &impl_fn.sig)
+        {
+            self.diagnostics.push(diag);
         }
         visit::visit_impl_item_fn(self, impl_fn);
     }
 
+    /// Inspects trait definition method signatures outside test scopes.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        if !self.in_test_scope {
-            self.check_signature(&trait_fn.sig.ident.to_string(), &trait_fn.sig);
+        if !self.in_test_scope
+            && let Some(diag) = check_fn_return_type(self.ctx, &trait_fn.sig)
+        {
+            self.diagnostics.push(diag);
         }
         visit::visit_trait_item_fn(self, trait_fn);
     }
 }
 
-impl ErrorTypesVisitor<'_> {
-    fn check_signature(&mut self, fn_name: &str, sig: &syn::Signature) {
-        let return_type = match &sig.output {
-            ReturnType::Type(_, ty) => ty.as_ref(),
-            ReturnType::Default => return,
-        };
-
-        if let Some((error_ty, err_desc)) = detect_string_error_type(return_type) {
-            let span = self.ctx.to_span(error_ty.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "opinionated::error_types",
-                    Severity::Warning,
-                    format!(
-                        "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Define a dedicated error enum deriving 'thiserror::Error' or use 'anyhow::Result'.".to_string()),
-            );
+/// Checks whether an attribute list includes `#[cfg(test)]`.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
         }
-    }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
 }
 
-/// Detects if a return type is Result<T, String> or Result<T, &str>.
+/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+/// Inspects a function signature's return type and returns a diagnostic if it returns `Result<T, String>` or `Result<T, &str>`.
+fn check_fn_return_type(ctx: &LintContext<'_>, sig: &syn::Signature) -> Option<Diagnostic> {
+    let return_type = match &sig.output {
+        ReturnType::Type(_, ty) => ty.as_ref(),
+        ReturnType::Default => return None,
+    };
+
+    let (error_ty, err_desc) = detect_string_error_type(return_type)?;
+    let span = ctx.to_span(error_ty.span());
+    let fn_name = sig.ident.to_string();
+
+    Some(
+        Diagnostic::new(
+            "opinionated::error_types",
+            Severity::Warning,
+            format!(
+                "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
+            ),
+        )
+        .with_span(span)
+        .with_suggested_fix("Define a dedicated error enum deriving 'thiserror::Error' or use 'anyhow::Result'."),
+    )
+}
+
+/// Detects if a return type is `Result<T, String>` or `Result<T, &str>`, returning the inner error type and description.
 fn detect_string_error_type(ty: &syn::Type) -> Option<(&syn::Type, String)> {
-    let type_path = match ty {
-        syn::Type::Path(p) => p,
-        _ => return None,
+    let syn::Type::Path(type_path) = ty else {
+        return None;
     };
 
     let last_segment = type_path.path.segments.last()?;
@@ -134,18 +189,16 @@ fn detect_string_error_type(ty: &syn::Type) -> Option<(&syn::Type, String)> {
         return None;
     }
 
-    let args = match &last_segment.arguments {
-        syn::PathArguments::AngleBracketed(ab) => &ab.args,
-        _ => return None,
+    let syn::PathArguments::AngleBracketed(ab) = &last_segment.arguments else {
+        return None;
     };
 
-    if args.len() != 2 {
+    if ab.args.len() != 2 {
         return None;
     }
 
-    let err_arg = match &args[1] {
-        syn::GenericArgument::Type(t) => t,
-        _ => return None,
+    let syn::GenericArgument::Type(err_arg) = ab.args.iter().nth(1)? else {
+        return None;
     };
 
     if is_string_type(err_arg) {
@@ -159,6 +212,7 @@ fn detect_string_error_type(ty: &syn::Type) -> Option<(&syn::Type, String)> {
     None
 }
 
+/// Returns true if the type is `String`.
 fn is_string_type(ty: &syn::Type) -> bool {
     if let syn::Type::Path(p) = ty
         && let Some(seg) = p.path.segments.last()
@@ -168,6 +222,7 @@ fn is_string_type(ty: &syn::Type) -> bool {
     false
 }
 
+/// Returns true if the type is `&str`.
 fn is_str_ref_type(ty: &syn::Type) -> bool {
     if let syn::Type::Reference(r) = ty
         && let syn::Type::Path(p) = &*r.elem

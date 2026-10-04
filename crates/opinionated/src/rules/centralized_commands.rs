@@ -1,3 +1,37 @@
+//! Rule: `opinionated::centralized_command_execution`
+//!
+//! # What This Rule Does
+//! Flags direct invocations of `std::process::Command::new` outside of dedicated command execution
+//! modules (such as directories or files named `tools/`, `commands/`, `cmd/`, `*_tool.rs`, or `*_command.rs`).
+//!
+//! # Why This Rule Exists
+//! Spreading raw process invocations across business logic makes mocking, error handling, exit code
+//! management, environment isolation, and argument sanitization inconsistent and fragile. External
+//! commands should be centralized into dedicated tool adapter structs or command runner modules that
+//! handle argument composition, timeout limits, stdout/stderr streaming, and structured result parsing.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! pub fn sync_repository() {
+//!     // Direct process invocation inside a domain service
+//!     let _ = std::process::Command::new("git").arg("fetch").status();
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! // In src/tools/git.rs or src/commands/git.rs
+//! pub struct GitTool;
+//!
+//! impl GitTool {
+//!     pub fn fetch(&self) -> io::Result<()> {
+//!         let status = std::process::Command::new("git").arg("fetch").status()?;
+//!         // Structured error handling...
+//!         Ok(())
+//!     }
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -27,6 +61,7 @@ impl Rule for CentralizedCommandsRule {
     }
 }
 
+/// Returns true if the file path is exempt from the centralized command rule (e.g. tests or dedicated tool modules).
 fn is_exempt_path(ctx: &LintContext<'_>) -> bool {
     if ctx.is_test_file() {
         return true;
@@ -42,28 +77,20 @@ fn is_exempt_path(ctx: &LintContext<'_>) -> bool {
         || path_str.ends_with("/command.rs")
 }
 
+/// Visitor that inspects function calls for direct `Command::new` invocations while tracking test scopes.
 struct CommandVisitor<'a> {
+    /// Context containing file metadata and source span converters.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
+    /// Indicates whether the AST traversal is currently inside a test function or test module.
     in_test_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for CommandVisitor<'_> {
+    /// Tracks entry into and exit from modules, updating test scope if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
-
+        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
         let prev = self.in_test_scope;
         if is_cfg_test {
             self.in_test_scope = true;
@@ -73,17 +100,9 @@ impl<'ast> Visit<'ast> for CommandVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Tracks entry into and exit from functions, updating test scope if annotated with `#[test]` or `#[googletest::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
-
+        let is_test = has_test_attr(&item_fn.attrs);
         let prev = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
@@ -93,27 +112,55 @@ impl<'ast> Visit<'ast> for CommandVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Inspects function call expressions and records a diagnostic if an uncentralized `Command::new` is detected.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.in_test_scope
-            && let syn::Expr::Path(expr_path) = &*call.func
-            && is_command_new_path(&expr_path.path)
-        {
-            let span = self.ctx.to_span(call.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "opinionated::centralized_command_execution",
-                    Severity::Warning,
-                    "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module."),
-            );
+        if !self.in_test_scope && is_uncentralized_command_call(call) {
+            self.diagnostics.push(build_diagnostic(self.ctx, call));
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
+/// Checks if any attribute matches `#[cfg(test)]`.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
+}
+
+/// Checks if any attribute matches `#[test]` or an attribute ending in `::test`.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+/// Returns true if a call expression targets `Command::new`.
+fn is_uncentralized_command_call(call: &syn::ExprCall) -> bool {
+    let syn::Expr::Path(expr_path) = &*call.func else {
+        return false;
+    };
+    is_command_new_path(&expr_path.path)
+}
+
+/// Checks if the path resolves to `Command::new` or `std::process::Command::new`.
 fn is_command_new_path(path: &syn::Path) -> bool {
     let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
     if segments.len() < 2 {
@@ -128,6 +175,18 @@ fn is_command_new_path(path: &syn::Path) -> bool {
     } else {
         false
     }
+}
+
+/// Builds the diagnostic finding for an uncentralized `Command::new` invocation.
+fn build_diagnostic(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Diagnostic {
+    let span = ctx.to_span(call.span());
+    Diagnostic::new(
+        "opinionated::centralized_command_execution",
+        Severity::Warning,
+        "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
+    )
+    .with_span(span)
+    .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module.")
 }
 
 #[cfg(test)]

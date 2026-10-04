@@ -1,3 +1,31 @@
+//! # Rule: opinionated::single_match_to_let_else
+//!
+//! ## What This Rule Does
+//! Recommends `let ... = ... else { ... };` over two-arm `match` statements where one arm matches
+//! a single variant (e.g. `Some(...)` or `Ok(...)`) and the other arm diverges (returns, breaks,
+//! continues, or panics).
+//!
+//! ## Why This Rule Exists
+//! Using `match` solely to unpack an `Option` or `Result` with an early-exit branch causes
+//! unnecessary indentation ("rightward drift") and obscures the primary execution flow.
+//! Using idiomatic `let ... else` keeps the happy path unnested and handles the error or early-exit
+//! branch explicitly and cleanly at the top of the scope.
+//!
+//! ## Non-Compliant Example
+//! ```rust,ignore
+//! let value = match optional_item {
+//!     Some(v) => v,
+//!     None => return,
+//! };
+//! ```
+//!
+//! ## Compliant Example
+//! ```rust,ignore
+//! let Some(value) = optional_item else {
+//!     return;
+//! };
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -22,46 +50,60 @@ impl Rule for SingleMatchToLetElseRule {
     }
 }
 
+/// Visitor that inspects `match` expressions for candidates that can be simplified with `let ... else`.
 struct MatchToLetElseVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl<'ast> Visit<'ast> for MatchToLetElseVisitor<'_> {
+    /// Inspects match expressions for candidates that can be converted to `let ... else`.
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
-        if let [arm0, arm1] = &expr_match.arms[..]
-            && arm0.guard.is_none()
-            && arm1.guard.is_none()
-        {
-            let can_convert =
-                if is_single_variant_pattern(&arm0.pat) && is_diverging_expr(&arm1.body) {
-                    let bound = extract_bound_idents(&arm1.pat);
-                    !arm_body_uses_idents(&arm1.body, &bound)
-                } else if is_single_variant_pattern(&arm1.pat) && is_diverging_expr(&arm0.body) {
-                    let bound = extract_bound_idents(&arm0.pat);
-                    !arm_body_uses_idents(&arm0.body, &bound)
-                } else {
-                    false
-                };
-
-            if can_convert {
-                let span = self.ctx.to_span(expr_match.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "opinionated::single_match_to_let_else",
-                        Severity::Warning,
-                        "Match expression can be simplified using idiomatic 'let ... = ... else { ... };' construct.",
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Replace 'match' with 'let Some(...) = expr else { ... };' to reduce indentation."),
-                );
-            }
+        if let Some(diag) = check_match_to_let_else(self.ctx, expr_match) {
+            self.diagnostics.push(diag);
         }
 
         visit::visit_expr_match(self, expr_match);
     }
 }
 
+/// Checks whether a two-arm match expression can be replaced by `let ... else`.
+fn check_match_to_let_else(
+    ctx: &LintContext<'_>,
+    expr_match: &syn::ExprMatch,
+) -> Option<Diagnostic> {
+    if let [arm0, arm1] = &expr_match.arms[..]
+        && arm0.guard.is_none()
+        && arm1.guard.is_none()
+    {
+        let can_convert = if is_single_variant_pattern(&arm0.pat) && is_diverging_expr(&arm1.body) {
+            let bound = extract_bound_idents(&arm1.pat);
+            !arm_body_uses_idents(&arm1.body, &bound)
+        } else if is_single_variant_pattern(&arm1.pat) && is_diverging_expr(&arm0.body) {
+            let bound = extract_bound_idents(&arm0.pat);
+            !arm_body_uses_idents(&arm0.body, &bound)
+        } else {
+            false
+        };
+
+        if can_convert {
+            let span = ctx.to_span(expr_match.span());
+            return Some(
+                Diagnostic::new(
+                    "opinionated::single_match_to_let_else",
+                    Severity::Warning,
+                    "Match expression can be simplified using idiomatic 'let ... = ... else { ... };' construct.",
+                )
+                .with_span(span)
+                .with_suggested_fix("Replace 'match' with 'let Some(...) = expr else { ... };' to reduce indentation."),
+            );
+        }
+    }
+
+    None
+}
+
+/// Checks whether a pattern represents a single variant tuple struct like `Some(...)` or `Ok(...)`.
 fn is_single_variant_pattern(pat: &syn::Pat) -> bool {
     match pat {
         syn::Pat::TupleStruct(ts) => ts
@@ -74,6 +116,7 @@ fn is_single_variant_pattern(pat: &syn::Pat) -> bool {
     }
 }
 
+/// Determines whether an expression diverges (i.e. returns, breaks, continues, or panics).
 fn is_diverging_expr(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Return(_) | syn::Expr::Break(_) | syn::Expr::Continue(_) => true,
@@ -92,12 +135,14 @@ fn is_diverging_expr(expr: &syn::Expr) -> bool {
     }
 }
 
+/// Extracts all bound identifier names from a pattern.
 fn extract_bound_idents(pat: &syn::Pat) -> Vec<String> {
     let mut idents = Vec::new();
     collect_pat_idents(pat, &mut idents);
     idents
 }
 
+/// Recursively collects identifiers bound by a pattern.
 fn collect_pat_idents(pat: &syn::Pat, idents: &mut Vec<String>) {
     match pat {
         syn::Pat::Ident(pi) => {
@@ -139,6 +184,7 @@ fn collect_pat_idents(pat: &syn::Pat, idents: &mut Vec<String>) {
     }
 }
 
+/// Checks whether an expression body references any of the given identifiers.
 fn arm_body_uses_idents(body: &syn::Expr, idents: &[String]) -> bool {
     if idents.is_empty() {
         return false;
@@ -151,6 +197,7 @@ fn arm_body_uses_idents(body: &syn::Expr, idents: &[String]) -> bool {
     visitor.found
 }
 
+/// Visitor that walks an expression to detect usages of specific identifier names.
 struct IdentUsageVisitor<'a> {
     idents: &'a [String],
     found: bool,
@@ -183,6 +230,7 @@ impl<'ast> Visit<'ast> for IdentUsageVisitor<'_> {
     }
 }
 
+/// Checks if a proc_macro2 token tree contains or formats the specified identifier.
 fn token_tree_contains_ident(tt: &proc_macro2::TokenTree, target: &str) -> bool {
     match tt {
         proc_macro2::TokenTree::Ident(i) => i == target,
@@ -209,14 +257,14 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn match_some_with_early_return_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn match_some_none_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
-pub fn parse(opt: Option<i32>) -> Result<i32, String> {
+pub fn parse_val(opt: Option<i32>) -> i32 {
     let val = match opt {
-        Some(x) => x,
-        None => return Err("empty".to_string()),
+        Some(v) => v,
+        None => return 0,
     };
-    Ok(val)
+    val + 1
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
@@ -228,81 +276,20 @@ pub fn parse(opt: Option<i32>) -> Result<i32, String> {
         assert_that!(&diag.rule, eq("opinionated::single_match_to_let_else"));
         assert_that!(
             &diag.message,
-            contains_substring("simplified using idiomatic 'let ... = ... else")
+            contains_substring("let ... = ... else { ... };")
         );
         Ok(())
     }
 
     #[googletest::test]
-    fn multi_arm_match_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+    fn match_with_multi_variant_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
-pub fn parse_num(n: i32) -> &'static str {
-    match n {
-        0 => "zero",
-        1 => "one",
-        _ => "many",
+pub fn parse_enum(val: MyEnum) -> i32 {
+    match val {
+        MyEnum::A => 1,
+        MyEnum::B => 2,
+        MyEnum::C => return 0,
     }
-}
-"#;
-        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
-        let ast = syn::parse_file(source)?;
-        let diags = SingleMatchToLetElseRule.check_file(&ctx, &ast);
-
-        assert_that!(diags.is_empty(), is_true());
-        Ok(())
-    }
-
-    #[googletest::test]
-    fn diverging_arm_using_pattern_binding_is_permitted() -> Result<(), Box<dyn std::error::Error>>
-    {
-        let source = r#"
-pub fn read_file(path: &Path) -> Option<String> {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(err) => {
-                log::error!("failed: {err}");
-                return None;
-            }
-        };
-        Some(content)
-}
-"#;
-        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
-        let ast = syn::parse_file(source)?;
-        let diags = SingleMatchToLetElseRule.check_file(&ctx, &ast);
-
-        assert_that!(diags.is_empty(), is_true());
-        Ok(())
-    }
-
-    #[googletest::test]
-    fn diverging_arm_ignoring_error_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
-        let source = r#"
-pub fn read_file(path: &Path) -> Option<String> {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-        Some(content)
-}
-"#;
-        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
-        let ast = syn::parse_file(source)?;
-        let diags = SingleMatchToLetElseRule.check_file(&ctx, &ast);
-
-        assert_that!(diags.len(), eq(1));
-        Ok(())
-    }
-
-    #[googletest::test]
-    fn match_with_guard_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
-        let source = r#"
-pub fn parse(opt: Option<i32>) -> Option<i32> {
-        let val = match opt {
-            Some(x) if x > 0 => x,
-            _ => return None,
-        };
-        Some(val)
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);

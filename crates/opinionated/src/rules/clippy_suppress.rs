@@ -1,9 +1,36 @@
+//! Rule: `opinionated::clippy_suppression_hygiene`
+//!
+//! # What This Rule Does
+//! Enforces rigorous hygiene on compiler and Clippy lint suppressions (`#[allow(...)]` and `#[expect(...)]`).
+//! Specifically, every lint suppression attribute must:
+//! 1. Include an in-attribute `reason = "..."` parameter documenting why the lint is waived.
+//! 2. Have an accompanying code comment (`// ...` or `/* ... */`) on the immediately preceding line
+//!    explaining why the code cannot be refactored to resolve the lint cleanly.
+//!
+//! # Why This Rule Exists
+//! Silent or unmotivated lint suppressions quickly accumulate technical debt and mask bugs. Requiring
+//! both a machine-readable reason parameter and a human-readable explanatory comment ensures that
+//! every suppression is an intentional, documented engineering decision rather than a quick workaround.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! #[allow(clippy::unwrap_used)] // Missing reason parameter and missing preceding comment
+//! fn read_config() { ... }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! // Invariant: The embedded config template is validated by build.rs and is guaranteed non-empty.
+//! #[expect(clippy::unwrap_used, reason = "infallible static template lookup")]
+//! fn read_config() { ... }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule enforcing suppression hygiene: requiring reason="…" and a preceding explanatory comment.
+/// Rule enforcing suppression hygiene: requiring `reason = "…"` and a preceding explanatory comment.
 pub struct ClippySuppressRule;
 
 impl Rule for ClippySuppressRule {
@@ -22,63 +49,83 @@ impl Rule for ClippySuppressRule {
     }
 }
 
+/// Visitor that inspects AST attributes to verify suppression hygiene.
 struct SuppressVisitor<'a> {
+    /// Context containing source text and preceding comment lookup helpers.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
 }
 
 impl<'ast> Visit<'ast> for SuppressVisitor<'_> {
+    /// Inspects attributes for lint suppressions (`#[allow]` or `#[expect]`) and verifies hygiene.
     fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
-        let is_suppression = attr.path().is_ident("allow") || attr.path().is_ident("expect");
-
-        if is_suppression {
-            let mut has_reason = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("reason") {
-                    has_reason = true;
-                }
-                Ok(())
-            });
-
-            let span = self.ctx.to_span(attr.span());
-            let start_line = attr.span().start().line;
-            let has_comment = self.ctx.has_preceding_comment(start_line);
-
-            if !has_reason && !has_comment {
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "opinionated::clippy_suppression_hygiene",
-                        Severity::Warning,
-                        "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line.",
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Add reason = \"...\" to the attribute and document the rationale in a comment directly above it."),
-                );
-            } else if !has_reason {
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "opinionated::clippy_suppression_hygiene",
-                        Severity::Warning,
-                        "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary.",
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Add reason = \"...\" parameter to the suppression attribute."),
-                );
-            } else if !has_comment {
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "opinionated::clippy_suppression_hygiene",
-                        Severity::Warning,
-                        "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved.",
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Add an explanatory '// ...' comment on the line immediately preceding the attribute."),
-                );
-            }
+        if let Some(diag) = check_suppression_attribute(self.ctx, attr) {
+            self.diagnostics.push(diag);
         }
 
         visit::visit_attribute(self, attr);
     }
+}
+
+/// Checks whether an attribute is an unhygienic lint suppression, returning a diagnostic if non-compliant.
+fn check_suppression_attribute(ctx: &LintContext<'_>, attr: &syn::Attribute) -> Option<Diagnostic> {
+    if !is_lint_suppression_attr(attr) {
+        return None;
+    }
+
+    let has_reason = has_reason_parameter(attr);
+    let start_line = attr.span().start().line;
+    let has_comment = ctx.has_preceding_comment(start_line);
+    let span = ctx.to_span(attr.span());
+
+    match (has_reason, has_comment) {
+        (false, false) => Some(
+            Diagnostic::new(
+                "opinionated::clippy_suppression_hygiene",
+                Severity::Warning,
+                "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line.",
+            )
+            .with_span(span)
+            .with_suggested_fix("Add reason = \"...\" to the attribute and document the rationale in a comment directly above it."),
+        ),
+        (false, true) => Some(
+            Diagnostic::new(
+                "opinionated::clippy_suppression_hygiene",
+                Severity::Warning,
+                "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary.",
+            )
+            .with_span(span)
+            .with_suggested_fix("Add reason = \"...\" parameter to the suppression attribute."),
+        ),
+        (true, false) => Some(
+            Diagnostic::new(
+                "opinionated::clippy_suppression_hygiene",
+                Severity::Warning,
+                "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved.",
+            )
+            .with_span(span)
+            .with_suggested_fix("Add an explanatory '// ...' comment on the line immediately preceding the attribute."),
+        ),
+        (true, true) => None,
+    }
+}
+
+/// Returns true if the attribute is `#[allow(...)]` or `#[expect(...)]`.
+fn is_lint_suppression_attr(attr: &syn::Attribute) -> bool {
+    attr.path().is_ident("allow") || attr.path().is_ident("expect")
+}
+
+/// Checks whether the suppression attribute contains a `reason = "..."` parameter.
+fn has_reason_parameter(attr: &syn::Attribute) -> bool {
+    let mut has_reason = false;
+    let _result = attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("reason") {
+            has_reason = true;
+        }
+        Ok(())
+    });
+    has_reason
 }
 
 #[cfg(test)]

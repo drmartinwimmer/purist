@@ -1,3 +1,38 @@
+//! Rule: `opinionated::no_println_in_libraries`
+//!
+//! # What This Rule Does
+//! Flags direct invocations of `println!` and `eprintln!` in library modules. Dedicated entry points
+//! (`main.rs`, `/bin/`, `/examples/`), test scopes, and CLI command execution runners (`run`,
+//! `run_with_format`, `execute` on command structs) are exempt.
+//!
+//! # Why This Rule Exists
+//! Libraries should never write directly to standard output or standard error. Doing so:
+//! 1. Corrupts structured machine-readable stdout (e.g. JSON or CSV pipelines).
+//! 2. Prevents consuming applications from configuring output format, log levels, or redirection.
+//! 3. Can cause unexpected panics in multithreaded environments when stdout is closed.
+//!
+//! Libraries must communicate through structured return types (`Result`), diagnostics collectors, or
+//! the `tracing`/`log` facades.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! // In a core parsing library:
+//! pub fn parse_document(input: &str) -> Document {
+//!     println!("Parsing {} bytes...", input.len()); // Pollutes stdout
+//!     ...
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! use tracing::info;
+//!
+//! pub fn parse_document(input: &str) -> Document {
+//!     info!(bytes = input.len(), "parsing document"); // Clean structured logging
+//!     ...
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -29,11 +64,13 @@ impl Rule for NoPrintlnInLibrariesRule {
     }
 }
 
+/// Returns true if the file is an entrypoint binary or example where standard output printing is expected.
 fn is_exempt_entrypoint_or_example(ctx: &LintContext<'_>) -> bool {
     let path_str = ctx.file_path().to_string_lossy();
     path_str.ends_with("main.rs") || path_str.contains("/bin/") || path_str.contains("/examples/")
 }
 
+/// Returns true if the type name matches CLI command or argument conventions.
 fn is_cli_type(ty: &syn::Type) -> bool {
     if let syn::Type::Path(type_path) = ty
         && let Some(segment) = type_path.path.segments.last()
@@ -48,6 +85,7 @@ fn is_cli_type(ty: &syn::Type) -> bool {
     false
 }
 
+/// Returns true if an impl block represents a CLI command or command runner.
 fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
     if is_cli_type(&item_impl.self_ty) {
         return true;
@@ -63,6 +101,7 @@ fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
     false
 }
 
+/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
 fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         attr.path().is_ident("test")
@@ -75,35 +114,30 @@ fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
+/// Returns true if the identifier matches CLI command runner method names.
 fn is_execution_method(ident: &syn::Ident) -> bool {
     let name = ident.to_string();
     matches!(name.as_str(), "run" | "run_with_format" | "execute")
 }
 
+/// Visitor that inspects macro invocations for `println!` and `eprintln!` while tracking CLI runner and test scopes.
 struct PrintlnVisitor<'a> {
+    /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
+    /// Indicates whether traversal is inside a test function or `#[cfg(test)]` module.
     in_test_scope: bool,
+    /// Indicates whether traversal is currently within an impl block for a CLI struct.
     current_impl_is_cli: bool,
+    /// Indicates whether traversal is currently within an execution runner method (`run`, `execute`).
     in_cli_runner_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
+    /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
-
+        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
         let prev = self.in_test_scope;
         if is_cfg_test {
             self.in_test_scope = true;
@@ -113,6 +147,7 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Tracks whether traversal is inside an impl block for a CLI command struct.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
         let prev_impl_is_cli = self.current_impl_is_cli;
         if is_cli_impl(item_impl) {
@@ -123,6 +158,7 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
         self.current_impl_is_cli = prev_impl_is_cli;
     }
 
+    /// Tracks entry into methods, noting whether the method is a CLI runner (`run`, `execute`) or a test.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
         let is_test = has_test_attr(&method.attrs);
         let is_runner = self.current_impl_is_cli && is_execution_method(&method.sig.ident);
@@ -143,9 +179,9 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
         self.in_cli_runner_scope = prev_runner;
     }
 
+    /// Tracks entry into free functions, updating test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let is_test = has_test_attr(&item_fn.attrs);
-
         let prev = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
@@ -155,30 +191,65 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Inspects macro calls and flags `println!` or `eprintln!` in library code outside allowed scopes.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if !self.in_test_scope
-            && !self.in_cli_runner_scope
-            && let Some(segment) = mac.path.segments.last()
+        if let Some(diag) =
+            check_print_macro(self.ctx, self.in_test_scope, self.in_cli_runner_scope, mac)
         {
-            let name = segment.ident.to_string();
-            if name == "println" || name == "eprintln" {
-                let span = self.ctx.to_span(mac.path.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "opinionated::no_println_in_libraries",
-                        Severity::Warning,
-                        format!(
-                            "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
-                );
-            }
+            self.diagnostics.push(diag);
         }
 
         visit::visit_macro(self, mac);
     }
+}
+
+/// Checks whether an attribute list includes `#[cfg(test)]`.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
+}
+
+/// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
+fn check_print_macro(
+    ctx: &LintContext<'_>,
+    in_test_scope: bool,
+    in_cli_runner_scope: bool,
+    mac: &syn::Macro,
+) -> Option<Diagnostic> {
+    if in_test_scope || in_cli_runner_scope {
+        return None;
+    }
+
+    let segment = mac.path.segments.last()?;
+    let name = segment.ident.to_string();
+
+    if name != "println" && name != "eprintln" {
+        return None;
+    }
+
+    let span = ctx.to_span(mac.path.span());
+    Some(
+        Diagnostic::new(
+            "opinionated::no_println_in_libraries",
+            Severity::Warning,
+            format!(
+                "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
+            ),
+        )
+        .with_span(span)
+        .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
+    )
 }
 
 #[cfg(test)]

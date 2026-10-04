@@ -1,3 +1,33 @@
+//! Rule: `opinionated::no_inline_mods`
+//!
+//! # What This Rule Does
+//! Forbids inline module definitions (`mod foo { ... }`) in crate entry point files (`main.rs` and `lib.rs`).
+//! Dedicated unit test modules (`#[cfg(test)] mod tests { ... }`) and external module declarations
+//! (`mod foo;`) are exempt.
+//!
+//! # Why This Rule Exists
+//! Crate entry points (`lib.rs` and `main.rs`) should serve as concise indices of the crate's architecture,
+//! public API exports, and top-level wiring. Defining inline modules in root files mixes high-level crate
+//! declarations with implementation details, degrading readability and leading to monolithic file bloat.
+//! Each logical subsystem belongs in its own dedicated file or directory.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! // In src/lib.rs:
+//! mod helpers { // Inline module cluttering entry point
+//!     pub fn format_text() { ... }
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! // In src/lib.rs:
+//! pub mod helpers; // Declares file module
+//!
+//! // In src/helpers.rs:
+//! pub fn format_text() { ... }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 
@@ -10,47 +40,56 @@ impl Rule for NoInlineModsRule {
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
         // Only enforce in entry point files (main.rs, lib.rs, bin targets)
         if !ctx.is_main_or_lib() {
-            return diagnostics;
+            return Vec::new();
         }
 
+        let mut diagnostics = Vec::new();
+
         for item in &file.items {
-            if let syn::Item::Mod(item_mod) = item {
-                // Ignore file module declarations (e.g. `mod foo;` without inline body)
-                if item_mod.content.is_none() {
-                    continue;
-                }
-
-                // Ignore test modules (e.g. `#[cfg(test)] mod tests { ... }`)
-                if is_cfg_test_module(item_mod) {
-                    continue;
-                }
-
-                let mod_name = item_mod.ident.to_string();
-                let span = ctx.to_span(item_mod.ident.span());
-
-                diagnostics.push(
-                    Diagnostic::new(
-                        self.name(),
-                        Severity::Warning,
-                        format!(
-                            "Inline module '{mod_name}' in '{}' violates modularity guidelines. Submodules should be placed in dedicated files.",
-                            ctx.file_path().display()
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(format!(
-                        "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
-                    )),
-                );
+            if let syn::Item::Mod(item_mod) = item
+                && let Some(diag) = check_inline_module(ctx, self.name(), item_mod)
+            {
+                diagnostics.push(diag);
             }
         }
 
         diagnostics
     }
+}
+
+/// Checks whether an item module is an unidiomatic inline module in a crate root file.
+fn check_inline_module(
+    ctx: &LintContext<'_>,
+    rule_name: &'static str,
+    item_mod: &syn::ItemMod,
+) -> Option<Diagnostic> {
+    // Ignore file module declarations (e.g. `mod foo;` without inline body)
+    item_mod.content.as_ref()?;
+
+    // Ignore test modules (e.g. `#[cfg(test)] mod tests { ... }`)
+    if is_cfg_test_module(item_mod) {
+        return None;
+    }
+
+    let mod_name = item_mod.ident.to_string();
+    let span = ctx.to_span(item_mod.ident.span());
+
+    Some(
+        Diagnostic::new(
+            rule_name,
+            Severity::Warning,
+            format!(
+                "Inline module '{mod_name}' in '{}' violates modularity guidelines. Submodules should be placed in dedicated files.",
+                ctx.file_path().display()
+            ),
+        )
+        .with_span(span)
+        .with_suggested_fix(format!(
+            "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
+        )),
+    )
 }
 
 /// Checks whether a module is annotated with `#[cfg(test)]`.

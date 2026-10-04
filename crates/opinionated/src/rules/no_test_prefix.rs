@@ -1,3 +1,30 @@
+//! # Rule: opinionated::no_test_prefix
+//!
+//! ## What This Rule Does
+//! Flags test functions that use a redundant `test_` or `test` prefix in their name.
+//!
+//! ## Why This Rule Exists
+//! Test functions are already explicitly annotated with `#[test]` (or test framework macros)
+//! and located within `#[cfg(test)]` modules or test files. Adding a `test_` prefix is redundant
+//! noise. Test functions should instead adopt a descriptive convention describing the behavior,
+//! such as `<action>_<scenario>_<outcome>` (e.g. `parse_valid_manifest_succeeds`).
+//!
+//! ## Non-Compliant Example
+//! ```rust,ignore
+//! #[test]
+//! fn test_parse_manifest() {
+//!     // ...
+//! }
+//! ```
+//!
+//! ## Compliant Example
+//! ```rust,ignore
+//! #[test]
+//! fn parse_valid_manifest_succeeds() {
+//!     // ...
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::visit::{self, Visit};
@@ -22,6 +49,7 @@ impl Rule for NoTestPrefixRule {
     }
 }
 
+/// Visitor that walks modules and functions, tracking test scope and inspecting test names.
 struct TestPrefixVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
@@ -29,20 +57,9 @@ struct TestPrefixVisitor<'a> {
 }
 
 impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
+    /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
+        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
 
         let prev = self.in_cfg_test;
         if is_cfg_test {
@@ -53,61 +70,106 @@ impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
         self.in_cfg_test = prev;
     }
 
+    /// Checks top-level functions for forbidden test prefixes when in test scope.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.check_fn_name(&item_fn.sig.ident, &item_fn.attrs);
+        if let Some(diag) = check_function_name(
+            self.ctx,
+            &item_fn.sig.ident,
+            &item_fn.attrs,
+            self.in_cfg_test,
+        ) {
+            self.diagnostics.push(diag);
+        }
         visit::visit_item_fn(self, item_fn);
     }
 
+    /// Checks impl-level functions for forbidden test prefixes when in test scope.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.check_fn_name(&impl_fn.sig.ident, &impl_fn.attrs);
+        if let Some(diag) = check_function_name(
+            self.ctx,
+            &impl_fn.sig.ident,
+            &impl_fn.attrs,
+            self.in_cfg_test,
+        ) {
+            self.diagnostics.push(diag);
+        }
         visit::visit_impl_item_fn(self, impl_fn);
     }
 }
 
-impl TestPrefixVisitor<'_> {
-    fn check_fn_name(&mut self, ident: &syn::Ident, attrs: &[syn::Attribute]) {
-        let has_test_attr = attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
+/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
+fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
         });
+        test_attr
+    })
+}
 
-        let is_test = has_test_attr || self.in_cfg_test;
-        if !is_test {
-            return;
-        }
+/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
 
-        let name = ident.to_string();
-        let starts_with_prefix = name.starts_with("test_")
-            || name == "test"
-            || (name.starts_with("test")
-                && name
-                    .chars()
-                    .nth(4)
-                    .map(|c| c.is_ascii_uppercase() || c == '_')
-                    .unwrap_or(false));
+/// Determines if a function name begins with a forbidden `test_` or `test` prefix.
+fn has_forbidden_prefix(name: &str) -> bool {
+    name.starts_with("test_")
+        || name == "test"
+        || (name.starts_with("test")
+            && name
+                .chars()
+                .nth(4)
+                .map(|c| c.is_ascii_uppercase() || c == '_')
+                .unwrap_or(false))
+}
 
-        if starts_with_prefix {
-            let span = self.ctx.to_span(ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "opinionated::no_test_prefix",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename test '{name}' to remove the 'test_' prefix and follow '<action>_<scenario>_<outcome>'."
-                )),
-            );
-        }
+/// Inspects a function identifier and attributes, returning a diagnostic if it has a redundant test prefix.
+fn check_function_name(
+    ctx: &LintContext<'_>,
+    ident: &syn::Ident,
+    attrs: &[syn::Attribute],
+    in_cfg_test: bool,
+) -> Option<Diagnostic> {
+    let is_test = has_test_attr(attrs) || in_cfg_test;
+    if !is_test {
+        return None;
     }
+
+    let name = ident.to_string();
+    if !has_forbidden_prefix(&name) {
+        return None;
+    }
+
+    let span = ctx.to_span(ident.span());
+    Some(
+        Diagnostic::new(
+            "opinionated::no_test_prefix",
+            Severity::Warning,
+            format!(
+                "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
+            ),
+        )
+        .with_span(span)
+        .with_suggested_fix(format!(
+            "Rename test '{name}' to remove the 'test_' prefix and follow '<action>_<scenario>_<outcome>'."
+        )),
+    )
 }
 
 #[cfg(test)]

@@ -1,3 +1,47 @@
+//! Rule: `opinionated::no_env_access_outside_config`
+//!
+//! # What This Rule Does
+//! Flags direct invocations of `std::env::var`, `var_os`, `set_var`, or `remove_var` outside of
+//! dedicated configuration, CLI, or settings modules (such as files named `config.rs`, `cli.rs`,
+//! `settings.rs`, or modules located in paths matching `*config*`, `*cli*`, or `*env*`).
+//!
+//! # Why This Rule Exists
+//! Reading or writing process environment variables throughout business logic creates hidden,
+//! untracked global state dependencies. It makes components hard to test in parallel (due to race
+//! conditions when mutating process environment), obscures what configuration a module actually
+//! requires, and bypasses validation. All environment parameters should be loaded and validated once
+//! in a dedicated configuration layer (`config.rs`) and passed down explicitly as strongly typed structs.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! // In src/database/pool.rs:
+//! pub fn connect() -> Connection {
+//!     // Direct environment lookup buried in database service
+//!     let url = std::env::var("DATABASE_URL").expect("missing url");
+//!     Connection::open(&url)
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! // In src/config.rs:
+//! pub struct DatabaseConfig {
+//!     pub url: String,
+//! }
+//!
+//! impl DatabaseConfig {
+//!     pub fn from_env() -> Result<Self, ConfigError> {
+//!         let url = std::env::var("DATABASE_URL").map_err(...)?;
+//!         Ok(Self { url })
+//!     }
+//! }
+//!
+//! // In src/database/pool.rs:
+//! pub fn connect(config: &DatabaseConfig) -> Connection {
+//!     Connection::open(&config.url)
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -27,6 +71,7 @@ impl Rule for NoEnvAccessOutsideConfigRule {
     }
 }
 
+/// Returns true if the file path is a recognized configuration or CLI module.
 fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
     if ctx.is_test_file() {
         return true;
@@ -39,28 +84,20 @@ fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
         || path_str.contains("env")
 }
 
+/// Visitor inspecting function call expressions for `std::env` access while tracking test scopes.
 struct EnvAccessVisitor<'a> {
+    /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
+    /// Indicates whether traversal is currently within a test function or `#[cfg(test)]` module.
     in_test_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
+    /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
-
+        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
         let prev = self.in_test_scope;
         if is_cfg_test {
             self.in_test_scope = true;
@@ -70,17 +107,9 @@ impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
-
+        let is_test = has_test_attr(&item_fn.attrs);
         let prev = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
@@ -90,35 +119,80 @@ impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Inspects function calls outside test scopes and flags direct `std::env` queries.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
         if !self.in_test_scope
-            && let syn::Expr::Path(expr_path) = &*call.func
-            && is_env_access_path(&expr_path.path)
+            && let Some(diag) = check_env_call(self.ctx, call)
         {
-            let func_name = expr_path
-                .path
-                .segments
-                .last()
-                .map(|s| s.ident.to_string())
-                .unwrap_or_else(|| "env".to_string());
-            let span = self.ctx.to_span(call.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "opinionated::no_env_access_outside_config",
-                    Severity::Warning,
-                    format!(
-                        "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Parse environment variables in a centralized 'config.rs' or 'cli.rs' module and pass explicit parameters."),
-            );
+            self.diagnostics.push(diag);
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
+/// Checks whether an attribute list includes `#[cfg(test)]`.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
+}
+
+/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+/// Inspects a function call expression and returns a diagnostic if it calls `std::env::var`, `var_os`, etc.
+fn check_env_call(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Option<Diagnostic> {
+    let syn::Expr::Path(expr_path) = &*call.func else {
+        return None;
+    };
+
+    if !is_env_access_path(&expr_path.path) {
+        return None;
+    }
+
+    let func_name = expr_path
+        .path
+        .segments
+        .last()
+        .map(|s| s.ident.to_string())
+        .unwrap_or_else(|| "env".to_string());
+    let span = ctx.to_span(call.span());
+
+    Some(
+        Diagnostic::new(
+            "opinionated::no_env_access_outside_config",
+            Severity::Warning,
+            format!(
+                "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
+            ),
+        )
+        .with_span(span)
+        .with_suggested_fix("Parse environment variables in a centralized 'config.rs' or 'cli.rs' module and pass explicit parameters."),
+    )
+}
+
+/// Returns true if the path targets `std::env::var`, `std::env::var_os`, `set_var`, or `remove_var`.
 fn is_env_access_path(path: &syn::Path) -> bool {
     let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
     if segments.is_empty() {
