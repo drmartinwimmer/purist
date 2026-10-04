@@ -1,3 +1,35 @@
+//! # Rule: opinionated::raii_temp_directories
+//!
+//! ## What This Rule Does
+//! Flags manual `fs::remove_dir_all` calls in test scopes (such as unit test functions or
+//! `#[cfg(test)]` modules), requiring the use of RAII cleanup guards instead.
+//!
+//! ## Why This Rule Exists
+//! Manual directory cleanup at the conclusion of a test function is fragile. If an assertion
+//! fails, a panic occurs, or an early return is triggered, the cleanup line is skipped, leaving
+//! temporary directories behind on disk. Using RAII temporary directory guards (such as
+//! `tempfile::TempDir` or a custom `Drop` struct) guarantees that directories are cleaned up
+//! on unwinding as well as normal exit.
+//!
+//! ## Non-Compliant Example
+//! ```rust,ignore
+//! #[test]
+//! fn test_write() {
+//!     let dir = PathBuf::from("/tmp/test_dir");
+//!     // ... test logic ...
+//!     std::fs::remove_dir_all(&dir).unwrap();
+//! }
+//! ```
+//!
+//! ## Compliant Example
+//! ```rust,ignore
+//! #[test]
+//! fn test_write() {
+//!     let dir = tempfile::tempdir().unwrap();
+//!     // Automatically removed on Drop, even if assertions panic
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -24,6 +56,7 @@ impl Rule for RaiiTempDirectoriesRule {
     }
 }
 
+/// Visitor that tracks test contexts and Drop implementations while checking for manual directory removals.
 struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
@@ -32,20 +65,9 @@ struct TempDirVisitor<'a> {
 }
 
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
+    /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
+        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
 
         let prev = self.in_test_scope;
         if is_cfg_test {
@@ -56,11 +78,9 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Tracks entry into and exit from `Drop` trait implementations.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        let is_drop = item_impl
-            .trait_
-            .as_ref()
-            .is_some_and(|(_, path, _)| path.segments.last().is_some_and(|s| s.ident == "Drop"));
+        let is_drop = is_drop_trait_impl(item_impl);
 
         let prev = self.in_drop_scope;
         if is_drop {
@@ -71,6 +91,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
         self.in_drop_scope = prev;
     }
 
+    /// Tracks entry into and exit from `drop` method implementations.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
         let is_drop_fn = method.sig.ident == "drop";
         let prev = self.in_drop_scope;
@@ -82,16 +103,9 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
         self.in_drop_scope = prev;
     }
 
+    /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
+        let is_test = has_test_attr(&item_fn.attrs);
 
         let prev = self.in_test_scope;
         if is_test {
@@ -102,28 +116,86 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Inspects function calls for manual `fs::remove_dir_all` invocations.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if self.in_test_scope
-            && !self.in_drop_scope
-            && let syn::Expr::Path(expr_path) = &*call.func
-            && is_remove_dir_all_path(&expr_path.path)
+        if let Some(diag) =
+            check_remove_dir_all_call(self.ctx, call, self.in_test_scope, self.in_drop_scope)
         {
-            let span = self.ctx.to_span(call.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "opinionated::raii_temp_directories",
-                    Severity::Warning,
-                    "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."),
-            );
+            self.diagnostics.push(diag);
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
+/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
+fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
+}
+
+/// Checks whether an impl block implements the `Drop` trait.
+fn is_drop_trait_impl(item_impl: &syn::ItemImpl) -> bool {
+    item_impl
+        .trait_
+        .as_ref()
+        .is_some_and(|(_, path, _)| path.segments.last().is_some_and(|s| s.ident == "Drop"))
+}
+
+/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+/// Emits a diagnostic if `fs::remove_dir_all` is called manually in a test scope outside of `Drop`.
+fn check_remove_dir_all_call(
+    ctx: &LintContext<'_>,
+    call: &syn::ExprCall,
+    in_test_scope: bool,
+    in_drop_scope: bool,
+) -> Option<Diagnostic> {
+    if !in_test_scope || in_drop_scope {
+        return None;
+    }
+
+    if let syn::Expr::Path(expr_path) = &*call.func
+        && is_remove_dir_all_path(&expr_path.path)
+    {
+        let span = ctx.to_span(call.span());
+        Some(
+            Diagnostic::new(
+                "opinionated::raii_temp_directories",
+                Severity::Warning,
+                "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures.",
+            )
+            .with_span(span)
+            .with_suggested_fix("Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."),
+        )
+    } else {
+        None
+    }
+}
+
+/// Checks whether a path refers to `remove_dir_all` or `fs::remove_dir_all`.
 fn is_remove_dir_all_path(path: &syn::Path) -> bool {
     let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
     if segments.is_empty() {

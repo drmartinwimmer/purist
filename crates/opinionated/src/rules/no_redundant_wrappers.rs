@@ -1,3 +1,27 @@
+//! # Rule: opinionated::no_redundant_wrappers
+//!
+//! ## What This Rule Does
+//! Flags trivial wrapper functions that merely forward arguments directly to another
+//! function or method without performing any additional work, transformations, or validation.
+//!
+//! ## Why This Rule Exists
+//! Wrapper functions that do nothing except forward their parameters to an underlying
+//! method or function add unnecessary layers of indirection, obscure call graphs,
+//! and bloat the API surface. Callers should instead invoke the underlying method directly.
+//!
+//! ## Non-Compliant Example
+//! ```rust,ignore
+//! pub fn forget_workspace(workspace: &Workspace) {
+//!     workspace.forget();
+//! }
+//! ```
+//!
+//! ## Compliant Example
+//! ```rust,ignore
+//! // Callers invoke the method directly:
+//! workspace.forget();
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::punctuated::Punctuated;
@@ -49,6 +73,7 @@ impl Rule for NoRedundantWrappersRule {
     }
 }
 
+/// Returns true if the function is exempt from wrapper checks (e.g. test functions or deprecated APIs).
 fn is_exempt_fn(item_fn: &syn::ItemFn) -> bool {
     item_fn.attrs.iter().any(|attr| {
         attr.path().is_ident("deprecated")
@@ -62,6 +87,7 @@ fn is_exempt_fn(item_fn: &syn::ItemFn) -> bool {
     })
 }
 
+/// Detects whether a function is a single-statement passthrough forwarding all arguments.
 fn detect_redundant_forwarding(item_fn: &syn::ItemFn) -> Option<String> {
     if item_fn.block.stmts.len() != 1 {
         return None;
@@ -103,6 +129,7 @@ fn detect_redundant_forwarding(item_fn: &syn::ItemFn) -> Option<String> {
     None
 }
 
+/// Extracts parameter identifier names from function inputs.
 fn extract_param_names(inputs: &Punctuated<syn::FnArg, Comma>) -> Vec<String> {
     let mut names = Vec::new();
     for input in inputs {
@@ -115,6 +142,7 @@ fn extract_param_names(inputs: &Punctuated<syn::FnArg, Comma>) -> Vec<String> {
     names
 }
 
+/// Extracts identifier names passed as arguments in a call expression.
 fn extract_arg_names(args: &Punctuated<syn::Expr, Comma>) -> Vec<String> {
     let mut names = Vec::new();
     for arg in args {
@@ -137,6 +165,7 @@ fn extract_arg_names(args: &Punctuated<syn::Expr, Comma>) -> Vec<String> {
     names
 }
 
+/// Converts a path expression to its string representation.
 fn expr_to_string(expr: &syn::Expr) -> String {
     match expr {
         syn::Expr::Path(p) => p

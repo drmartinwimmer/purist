@@ -1,10 +1,39 @@
+//! Rule: `opinionated::no_redundant_conversions`
+//!
+//! # What This Rule Does
+//! Detects redundant serialization roundtrips where a data structure is serialized (e.g. via
+//! `serde_json::to_string` or `to_vec`) and then immediately deserialized back (via `from_str` or `from_slice`),
+//! either nested in a single expression or sequentially via local variables. Test scopes are exempt.
+//!
+//! # Why This Rule Exists
+//! Developers sometimes serialize and deserialize objects as a quick way to deep-clone, convert
+//! between similar structs, or detach lifetimes. This pattern is extremely inefficient: it converts
+//! structured memory into JSON text and re-parses it, allocating intermediate strings and running
+//! full tokenization/parsing logic. Code should derive `Clone`, implement `From`/`Into`, or use
+//! direct struct transformation functions.
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! pub fn clone_payload(payload: &Payload) -> Payload {
+//!     // Inefficient serialization roundtrip used as a deep clone
+//!     serde_json::from_str(&serde_json::to_string(payload).unwrap()).unwrap()
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! pub fn clone_payload(payload: &Payload) -> Payload {
+//!     payload.clone() // Idiomatic, efficient in-memory clone
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule detecting redundant serialization roundtrips (e.g. to_string followed by from_str).
+/// Rule detecting redundant serialization roundtrips (e.g. `to_string` followed by `from_str`).
 pub struct NoRedundantConversionsRule;
 
 impl Rule for NoRedundantConversionsRule {
@@ -29,29 +58,22 @@ impl Rule for NoRedundantConversionsRule {
     }
 }
 
+/// Visitor tracking local variable assignments and call expressions to detect serialization roundtrips.
 struct RedundantConversionsVisitor<'a> {
+    /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
+    /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
+    /// Stack of lexical block scopes tracking variables assigned from serializer outputs.
     block_vars_stack: Vec<HashMap<String, proc_macro2::Span>>,
+    /// Indicates whether traversal is currently within a test function or `#[cfg(test)]` module.
     in_test_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
+    /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            drop(attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            }));
-            test_attr
-        });
-
+        let is_test = has_cfg_test_attr(&item_mod.attrs);
         let previous_test_scope = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
@@ -61,17 +83,9 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
         self.in_test_scope = previous_test_scope;
     }
 
+    /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "test")
-                    .unwrap_or(false)
-        });
-
+        let is_test = has_test_attr(&item_fn.attrs);
         let previous_test_scope = self.in_test_scope;
         if is_test {
             self.in_test_scope = true;
@@ -81,76 +95,130 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
         self.in_test_scope = previous_test_scope;
     }
 
+    /// Maintains the lexical block scope stack, recording variables initialized from serializer calls.
     fn visit_block(&mut self, block: &'ast syn::Block) {
         if self.in_test_scope {
             return;
         }
-        let mut serializer_vars: HashMap<String, proc_macro2::Span> = HashMap::new();
 
-        for stmt in &block.stmts {
-            if let syn::Stmt::Local(local) = stmt
-                && let Some(init) = &local.init
-                && let Some(span) = find_nested_serializer_call(&init.expr)
-                && let syn::Pat::Ident(pat_ident) = &local.pat
-            {
-                serializer_vars.insert(pat_ident.ident.to_string(), span);
-            }
-        }
-
+        let serializer_vars = collect_block_serializer_vars(block);
         self.block_vars_stack.push(serializer_vars);
+
         visit::visit_block(self, block);
+
         self.block_vars_stack.pop();
     }
 
+    /// Inspects call expressions and flags nested or sequential deserialization of serialized variables.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if self.in_test_scope {
-            return;
-        }
-
-        if is_serde_parse_func(&call.func) {
-            // Check nested serializer invocation
-            for arg in &call.args {
-                if let Some(inner_call_span) = find_nested_serializer_call(arg) {
-                    let span = self.ctx.to_span(inner_call_span);
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "opinionated::no_redundant_conversions",
-                            Severity::Warning,
-                            "Redundant serialization roundtrip: value serialized and immediately deserialized.",
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Use 'Clone::clone', 'From::from', or 'serde_json::to_value' instead of stringifying and re-parsing."),
-                    );
-                }
-            }
-
-            // Check sequential variable usage across active blocks
-            for vars in self.block_vars_stack.iter().rev() {
-                for arg in &call.args {
-                    if let Some(ident) = extract_ident_from_arg(arg)
-                        && let Some(&init_span) = vars.get(&ident)
-                    {
-                        let span = self.ctx.to_span(init_span);
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "opinionated::no_redundant_conversions",
-                                Severity::Warning,
-                                format!(
-                                    "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
-                                ),
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
-                        );
-                    }
-                }
-            }
+        if !self.in_test_scope {
+            let findings = check_redundant_conversion_call(self.ctx, call, &self.block_vars_stack);
+            self.diagnostics.extend(findings);
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
+/// Checks whether an attribute list includes `#[cfg(test)]`.
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut test_attr = false;
+        drop(attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        }));
+        test_attr
+    })
+}
+
+/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || attr
+                .path()
+                .segments
+                .last()
+                .map(|s| s.ident == "test")
+                .unwrap_or(false)
+    })
+}
+
+/// Scans local variable declarations in a block and records variables initialized with serializer calls.
+fn collect_block_serializer_vars(block: &syn::Block) -> HashMap<String, proc_macro2::Span> {
+    let mut serializer_vars = HashMap::new();
+    for stmt in &block.stmts {
+        if let syn::Stmt::Local(local) = stmt
+            && let Some(init) = &local.init
+            && let Some(span) = find_nested_serializer_call(&init.expr)
+            && let syn::Pat::Ident(pat_ident) = &local.pat
+        {
+            serializer_vars.insert(pat_ident.ident.to_string(), span);
+        }
+    }
+    serializer_vars
+}
+
+/// Checks whether a call expression is a deserializer operating on an immediately serialized value or variable.
+fn check_redundant_conversion_call(
+    ctx: &LintContext<'_>,
+    call: &syn::ExprCall,
+    block_vars_stack: &[HashMap<String, proc_macro2::Span>],
+) -> Vec<Diagnostic> {
+    let mut findings = Vec::new();
+
+    if !is_serde_parse_func(&call.func) {
+        return findings;
+    }
+
+    // 1. Check nested serializer invocation (e.g. from_str(&to_string(data)...))
+    for arg in &call.args {
+        if let Some(inner_call_span) = find_nested_serializer_call(arg) {
+            let span = ctx.to_span(inner_call_span);
+            findings.push(
+                Diagnostic::new(
+                    "opinionated::no_redundant_conversions",
+                    Severity::Warning,
+                    "Redundant serialization roundtrip: value serialized and immediately deserialized.",
+                )
+                .with_span(span)
+                .with_suggested_fix("Use 'Clone::clone', 'From::from', or 'serde_json::to_value' instead of stringifying and re-parsing."),
+            );
+        }
+    }
+
+    // 2. Check sequential variable usage across active lexical blocks
+    for vars in block_vars_stack.iter().rev() {
+        for arg in &call.args {
+            if let Some(ident) = extract_ident_from_arg(arg)
+                && let Some(&init_span) = vars.get(&ident)
+            {
+                let span = ctx.to_span(init_span);
+                findings.push(
+                    Diagnostic::new(
+                        "opinionated::no_redundant_conversions",
+                        Severity::Warning,
+                        format!(
+                            "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
+                );
+            }
+        }
+    }
+
+    findings
+}
+
+/// Extracts a variable identifier from an argument expression, unwrapping references, try operators, and method calls.
 fn extract_ident_from_arg(expr: &syn::Expr) -> Option<String> {
     match expr {
         syn::Expr::Path(p) => p.path.get_ident().map(|i| i.to_string()),
@@ -169,24 +237,27 @@ fn extract_ident_from_arg(expr: &syn::Expr) -> Option<String> {
     }
 }
 
+/// Returns true if a function expression targets `serde_json::from_str` or `from_slice`.
 fn is_serde_parse_func(func: &syn::Expr) -> bool {
-    if let syn::Expr::Path(p) = func {
-        let path_str = p
-            .path
-            .segments
-            .iter()
-            .map(|s| s.ident.to_string())
-            .collect::<Vec<_>>()
-            .join("::");
-        path_str == "serde_json::from_str"
-            || path_str == "serde_json::from_slice"
-            || path_str == "from_str"
-            || path_str == "from_slice"
-    } else {
-        false
-    }
+    let syn::Expr::Path(p) = func else {
+        return false;
+    };
+
+    let path_str = p
+        .path
+        .segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::");
+
+    path_str == "serde_json::from_str"
+        || path_str == "serde_json::from_slice"
+        || path_str == "from_str"
+        || path_str == "from_slice"
 }
 
+/// Recursively detects whether an expression invokes a serialization function like `to_string` or `to_vec`.
 fn find_nested_serializer_call(expr: &syn::Expr) -> Option<proc_macro2::Span> {
     match expr {
         syn::Expr::Call(call) => {

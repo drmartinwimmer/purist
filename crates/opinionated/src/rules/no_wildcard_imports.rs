@@ -1,3 +1,24 @@
+//! # Rule: opinionated::no_wildcard_imports
+//!
+//! ## What This Rule Does
+//! Flags wildcard imports (`use path::*`) outside of test files, test modules, and prelude imports.
+//!
+//! ## Why This Rule Exists
+//! Wildcard imports pollute the local namespace, obscure the provenance of imported symbols,
+//! and make code harder to read and refactor. Furthermore, they risk silent breakage or shadowing
+//! when upstream crates add new items in minor or patch releases. Explicit item imports ensure
+//! clarity, deterministic name resolution, and maintainability.
+//!
+//! ## Non-Compliant Example
+//! ```rust,ignore
+//! use std::collections::*;
+//! ```
+//!
+//! ## Compliant Example
+//! ```rust,ignore
+//! use std::collections::{BTreeMap, HashMap};
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use syn::spanned::Spanned;
@@ -23,6 +44,7 @@ impl Rule for NoWildcardImportsRule {
     }
 }
 
+/// Visitor that inspects `use` statements outside test scope for wildcard/glob imports.
 struct WildcardImportVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
@@ -30,20 +52,9 @@ struct WildcardImportVisitor<'a> {
 }
 
 impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
+    /// Tracks entry into and exit from test-scoped modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = item_mod.attrs.iter().any(|attr| {
-            if !attr.path().is_ident("cfg") {
-                return false;
-            }
-            let mut test_attr = false;
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("test") {
-                    test_attr = true;
-                }
-                Ok(())
-            });
-            test_attr
-        });
+        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
 
         let prev = self.in_test_scope;
         if is_cfg_test {
@@ -54,55 +65,82 @@ impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
         self.in_test_scope = prev;
     }
 
+    /// Recursively checks `use` trees if outside test scope.
     fn visit_item_use(&mut self, item_use: &'ast syn::ItemUse) {
         if !self.in_test_scope {
-            self.check_use_tree(&item_use.tree, Vec::new());
+            collect_wildcard_diagnostics(
+                self.ctx,
+                &item_use.tree,
+                Vec::new(),
+                &mut self.diagnostics,
+            );
         }
 
         visit::visit_item_use(self, item_use);
     }
 }
 
-impl WildcardImportVisitor<'_> {
-    fn check_use_tree(&mut self, tree: &syn::UseTree, mut path_segments: Vec<String>) {
-        match tree {
-            syn::UseTree::Path(p) => {
-                path_segments.push(p.ident.to_string());
-                self.check_use_tree(&p.tree, path_segments);
-            }
-            syn::UseTree::Glob(g) => {
-                // Exempt preludes like googletest::prelude::* or std::io::prelude::*
-                let is_prelude = path_segments
-                    .last()
-                    .map(|s| s == "prelude")
-                    .unwrap_or(false);
-                if !is_prelude {
-                    let path_str = if path_segments.is_empty() {
-                        "*".to_string()
-                    } else {
-                        format!("{}::*", path_segments.join("::"))
-                    };
-                    let span = self.ctx.to_span(g.span());
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "opinionated::no_wildcard_imports",
-                            Severity::Warning,
-                            format!(
-                                "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Replace wildcard import with explicit item imports."),
-                    );
-                }
-            }
-            syn::UseTree::Group(group) => {
-                for item in &group.items {
-                    self.check_use_tree(item, path_segments.clone());
-                }
-            }
-            syn::UseTree::Name(_) | syn::UseTree::Rename(_) => {}
+/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
+fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
         }
+        let mut test_attr = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                test_attr = true;
+            }
+            Ok(())
+        });
+        test_attr
+    })
+}
+
+/// Recursively traverses a `syn::UseTree` to identify and report non-prelude glob imports.
+fn collect_wildcard_diagnostics(
+    ctx: &LintContext<'_>,
+    tree: &syn::UseTree,
+    mut path_segments: Vec<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            path_segments.push(p.ident.to_string());
+            collect_wildcard_diagnostics(ctx, &p.tree, path_segments, diagnostics);
+        }
+        syn::UseTree::Glob(g) => {
+            // Exempt preludes like googletest::prelude::* or std::io::prelude::*
+            let is_prelude = path_segments
+                .last()
+                .map(|s| s == "prelude")
+                .unwrap_or(false);
+            if !is_prelude {
+                let path_str = if path_segments.is_empty() {
+                    "*".to_string()
+                } else {
+                    format!("{}::*", path_segments.join("::"))
+                };
+                let span = ctx.to_span(g.span());
+                diagnostics.push(
+                    Diagnostic::new(
+                        "opinionated::no_wildcard_imports",
+                        Severity::Warning,
+                        format!(
+                            "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix("Replace wildcard import with explicit item imports."),
+                );
+            }
+        }
+        syn::UseTree::Group(group) => {
+            for item in &group.items {
+                collect_wildcard_diagnostics(ctx, item, path_segments.clone(), diagnostics);
+            }
+        }
+        syn::UseTree::Name(_) | syn::UseTree::Rename(_) => {}
     }
 }
 

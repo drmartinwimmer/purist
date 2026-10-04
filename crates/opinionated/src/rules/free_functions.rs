@@ -1,3 +1,35 @@
+//! Rule: `opinionated::free_functions`
+//!
+//! # What This Rule Does
+//! Detects stateless dummy structs (unit structs or structs with zero fields) that are used solely
+//! as namespaces for associated functions and implement no traits.
+//!
+//! # Why This Rule Exists
+//! In Rust, modules are first-class language constructs designed for namespacing and privacy boundaries.
+//! Creating empty structs with only associated functions (and no instance methods taking `&self` or `self`,
+//! and no trait implementations) is an unidiomatic pattern carried over from languages like Java or C#
+//! where all functions must belong to a class. In Rust, functions that do not operate on state should
+//! be idiomatic module-level free functions (`pub fn parse(...)`).
+//!
+//! # Non-Compliant Example
+//! ```rust,ignore
+//! pub struct StringParser; // Stateless dummy struct used as a namespace
+//!
+//! impl StringParser {
+//!     pub fn parse_int(s: &str) -> Result<i32, ParseIntError> {
+//!         s.parse()
+//!     }
+//! }
+//! ```
+//!
+//! # Compliant Example
+//! ```rust,ignore
+//! // In parser.rs module:
+//! pub fn parse_int(s: &str) -> Result<i32, ParseIntError> {
+//!     s.parse()
+//! }
+//! ```
+
 use crate::engine::{LintContext, Rule};
 use code_review_diagnostics::{Diagnostic, Severity};
 use std::collections::{HashMap, HashSet};
@@ -12,91 +44,129 @@ impl Rule for FreeFunctionsRule {
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
+        // 1. Identify all unit or empty structs in the file
+        let empty_structs = collect_empty_structs(file);
+        if empty_structs.is_empty() {
+            return Vec::new();
+        }
 
-        // 1. Identify unit / empty structs: struct_name -> ident span
-        let mut empty_structs: HashMap<String, proc_macro2::Span> = HashMap::new();
-        for item in &file.items {
-            if let syn::Item::Struct(item_struct) = item {
-                let is_empty = match &item_struct.fields {
-                    Fields::Unit => true,
-                    Fields::Named(f) => f.named.is_empty(),
-                    Fields::Unnamed(f) => f.unnamed.is_empty(),
-                };
-                if is_empty {
-                    empty_structs.insert(item_struct.ident.to_string(), item_struct.ident.span());
-                }
+        // 2. Analyze implementations: traits, instance methods, and static functions
+        let impl_analysis = analyze_struct_implementations(file, &empty_structs);
+
+        // 3. Generate findings for structs that have static functions but no instance methods or traits
+        build_free_function_diagnostics(ctx, self.name(), empty_structs, impl_analysis)
+    }
+}
+
+/// Stores implementation metrics for unit/empty structs.
+struct StructImplAnalysis {
+    implemented_traits: HashSet<String>,
+    structs_with_instance_methods: HashSet<String>,
+    structs_with_static_functions: HashMap<String, usize>,
+}
+
+/// Identifies all empty or unit structs defined in the file.
+fn collect_empty_structs(file: &syn::File) -> HashMap<String, proc_macro2::Span> {
+    let mut empty_structs = HashMap::new();
+    for item in &file.items {
+        if let syn::Item::Struct(item_struct) = item {
+            let is_empty = match &item_struct.fields {
+                Fields::Unit => true,
+                Fields::Named(f) => f.named.is_empty(),
+                Fields::Unnamed(f) => f.unnamed.is_empty(),
+            };
+            if is_empty {
+                empty_structs.insert(item_struct.ident.to_string(), item_struct.ident.span());
             }
         }
+    }
+    empty_structs
+}
 
-        if empty_structs.is_empty() {
-            return diagnostics;
-        }
+/// Analyzes impl blocks for empty structs, recording instance methods, static methods, and trait implementations.
+fn analyze_struct_implementations(
+    file: &syn::File,
+    empty_structs: &HashMap<String, proc_macro2::Span>,
+) -> StructImplAnalysis {
+    let mut implemented_traits = HashSet::new();
+    let mut structs_with_instance_methods = HashSet::new();
+    let mut structs_with_static_functions = HashMap::new();
 
-        // 2. Track trait implementations and method presence per struct
-        let mut implemented_traits: HashSet<String> = HashSet::new();
-        let mut structs_with_instance_methods: HashSet<String> = HashSet::new();
-        let mut structs_with_static_functions: HashMap<String, usize> = HashMap::new();
+    for item in &file.items {
+        if let syn::Item::Impl(item_impl) = item {
+            let Some(struct_name) = extract_type_ident(&item_impl.self_ty) else {
+                continue;
+            };
 
-        for item in &file.items {
-            if let syn::Item::Impl(item_impl) = item {
-                let Some(struct_name) = extract_type_ident(&item_impl.self_ty) else {
-                    continue;
-                };
+            if !empty_structs.contains_key(&struct_name) {
+                continue;
+            }
 
-                if !empty_structs.contains_key(&struct_name) {
-                    continue;
-                }
+            if item_impl.trait_.is_some() {
+                implemented_traits.insert(struct_name);
+                continue;
+            }
 
-                if item_impl.trait_.is_some() {
-                    implemented_traits.insert(struct_name);
-                    continue;
-                }
-
-                for impl_item in &item_impl.items {
-                    if let syn::ImplItem::Fn(fn_item) = impl_item {
-                        if fn_item.sig.receiver().is_some() {
-                            structs_with_instance_methods.insert(struct_name.clone());
-                        } else {
-                            *structs_with_static_functions
-                                .entry(struct_name.clone())
-                                .or_insert(0) += 1;
-                        }
+            for impl_item in &item_impl.items {
+                if let syn::ImplItem::Fn(fn_item) = impl_item {
+                    if fn_item.sig.receiver().is_some() {
+                        structs_with_instance_methods.insert(struct_name.clone());
+                    } else {
+                        *structs_with_static_functions
+                            .entry(struct_name.clone())
+                            .or_insert(0) += 1;
                     }
                 }
             }
         }
-
-        // 3. Flag structs that only have static functions, no instance methods, and no trait implementations
-        for (struct_name, span) in empty_structs {
-            let static_fn_count = structs_with_static_functions
-                .get(&struct_name)
-                .copied()
-                .unwrap_or(0);
-            let has_instance_methods = structs_with_instance_methods.contains(&struct_name);
-            let implements_traits = implemented_traits.contains(&struct_name);
-
-            if static_fn_count > 0 && !has_instance_methods && !implements_traits {
-                diagnostics.push(
-                    Diagnostic::new(
-                        self.name(),
-                        Severity::Warning,
-                        format!(
-                            "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module."
-                        ),
-                    )
-                    .with_span(ctx.to_span(span))
-                    .with_suggested_fix(format!(
-                        "Remove struct '{struct_name}' and export its functions as top-level free functions."
-                    )),
-                );
-            }
-        }
-
-        // Sort diagnostics by start line for deterministic output
-        diagnostics.sort_by_key(|d| d.span.as_ref().map(|s| s.start_line).unwrap_or(0));
-        diagnostics
     }
+
+    StructImplAnalysis {
+        implemented_traits,
+        structs_with_instance_methods,
+        structs_with_static_functions,
+    }
+}
+
+/// Produces diagnostics for structs that act strictly as function namespaces.
+fn build_free_function_diagnostics(
+    ctx: &LintContext<'_>,
+    rule_name: &'static str,
+    empty_structs: HashMap<String, proc_macro2::Span>,
+    analysis: StructImplAnalysis,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for (struct_name, span) in empty_structs {
+        let static_fn_count = analysis
+            .structs_with_static_functions
+            .get(&struct_name)
+            .copied()
+            .unwrap_or(0);
+        let has_instance_methods = analysis
+            .structs_with_instance_methods
+            .contains(&struct_name);
+        let implements_traits = analysis.implemented_traits.contains(&struct_name);
+
+        if static_fn_count > 0 && !has_instance_methods && !implements_traits {
+            diagnostics.push(
+                Diagnostic::new(
+                    rule_name,
+                    Severity::Warning,
+                    format!(
+                        "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module."
+                    ),
+                )
+                .with_span(ctx.to_span(span))
+                .with_suggested_fix(format!(
+                    "Remove struct '{struct_name}' and export its functions as top-level free functions."
+                )),
+            );
+        }
+    }
+
+    diagnostics.sort_by_key(|d| d.span.as_ref().map(|s| s.start_line).unwrap_or(0));
+    diagnostics
 }
 
 /// Extracts the identifier of a type if it is a simple path.
