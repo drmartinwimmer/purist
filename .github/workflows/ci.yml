@@ -26,7 +26,15 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Check code formatting
+      - name: Install external check tools (cargo-audit, taplo)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,taplo-cli
+
+      - name: Install Prettier
+        run: npm install -g prettier
+
+      - name: Check code formatting (Rust)
         run: cargo fmt --check
 
       - name: Check Clippy lints
@@ -34,6 +42,18 @@ jobs:
 
       - name: Run purist AST linter
         run: cargo run -p code-review -- purist --path .
+
+      - name: Check TOML formatting (Taplo)
+        run: taplo fmt --check
+
+      - name: Check Markdown and JSON formatting (Prettier)
+        run: prettier --check "**/*.{md,json}"
+
+      - name: Run cargo security audit
+        run: cargo audit
+
+      - name: Run code-review check aggregator
+        run: cargo run -p code-review -- check
 
       - name: Verify package & metadata
         run: |
