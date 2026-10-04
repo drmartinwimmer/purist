@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "A suite of code review skills, opinionated linters, and Inspect AI evals"
+publish = false
 
 [[bin]]
 name = "code-review"
@@ -13,10 +14,9 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true }
 thiserror = { workspace = true }
-code-review-diagnostics = { workspace = true }
 code-review-configure-lints = { workspace = true }
 code-review-check = { workspace = true }
-code-review-opinionated = { workspace = true }
+purist = { workspace = true }
 code-review-api = { workspace = true }
 code-review-coverage = { workspace = true }
 
