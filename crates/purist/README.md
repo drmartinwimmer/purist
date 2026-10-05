@@ -39,6 +39,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::centralized_command_execution`: External command invocations must be centralized via dedicated runners.
   - `purist::no_inline_mods`: Modules should be placed in dedicated files, not inlined in root source files.
   - `purist::free_functions`: Functions should not be namespaced in dummy empty structs.
+  - `purist::no_trivial_getters_setters`: Flags trivial getter/setter combos where exposing or accessing the field directly would suffice (YAGNI).
 - **Hygiene & Readability**:
   - `purist::use_declarations_over_qualified_paths`: Disallows long inline qualified paths (`crate::a::b::C`) in favor of clear `use` imports.
   - `purist::no_wildcard_imports`: Wildcard imports (`use foo::*`) are prohibited outside test contexts and preludes.
