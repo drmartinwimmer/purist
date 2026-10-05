@@ -31,6 +31,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::ReturnType;
@@ -53,7 +54,7 @@ impl Rule for ErrorTypesRule {
         let mut visitor = ErrorTypesVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -67,91 +68,54 @@ struct ErrorTypesVisitor<'a> {
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Indicates whether the traversal is inside a test function or `#[cfg(test)]` module.
-    in_test_scope: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = has_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Inspects free function return types and marks test scope active if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        if !self.in_test_scope
-            && !is_test
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_fn_return_type(self.ctx, &item_fn.sig)
         {
             self.diagnostics.push(diag);
         }
 
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects methods in inherent or trait implementations outside test scopes.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        if !self.in_test_scope
+        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_fn_return_type(self.ctx, &impl_fn.sig)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects trait definition method signatures outside test scopes.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        if !self.in_test_scope
+        let prev = self.test_scope.enter_fn(&trait_fn.attrs);
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_fn_return_type(self.ctx, &trait_fn.sig)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_trait_item_fn(self, trait_fn);
+        self.test_scope.exit_fn(prev);
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Inspects a function signature's return type and returns a diagnostic if it returns `Result<T, String>` or `Result<T, &str>`.
@@ -184,11 +148,11 @@ fn detect_string_error_type(ty: &syn::Type) -> Option<(&syn::Type, String)> {
         return None;
     };
 
-    let last_segment = type_path.path.segments.last()?;
-    if last_segment.ident != "Result" {
+    if !path_ends_with_ident(&type_path.path, "Result") {
         return None;
     }
 
+    let last_segment = type_path.path.segments.last()?;
     let syn::PathArguments::AngleBracketed(ab) = &last_segment.arguments else {
         return None;
     };
@@ -214,10 +178,8 @@ fn detect_string_error_type(ty: &syn::Type) -> Option<(&syn::Type, String)> {
 
 /// Returns true if the type is `String`.
 fn is_string_type(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(p) = ty
-        && let Some(seg) = p.path.segments.last()
-    {
-        return seg.ident == "String";
+    if let syn::Type::Path(p) = ty {
+        return path_ends_with_ident(&p.path, "String");
     }
     false
 }
@@ -226,9 +188,8 @@ fn is_string_type(ty: &syn::Type) -> bool {
 fn is_str_ref_type(ty: &syn::Type) -> bool {
     if let syn::Type::Reference(r) = ty
         && let syn::Type::Path(p) = &*r.elem
-        && let Some(seg) = p.path.segments.last()
     {
-        return seg.ident == "str";
+        return path_ends_with_ident(&p.path, "str");
     }
     false
 }

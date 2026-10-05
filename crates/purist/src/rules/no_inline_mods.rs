@@ -28,6 +28,7 @@
 //! pub fn format_text() { ... }
 //! ```
 
+use super::common::has_cfg_test_attr;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 
@@ -69,7 +70,7 @@ fn check_inline_module(
     item_mod.content.as_ref()?;
 
     // Ignore test modules (e.g. `#[cfg(test)] mod tests { ... }`)
-    if is_cfg_test_module(item_mod) {
+    if has_cfg_test_attr(&item_mod.attrs) {
         return None;
     }
 
@@ -90,24 +91,6 @@ fn check_inline_module(
             "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
         )),
     )
-}
-
-/// Checks whether a module is annotated with `#[cfg(test)]`.
-fn is_cfg_test_module(item_mod: &syn::ItemMod) -> bool {
-    item_mod.attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-
-        let mut is_test = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                is_test = true;
-            }
-            Ok(())
-        });
-        is_test
-    })
 }
 
 #[cfg(test)]

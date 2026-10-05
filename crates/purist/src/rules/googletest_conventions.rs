@@ -41,6 +41,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, has_bare_test_attr, has_framework_test_attr, macro_name};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::punctuated::Punctuated;
@@ -59,8 +60,7 @@ impl Rule for GoogletestConventionsRule {
         let mut visitor = GoogletestConventionsVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: ctx.is_test_file(),
-            current_fn_is_test: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -72,26 +72,19 @@ impl Rule for GoogletestConventionsRule {
 struct GoogletestConventionsVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_test_scope: bool,
-    current_fn_is_test: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let has_bare_test = has_bare_test_attr(&item_fn.attrs);
         let has_framework_test = has_framework_test_attr(&item_fn.attrs);
-        let is_test = has_bare_test || has_framework_test;
 
         if has_bare_test && !has_framework_test {
             let span = self.ctx.to_span(item_fn.sig.ident.span());
@@ -109,17 +102,15 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
             );
         }
 
-        let prev_fn = self.current_fn_is_test;
-        self.current_fn_is_test =
-            is_test || (self.in_test_scope && item_fn.sig.ident.to_string().starts_with("test_"));
+        let fn_name = item_fn.sig.ident.to_string();
+        let prev_fn = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
         visit::visit_item_fn(self, item_fn);
-        self.current_fn_is_test = prev_fn;
+        self.test_scope.exit_fn(prev_fn);
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
         let has_bare_test = has_bare_test_attr(&impl_fn.attrs);
         let has_framework_test = has_framework_test_attr(&impl_fn.attrs);
-        let is_test = has_bare_test || has_framework_test;
 
         if has_bare_test && !has_framework_test {
             let span = self.ctx.to_span(impl_fn.sig.ident.span());
@@ -137,21 +128,20 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
             );
         }
 
-        let prev_fn = self.current_fn_is_test;
-        self.current_fn_is_test =
-            is_test || (self.in_test_scope && impl_fn.sig.ident.to_string().starts_with("test_"));
+        let fn_name = impl_fn.sig.ident.to_string();
+        let prev_fn = self.test_scope.enter_fn_with_name(&impl_fn.attrs, &fn_name);
         visit::visit_impl_item_fn(self, impl_fn);
-        self.current_fn_is_test = prev_fn;
+        self.test_scope.exit_fn(prev_fn);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if !self.current_fn_is_test {
+        if !self.test_scope.is_in_test_fn() {
             visit::visit_macro(self, mac);
             return;
         }
 
-        if let Some(mac_ident) = mac.path.segments.last() {
-            let mac_name = mac_ident.ident.to_string();
+        if let Some(mac_ident) = macro_name(mac) {
+            let mac_name = mac_ident.to_string();
             if mac_name == "assert" {
                 let span = self.ctx.to_span(mac.path.span());
                 self.diagnostics.push(
@@ -185,7 +175,7 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if self.current_fn_is_test && call.method == "expect" {
+        if self.test_scope.is_in_test_fn() && call.method == "expect" {
             let span = self.ctx.to_span(call.method.span());
             self.diagnostics.push(
                 Diagnostic::new(
@@ -335,44 +325,6 @@ fn is_true_matcher(expr: &syn::Expr) -> bool {
             .is_some_and(|ident| ident == "is_true"),
         _ => false,
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute matches bare `#[test]`.
-fn has_bare_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("test"))
-}
-
-/// Checks whether an attribute matches framework test macros such as `#[googletest::test]`, `#[rstest]`, etc.
-fn has_framework_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        let segs: Vec<_> = attr
-            .path()
-            .segments
-            .iter()
-            .map(|s| s.ident.to_string())
-            .collect();
-        if segs.len() >= 2 && segs.last().map(|s| s == "test").unwrap_or(false) {
-            return true;
-        }
-        attr.path().is_ident("rstest")
-    })
 }
 
 #[cfg(test)]

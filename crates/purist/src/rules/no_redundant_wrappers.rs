@@ -22,6 +22,7 @@
 //! workspace.forget();
 //! ```
 
+use super::common::has_test_attr;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::punctuated::Punctuated;
@@ -75,16 +76,11 @@ impl Rule for NoRedundantWrappersRule {
 
 /// Returns true if the function is exempt from wrapper checks (e.g. test functions or deprecated APIs).
 fn is_exempt_fn(item_fn: &syn::ItemFn) -> bool {
-    item_fn.attrs.iter().any(|attr| {
-        attr.path().is_ident("deprecated")
-            || attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
+    has_test_attr(&item_fn.attrs)
+        || item_fn
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("deprecated"))
 }
 
 /// Detects whether a function is a single-statement passthrough forwarding all arguments.

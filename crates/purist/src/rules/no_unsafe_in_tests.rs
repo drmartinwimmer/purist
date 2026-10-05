@@ -32,6 +32,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, has_suppression_attribute};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -49,8 +50,7 @@ impl Rule for NoUnsafeInTestsRule {
         let mut visitor = UnsafeTestVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_cfg_test: ctx.is_test_file(),
-            current_fn_is_test: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
             suppressed_depth: 0,
         };
 
@@ -63,27 +63,21 @@ impl Rule for NoUnsafeInTestsRule {
 struct UnsafeTestVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_cfg_test: bool,
-    current_fn_is_test: bool,
+    test_scope: TestScopeTracker,
     suppressed_depth: usize,
 }
 
 impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks module-level test configuration and suppression scoping.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-        let suppressed = has_suppression(&item_mod.attrs);
+        let suppressed = has_suppression_attribute(&item_mod.attrs, "no_unsafe_in_tests");
         if suppressed {
             self.suppressed_depth += 1;
         }
 
-        let prev = self.in_cfg_test;
-        if is_cfg_test {
-            self.in_cfg_test = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_cfg_test = prev;
+        self.test_scope.exit_mod(prev);
 
         if suppressed {
             self.suppressed_depth -= 1;
@@ -92,19 +86,13 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
 
     /// Tracks function-level test attributes and checks for `unsafe fn` in test contexts.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test_attr = has_test_attr(&item_fn.attrs);
-        let suppressed = has_suppression(&item_fn.attrs);
+        let suppressed = has_suppression_attribute(&item_fn.attrs, "no_unsafe_in_tests");
         if suppressed {
             self.suppressed_depth += 1;
         }
 
-        let prev = self.current_fn_is_test;
-        if is_test_attr {
-            self.current_fn_is_test = true;
-        }
-
-        let in_test = self.in_cfg_test || self.current_fn_is_test;
-        if in_test
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        if self.test_scope.is_in_test()
             && self.suppressed_depth == 0
             && let Some(diag) = check_unsafe_fn(self.ctx, item_fn)
         {
@@ -112,7 +100,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
         }
 
         visit::visit_item_fn(self, item_fn);
-        self.current_fn_is_test = prev;
+        self.test_scope.exit_fn(prev);
 
         if suppressed {
             self.suppressed_depth -= 1;
@@ -121,68 +109,13 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
 
     /// Flags raw `unsafe` blocks when encountered within a test context.
     fn visit_expr_unsafe(&mut self, expr_unsafe: &'ast syn::ExprUnsafe) {
-        let in_test = self.in_cfg_test || self.current_fn_is_test;
-        if in_test && self.suppressed_depth == 0 {
+        if self.test_scope.is_in_test() && self.suppressed_depth == 0 {
             self.diagnostics
                 .push(check_unsafe_block(self.ctx, expr_unsafe));
         }
 
         visit::visit_expr_unsafe(self, expr_unsafe);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
-}
-
-/// Checks whether attributes contain an allow or expect suppression for this rule.
-fn has_suppression(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("expect") && !attr.path().is_ident("allow") {
-            return false;
-        }
-        let mut matched_rule = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("no_unsafe_in_tests")
-                || meta
-                    .path
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "no_unsafe_in_tests")
-                    .unwrap_or(false)
-            {
-                matched_rule = true;
-            }
-            Ok(())
-        });
-        matched_rule
-    })
 }
 
 /// Emits a diagnostic if the function has an `unsafe` qualifier.

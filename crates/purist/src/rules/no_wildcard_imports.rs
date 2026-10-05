@@ -19,6 +19,7 @@
 //! use std::collections::{BTreeMap, HashMap};
 //! ```
 
+use super::common::TestScopeTracker;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -36,7 +37,7 @@ impl Rule for NoWildcardImportsRule {
         let mut visitor = WildcardImportVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: ctx.is_test_file(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -48,26 +49,20 @@ impl Rule for NoWildcardImportsRule {
 struct WildcardImportVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_test_scope: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
     /// Tracks entry into and exit from test-scoped modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Recursively checks `use` trees if outside test scope.
     fn visit_item_use(&mut self, item_use: &'ast syn::ItemUse) {
-        if !self.in_test_scope {
+        if !self.test_scope.is_in_test() {
             collect_wildcard_diagnostics(
                 self.ctx,
                 &item_use.tree,
@@ -78,23 +73,6 @@ impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
 
         visit::visit_item_use(self, item_use);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
 }
 
 /// Recursively traverses a `syn::UseTree` to identify and report non-prelude glob imports.

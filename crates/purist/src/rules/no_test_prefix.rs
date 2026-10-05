@@ -25,6 +25,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, has_test_attr};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
@@ -41,7 +42,7 @@ impl Rule for NoTestPrefixRule {
         let mut visitor = TestPrefixVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_cfg_test: ctx.is_test_file(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -53,31 +54,21 @@ impl Rule for NoTestPrefixRule {
 struct TestPrefixVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_cfg_test: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-
-        let prev = self.in_cfg_test;
-        if is_cfg_test {
-            self.in_cfg_test = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_cfg_test = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Checks top-level functions for forbidden test prefixes when in test scope.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        if let Some(diag) = check_function_name(
-            self.ctx,
-            &item_fn.sig.ident,
-            &item_fn.attrs,
-            self.in_cfg_test,
-        ) {
+        let is_test = has_test_attr(&item_fn.attrs) || self.test_scope.is_in_test_module();
+        if is_test && let Some(diag) = check_function_name(self.ctx, &item_fn.sig.ident) {
             self.diagnostics.push(diag);
         }
         visit::visit_item_fn(self, item_fn);
@@ -85,46 +76,12 @@ impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
 
     /// Checks impl-level functions for forbidden test prefixes when in test scope.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        if let Some(diag) = check_function_name(
-            self.ctx,
-            &impl_fn.sig.ident,
-            &impl_fn.attrs,
-            self.in_cfg_test,
-        ) {
+        let is_test = has_test_attr(&impl_fn.attrs) || self.test_scope.is_in_test_module();
+        if is_test && let Some(diag) = check_function_name(self.ctx, &impl_fn.sig.ident) {
             self.diagnostics.push(diag);
         }
         visit::visit_impl_item_fn(self, impl_fn);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Determines if a function name begins with a forbidden `test_` or `test` prefix.
@@ -140,17 +97,7 @@ fn has_forbidden_prefix(name: &str) -> bool {
 }
 
 /// Inspects a function identifier and attributes, returning a diagnostic if it has a redundant test prefix.
-fn check_function_name(
-    ctx: &LintContext<'_>,
-    ident: &syn::Ident,
-    attrs: &[syn::Attribute],
-    in_cfg_test: bool,
-) -> Option<Diagnostic> {
-    let is_test = has_test_attr(attrs) || in_cfg_test;
-    if !is_test {
-        return None;
-    }
-
+fn check_function_name(ctx: &LintContext<'_>, ident: &syn::Ident) -> Option<Diagnostic> {
     let name = ident.to_string();
     if !has_forbidden_prefix(&name) {
         return None;
