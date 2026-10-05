@@ -33,6 +33,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, extract_type_ident, macro_name, path_last_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -54,7 +55,7 @@ impl Rule for NoPrintlnInLibrariesRule {
         let mut visitor = PrintlnVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: ctx.is_test_file(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
             current_impl_is_cli: false,
             in_cli_runner_scope: false,
         };
@@ -71,47 +72,30 @@ fn is_exempt_entrypoint_or_example(ctx: &LintContext<'_>) -> bool {
 }
 
 /// Returns true if the type name matches CLI command or argument conventions.
-fn is_cli_type(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.last()
-    {
-        let name = segment.ident.to_string();
-        return name.ends_with("Command")
-            || name.ends_with("Cli")
-            || name == "Cli"
-            || name == "Commands"
-            || name.ends_with("Subcommand");
-    }
-    false
+fn is_cli_type_name(name: &str) -> bool {
+    name.ends_with("Command")
+        || name.ends_with("Cli")
+        || name == "Cli"
+        || name == "Commands"
+        || name.ends_with("Subcommand")
 }
 
 /// Returns true if an impl block represents a CLI command or command runner.
 fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
-    if is_cli_type(&item_impl.self_ty) {
+    if let Some(ident) = extract_type_ident(&item_impl.self_ty)
+        && is_cli_type_name(&ident.to_string())
+    {
         return true;
     }
     if let Some((_, ref trait_path, _)) = item_impl.trait_
-        && let Some(segment) = trait_path.segments.last()
+        && let Some(ident) = path_last_ident(trait_path)
     {
-        let name = segment.ident.to_string();
+        let name = ident.to_string();
         if name.ends_with("Command") || name == "Command" || name.ends_with("Runner") {
             return true;
         }
     }
     false
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Returns true if the identifier matches CLI command runner method names.
@@ -126,8 +110,8 @@ struct PrintlnVisitor<'a> {
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Indicates whether traversal is inside a test function or `#[cfg(test)]` module.
-    in_test_scope: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
     /// Indicates whether traversal is currently within an impl block for a CLI struct.
     current_impl_is_cli: bool,
     /// Indicates whether traversal is currently within an execution runner method (`run`, `execute`).
@@ -137,14 +121,9 @@ struct PrintlnVisitor<'a> {
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks whether traversal is inside an impl block for a CLI command struct.
@@ -160,64 +139,40 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
 
     /// Tracks entry into methods, noting whether the method is a CLI runner (`run`, `execute`) or a test.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        let is_test = has_test_attr(&method.attrs);
+        let prev_test = self.test_scope.enter_fn(&method.attrs);
         let is_runner = self.current_impl_is_cli && is_execution_method(&method.sig.ident);
-
-        let prev_test = self.in_test_scope;
         let prev_runner = self.in_cli_runner_scope;
 
-        if is_test {
-            self.in_test_scope = true;
-        }
         if is_runner {
             self.in_cli_runner_scope = true;
         }
 
         visit::visit_impl_item_fn(self, method);
 
-        self.in_test_scope = prev_test;
+        self.test_scope.exit_fn(prev_test);
         self.in_cli_runner_scope = prev_runner;
     }
 
     /// Tracks entry into free functions, updating test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects macro calls and flags `println!` or `eprintln!` in library code outside allowed scopes.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if let Some(diag) =
-            check_print_macro(self.ctx, self.in_test_scope, self.in_cli_runner_scope, mac)
-        {
+        if let Some(diag) = check_print_macro(
+            self.ctx,
+            self.test_scope.is_in_test(),
+            self.in_cli_runner_scope,
+            mac,
+        ) {
             self.diagnostics.push(diag);
         }
 
         visit::visit_macro(self, mac);
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
 }
 
 /// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
@@ -231,8 +186,7 @@ fn check_print_macro(
         return None;
     }
 
-    let segment = mac.path.segments.last()?;
-    let name = segment.ident.to_string();
+    let name = macro_name(mac)?.to_string();
 
     if name != "println" && name != "eprintln" {
         return None;

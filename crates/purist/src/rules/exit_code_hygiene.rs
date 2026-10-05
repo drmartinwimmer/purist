@@ -46,6 +46,7 @@
 //! }
 //! ```
 
+use super::common::{path_ends_with_ident, path_ends_with_segments};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -190,28 +191,15 @@ fn check_process_exit_call(
 
 /// Checks whether a path resolves to `exit` or `std::process::exit`.
 fn is_process_exit_path(path: &syn::Path) -> bool {
-    let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
-    if let Some(last) = segments.last() {
-        if last.ident != "exit" {
-            return false;
-        }
-        if segments.len() == 1 {
-            return true;
-        }
-        if let Some(second) = segments.get(segments.len().saturating_sub(2)) {
-            return second.ident == "process";
-        }
-    }
-    false
+    path.is_ident("exit") || path_ends_with_segments(path, &["process", "exit"])
 }
 
 /// Returns true if a return type specifies `ExitCode`.
 fn returns_exit_code(output: &syn::ReturnType) -> bool {
     if let syn::ReturnType::Type(_, ty) = output
         && let syn::Type::Path(type_path) = &**ty
-        && let Some(last) = type_path.path.segments.last()
     {
-        return last.ident == "ExitCode";
+        return path_ends_with_ident(&type_path.path, "ExitCode");
     }
     false
 }

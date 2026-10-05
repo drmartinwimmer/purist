@@ -35,6 +35,7 @@
 //! }
 //! ```
 
+use super::common::derives_any;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use std::collections::{HashMap, HashSet};
@@ -85,7 +86,7 @@ fn collect_clap_structs_and_methods(
     for item in &file.items {
         match item {
             syn::Item::Struct(item_struct) => {
-                if derives_clap(&item_struct.attrs) {
+                if derives_any(&item_struct.attrs, &["Args", "Parser"]) {
                     clap_structs.insert(item_struct.ident.to_string(), item_struct);
                 }
             }
@@ -164,31 +165,6 @@ fn check_command_execution_method(
             .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
         );
     }
-}
-
-/// Checks whether an attribute list includes a derive for `Args` or `Parser`.
-fn derives_clap(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("derive") {
-            return false;
-        }
-        let mut found_clap = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("Args")
-                || meta.path.is_ident("Parser")
-                || meta
-                    .path
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "Args" || s.ident == "Parser")
-                    .unwrap_or(false)
-            {
-                found_clap = true;
-            }
-            Ok(())
-        });
-        found_clap
-    })
 }
 
 /// Checks whether a struct field is annotated with `#[command(flatten)]` or `#[arg(flatten)]`.

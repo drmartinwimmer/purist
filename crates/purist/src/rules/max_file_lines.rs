@@ -25,6 +25,7 @@
 //! // parser/validation.rs
 //! ```
 
+use super::common::{has_cfg_test_attr, has_test_attr};
 use crate::diagnostics::{Diagnostic, Severity, Span};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -131,42 +132,18 @@ fn find_test_line_spans(file: &syn::File) -> Vec<(usize, usize)> {
 }
 
 fn is_test_ast_item(item: &syn::Item) -> bool {
-    match item {
-        syn::Item::Mod(item_mod) => item_mod.attrs.iter().any(is_test_attribute),
-        syn::Item::Fn(item_fn) => item_fn.attrs.iter().any(is_test_attribute),
-        syn::Item::Const(item_const) => item_const.attrs.iter().any(is_test_attribute),
-        syn::Item::Static(item_static) => item_static.attrs.iter().any(is_test_attribute),
-        syn::Item::Struct(item_struct) => item_struct.attrs.iter().any(is_test_attribute),
-        syn::Item::Enum(item_enum) => item_enum.attrs.iter().any(is_test_attribute),
-        syn::Item::Impl(item_impl) => item_impl.attrs.iter().any(is_test_attribute),
-        syn::Item::Use(item_use) => item_use.attrs.iter().any(is_test_attribute),
-        _ => false,
-    }
-}
-
-fn is_test_attribute(attr: &syn::Attribute) -> bool {
-    if is_cfg_test_attr(attr) {
-        return true;
-    }
-    let path = attr.path();
-    if path.is_ident("test") {
-        return true;
-    }
-    if let Some(last_seg) = path.segments.last()
-        && last_seg.ident == "test"
-    {
-        return true;
-    }
-    false
-}
-
-fn is_cfg_test_attr(attr: &syn::Attribute) -> bool {
-    if attr.path().is_ident("cfg")
-        && let syn::Meta::List(ref list) = attr.meta
-    {
-        return list.tokens.to_string().contains("test");
-    }
-    false
+    let attrs = match item {
+        syn::Item::Mod(item_mod) => &item_mod.attrs,
+        syn::Item::Fn(item_fn) => &item_fn.attrs,
+        syn::Item::Const(item_const) => &item_const.attrs,
+        syn::Item::Static(item_static) => &item_static.attrs,
+        syn::Item::Struct(item_struct) => &item_struct.attrs,
+        syn::Item::Enum(item_enum) => &item_enum.attrs,
+        syn::Item::Impl(item_impl) => &item_impl.attrs,
+        syn::Item::Use(item_use) => &item_use.attrs,
+        _ => return false,
+    };
+    has_cfg_test_attr(attrs) || has_test_attr(attrs)
 }
 
 #[cfg(test)]

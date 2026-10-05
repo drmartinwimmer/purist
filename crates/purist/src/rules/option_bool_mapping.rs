@@ -23,6 +23,7 @@
 //! val.is_some_and(|x| x > 10)
 //! ```
 
+use super::common::path_ends_with_ident;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -107,12 +108,7 @@ fn check_option_mapping(ctx: &LintContext<'_>, expr_if: &syn::ExprIf) -> Option<
 /// Checks whether a pattern is a `Some(...)` tuple struct.
 fn is_pattern_some(pat: &syn::Pat) -> bool {
     match pat {
-        syn::Pat::TupleStruct(ts) => ts
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident == "Some")
-            .unwrap_or(false),
+        syn::Pat::TupleStruct(ts) => path_ends_with_ident(&ts.path, "Some"),
         _ => false,
     }
 }
@@ -151,13 +147,7 @@ fn check_single_expr(expr: &syn::Expr) -> ElseKind {
             }
         }
         syn::Expr::Path(p) => {
-            if p.path.is_ident("None")
-                || p.path
-                    .segments
-                    .last()
-                    .map(|s| s.ident == "None")
-                    .unwrap_or(false)
-            {
+            if path_ends_with_ident(&p.path, "None") {
                 ElseKind::NoneVal
             } else {
                 ElseKind::Other

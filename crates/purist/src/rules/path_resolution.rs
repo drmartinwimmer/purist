@@ -23,6 +23,7 @@
 //! let file = std::fs::read_to_string(root.join("config/settings.toml"))?;
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_segments};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::punctuated::Punctuated;
@@ -45,7 +46,7 @@ impl Rule for PathResolutionRule {
         let mut visitor = PathVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -57,39 +58,27 @@ impl Rule for PathResolutionRule {
 struct PathVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_test_scope: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for PathVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = is_cfg_test_attr(&item_mod.attrs);
-
-        let previous_test_scope = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = previous_test_scope;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-
-        let previous_test_scope = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = previous_test_scope;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function calls (such as `Path::new`, `File::open`) for unanchored literals.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.in_test_scope
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_call_for_unanchored_path(self.ctx, &call.func, &call.args)
         {
             self.diagnostics.push(diag);
@@ -99,43 +88,13 @@ impl<'ast> Visit<'ast> for PathVisitor<'_> {
 
     /// Inspects method calls (such as `.join(...)`) for unanchored literals.
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if !self.in_test_scope
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_method_call_for_unanchored_path(self.ctx, call)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_expr_method_call(self, call);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Checks if a call expression is a targeted path or fs call with an unanchored path literal.
@@ -149,29 +108,20 @@ fn check_call_for_unanchored_path(
         _ => return None,
     };
 
-    let path_str = path
-        .segments
+    const TARGETS: &[&[&str]] = &[
+        &["Path", "new"],
+        &["PathBuf", "from"],
+        &["fs", "read"],
+        &["fs", "read_to_string"],
+        &["fs", "write"],
+        &["File", "open"],
+        &["File", "create"],
+    ];
+
+    if !TARGETS
         .iter()
-        .map(|s| s.ident.to_string())
-        .collect::<Vec<_>>()
-        .join("::");
-
-    let is_target_call = path_str == "Path::new"
-        || path_str == "std::path::Path::new"
-        || path_str == "PathBuf::from"
-        || path_str == "std::path::PathBuf::from"
-        || path_str == "fs::read"
-        || path_str == "std::fs::read"
-        || path_str == "fs::read_to_string"
-        || path_str == "std::fs::read_to_string"
-        || path_str == "fs::write"
-        || path_str == "std::fs::write"
-        || path_str == "File::open"
-        || path_str == "std::fs::File::open"
-        || path_str == "File::create"
-        || path_str == "std::fs::File::create";
-
-    if !is_target_call {
+        .any(|target| path_ends_with_segments(path, target))
+    {
         return None;
     }
 
