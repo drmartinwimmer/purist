@@ -1,5 +1,4 @@
-use code_review_diagnostics::DiagnosticReport;
-use purist::PuristEngine;
+use purist::{DiagnosticReport, PuristEngine};
 use std::path::{Path, PathBuf};
 
 /// Runner for purist AST static analysis rules.

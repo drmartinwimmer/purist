@@ -2,7 +2,7 @@
 
 ## 1. Purpose and Overview
 
-The `code-review check` command is the central quality and conformance aggregator of the `code-review` toolkit. It coordinates the execution of static analysis tools, linters, formatters, and security scanners across a Cargo project or workspace, synthesizing their output into a unified diagnostic model (`code_review_diagnostics::DiagnosticReport`).
+The `code-review check` command is the central quality and conformance aggregator of the `code-review` toolkit. It coordinates the execution of static analysis tools, linters, formatters, and security scanners across a Cargo project or workspace, synthesizing their output into a unified diagnostic model (`purist::DiagnosticReport`).
 
 The aggregator executes:
 
@@ -19,7 +19,7 @@ The aggregator executes:
 
 ## 2. Invariants and Architectural Guarantees
 
-1. **Normalized Diagnostic Stream**: Regardless of the underlying tool's native output format, all findings must be parsed and represented as `code_review_diagnostics::Diagnostic` items containing a standardized rule identifier, severity (`Error`, `Warning`, `Info`, `Hint`), source code span (`Span`), message, and optional suggested fix.
+1. **Normalized Diagnostic Stream**: Regardless of the underlying tool's native output format, all findings must be parsed and represented as `purist::Diagnostic` items containing a standardized rule identifier, severity (`Error`, `Warning`, `Info`, `Hint`), source code span (`Span`), message, and optional suggested fix.
 2. **Centralized Process Execution**: In compliance with `purist::centralized_command_execution`, all external process invocations (`std::process::Command::new`) must be isolated within dedicated tool runner modules under `crates/check/src/tools/`.
 3. **Resilience & Graceful Degradation ("If Available")**:
    - Optional external checkers/formatters (`prettier`, `mdformat`, `taplo`, `cargo-audit`) probe availability before running.
@@ -29,7 +29,7 @@ The aggregator executes:
    - Exit code `0`: Check execution succeeded and no violations exceeded the configured `--fail-on` threshold.
    - Exit code `1`: Quality, style, or security violations were detected that meet or exceed the `--fail-on` threshold.
    - Exit code `2`: Operational error (e.g., target directory not found, invalid command-line arguments, or VCS failure when `--changed-only` is requested).
-5. **Format Transparency**: Supports all standard diagnostic output formats (`console`, `json`, `markdown`), delegating formatting to `code_review_diagnostics::render_report`.
+5. **Format Transparency**: Supports all standard diagnostic output formats (`console`, `json`, `markdown`), delegating formatting to `purist::render_report`.
 6. **No Library Output Side Effects**: In compliance with `purist::no_println_in_libraries`, library functions must not emit unbuffered `println!` or `eprintln!` directly; execution produces a `DiagnosticReport` or writes to an injected `&mut dyn std::io::Write`.
 
 ---

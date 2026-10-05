@@ -1,5 +1,5 @@
 use super::file_utils::{find_files_with_extensions, is_tool_available};
-use code_review_diagnostics::{Diagnostic, Severity, Span};
+use purist::{Diagnostic, Severity, Span};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -4,6 +4,10 @@
     "crates/purist": {
       "release-type": "rust",
       "package-name": "purist"
+    },
+    "crates/check": {
+      "release-type": "rust",
+      "package-name": "code-review-check"
     }
   }
 }

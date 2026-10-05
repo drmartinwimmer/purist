@@ -147,7 +147,6 @@ name = "code-review-check"
 version = "0.1.0"
 dependencies = [
  "clap",
- "code-review-diagnostics",
  "googletest",
  "purist",
  "serde",
