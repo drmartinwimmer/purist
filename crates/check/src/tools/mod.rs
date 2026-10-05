@@ -18,7 +18,7 @@ pub use purist::{OpinionatedRunner, PuristRunner};
 pub use toml::{TomlRunner, parse_taplo_output};
 pub use vcs_jj::{JjError, JjVcs, filter_diagnostics_by_changed_files, parse_jj_diff_summary};
 
-use code_review_diagnostics::{Diagnostic, DiagnosticReport};
+use ::purist::{Diagnostic, DiagnosticReport};
 
 /// Aggregates diagnostics from multiple checking tools into a consolidated `DiagnosticReport`.
 pub fn aggregate_diagnostics(
@@ -44,7 +44,7 @@ pub fn aggregate_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_review_diagnostics::Severity;
+    use ::purist::Severity;
     use googletest::prelude::*;
 
     #[googletest::test]

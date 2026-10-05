@@ -1,4 +1,4 @@
-use code_review_diagnostics::{Diagnostic, Severity, Span};
+use purist::{Diagnostic, Severity, Span};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

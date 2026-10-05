@@ -1,4 +1,4 @@
-use code_review_diagnostics::{Diagnostic, DiagnosticReport};
+use purist::{Diagnostic, DiagnosticReport};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -162,8 +162,8 @@ pub fn filter_diagnostics_by_changed_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use code_review_diagnostics::{Severity, Span};
     use googletest::prelude::*;
+    use purist::{Severity, Span};
 
     #[googletest::test]
     fn parse_jj_diff_summary_extracts_modified_and_added_files()

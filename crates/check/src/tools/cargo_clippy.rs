@@ -1,4 +1,4 @@
-use code_review_diagnostics::{Diagnostic, Severity, Span};
+use purist::{Diagnostic, Severity, Span};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;

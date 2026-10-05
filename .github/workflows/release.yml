@@ -26,13 +26,17 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Checkout repository
-        if: ${{ steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs['crates/check--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        if: ${{ steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs['crates/check--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Publish to crates.io
-        if: ${{ steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
+      - name: Publish purist to crates.io
+        if: ${{ steps.release.outputs['crates/purist--release_created'] == 'true' }}
         run: cargo publish -p purist --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"
+
+      - name: Publish code-review-check to crates.io
+        if: ${{ steps.release.outputs['crates/check--release_created'] == 'true' }}
+        run: cargo publish -p code-review-check --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"

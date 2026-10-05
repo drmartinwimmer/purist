@@ -1,7 +1,7 @@
 pub mod tools;
 
 use clap::Args;
-use code_review_diagnostics::{DiagnosticReport, OutputFormat, render_report};
+use purist::{DiagnosticReport, OutputFormat, render_report};
 use std::path::{Path, PathBuf};
 pub use tools::{
     AuditRunner, ClippyRunner, FmtRunner, JjError, JjVcs, JsonRunner, MarkdownRunner,
