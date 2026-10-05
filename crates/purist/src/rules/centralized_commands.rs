@@ -32,6 +32,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_segments};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -53,7 +54,7 @@ impl Rule for CentralizedCommandsRule {
         let mut visitor = CommandVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -83,38 +84,28 @@ struct CommandVisitor<'a> {
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Indicates whether the AST traversal is currently inside a test function or test module.
-    in_test_scope: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for CommandVisitor<'_> {
     /// Tracks entry into and exit from modules, updating test scope if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from functions, updating test scope if annotated with `#[test]` or `#[googletest::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function call expressions and records a diagnostic if an uncentralized `Command::new` is detected.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.in_test_scope && is_uncentralized_command_call(call) {
+        if !self.test_scope.is_in_test() && is_uncentralized_command_call(call) {
             self.diagnostics.push(build_diagnostic(self.ctx, call));
         }
 
@@ -122,59 +113,12 @@ impl<'ast> Visit<'ast> for CommandVisitor<'_> {
     }
 }
 
-/// Checks if any attribute matches `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks if any attribute matches `#[test]` or an attribute ending in `::test`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
-}
-
 /// Returns true if a call expression targets `Command::new`.
 fn is_uncentralized_command_call(call: &syn::ExprCall) -> bool {
     let syn::Expr::Path(expr_path) = &*call.func else {
         return false;
     };
-    is_command_new_path(&expr_path.path)
-}
-
-/// Checks if the path resolves to `Command::new` or `std::process::Command::new`.
-fn is_command_new_path(path: &syn::Path) -> bool {
-    let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
-    if segments.len() < 2 {
-        return false;
-    }
-
-    let last = segments.last();
-    let second_to_last = segments.get(segments.len().saturating_sub(2));
-
-    if let (Some(l), Some(s)) = (last, second_to_last) {
-        l.ident == "new" && s.ident == "Command"
-    } else {
-        false
-    }
+    path_ends_with_segments(&expr_path.path, &["Command", "new"])
 }
 
 /// Builds the diagnostic finding for an uncentralized `Command::new` invocation.

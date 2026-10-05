@@ -22,6 +22,7 @@
 //! fn process(w: Workspace) {}
 //! ```
 
+use super::common::path_last_ident;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use std::collections::HashSet;
@@ -151,7 +152,7 @@ fn check_qualified_path(
         .collect::<Vec<_>>()
         .join("::");
 
-    let target_ident = path.segments.last()?;
+    let target_ident = path_last_ident(path)?;
     let span = ctx.to_span(path.span());
     Some(
         Diagnostic::new(
@@ -163,8 +164,7 @@ fn check_qualified_path(
         )
         .with_span(span)
         .with_suggested_fix(format!(
-            "Import '{path_str}' via 'use {path_str};' and refer to '{}' directly.",
-            target_ident.ident
+            "Import '{path_str}' via 'use {path_str};' and refer to '{target_ident}' directly."
         )),
     )
 }

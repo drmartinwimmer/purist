@@ -26,6 +26,7 @@
 //! };
 //! ```
 
+use super::common::{macro_name, path_ends_with_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -106,12 +107,9 @@ fn check_match_to_let_else(
 /// Checks whether a pattern represents a single variant tuple struct like `Some(...)` or `Ok(...)`.
 fn is_single_variant_pattern(pat: &syn::Pat) -> bool {
     match pat {
-        syn::Pat::TupleStruct(ts) => ts
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident == "Some" || s.ident == "Ok")
-            .unwrap_or(false),
+        syn::Pat::TupleStruct(ts) => {
+            path_ends_with_ident(&ts.path, "Some") || path_ends_with_ident(&ts.path, "Ok")
+        }
         _ => false,
     }
 }
@@ -120,9 +118,9 @@ fn is_single_variant_pattern(pat: &syn::Pat) -> bool {
 fn is_diverging_expr(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Return(_) | syn::Expr::Break(_) | syn::Expr::Continue(_) => true,
-        syn::Expr::Macro(mac) => mac.mac.path.segments.last().is_some_and(|ident| {
+        syn::Expr::Macro(mac) => macro_name(&mac.mac).is_some_and(|ident| {
             matches!(
-                ident.ident.to_string().as_str(),
+                ident.to_string().as_str(),
                 "panic" | "bail" | "todo" | "unreachable"
             )
         }),

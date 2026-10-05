@@ -42,6 +42,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_segments, path_last_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -63,7 +64,7 @@ impl Rule for NoEnvAccessOutsideConfigRule {
         let mut visitor = EnvAccessVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -90,38 +91,28 @@ struct EnvAccessVisitor<'a> {
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Indicates whether traversal is currently within a test function or `#[cfg(test)]` module.
-    in_test_scope: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function calls outside test scopes and flags direct `std::env` queries.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.in_test_scope
+        if !self.test_scope.is_in_test()
             && let Some(diag) = check_env_call(self.ctx, call)
         {
             self.diagnostics.push(diag);
@@ -129,36 +120,6 @@ impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
 
         visit::visit_expr_call(self, call);
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Inspects a function call expression and returns a diagnostic if it calls `std::env::var`, `var_os`, etc.
@@ -194,31 +155,14 @@ fn check_env_call(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Option<Diagnos
 
 /// Returns true if the path targets `std::env::var`, `std::env::var_os`, `set_var`, or `remove_var`.
 fn is_env_access_path(path: &syn::Path) -> bool {
-    let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
-    if segments.is_empty() {
+    let Some(last_ident) = path_last_ident(path) else {
+        return false;
+    };
+    let last = last_ident.to_string();
+    if !matches!(last.as_str(), "var" | "var_os" | "set_var" | "remove_var") {
         return false;
     }
-
-    let last_ident = segments
-        .last()
-        .map(|s| s.ident.to_string())
-        .unwrap_or_default();
-    if !matches!(
-        last_ident.as_str(),
-        "var" | "var_os" | "set_var" | "remove_var"
-    ) {
-        return false;
-    }
-
-    if segments.len() == 1 {
-        return false;
-    }
-
-    if let Some(second) = segments.get(segments.len().saturating_sub(2)) {
-        return second.ident == "env";
-    }
-
-    false
+    path_ends_with_segments(path, &["env", &last])
 }
 
 #[cfg(test)]
