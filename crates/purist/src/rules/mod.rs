@@ -6,6 +6,7 @@ pub mod error_types;
 pub mod exit_code_hygiene;
 pub mod free_functions;
 pub mod googletest_conventions;
+pub mod max_file_lines;
 pub mod no_boxed_dyn_error;
 pub mod no_double_negation;
 pub mod no_env_access_outside_config;
@@ -32,6 +33,7 @@ pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
 pub use free_functions::FreeFunctionsRule;
 pub use googletest_conventions::GoogletestConventionsRule;
+pub use max_file_lines::MaxFileLinesRule;
 pub use no_boxed_dyn_error::NoBoxedDynErrorRule;
 pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
@@ -80,5 +82,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(CliRunConsumesSelfRule),
         Box::new(NoDoubleNegationRule),
         Box::new(GoogletestConventionsRule),
+        Box::new(MaxFileLinesRule),
     ]
 }
