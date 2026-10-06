@@ -16,6 +16,7 @@ pub mod no_println_in_libraries;
 pub mod no_redundant_conversions;
 pub mod no_redundant_wrappers;
 pub mod no_test_prefix;
+pub mod no_trivial_getters_setters;
 pub mod no_unsafe_in_tests;
 pub mod no_wildcard_imports;
 pub mod option_bool_mapping;
@@ -43,6 +44,7 @@ pub use no_println_in_libraries::NoPrintlnInLibrariesRule;
 pub use no_redundant_conversions::NoRedundantConversionsRule;
 pub use no_redundant_wrappers::NoRedundantWrappersRule;
 pub use no_test_prefix::NoTestPrefixRule;
+pub use no_trivial_getters_setters::NoTrivialGettersSettersRule;
 pub use no_unsafe_in_tests::NoUnsafeInTestsRule;
 pub use no_wildcard_imports::NoWildcardImportsRule;
 pub use option_bool_mapping::OptionBoolMappingRule;
@@ -84,5 +86,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoDoubleNegationRule),
         Box::new(GoogletestConventionsRule),
         Box::new(MaxFileLinesRule),
+        Box::new(NoTrivialGettersSettersRule),
     ]
 }

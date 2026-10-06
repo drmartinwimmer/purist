@@ -53,6 +53,7 @@ pub struct PuristLintsConfig {
     pub no_double_negation: RuleLevel,
     pub googletest_conventions: RuleLevel,
     pub max_file_lines: RuleLevel,
+    pub no_trivial_getters_setters: RuleLevel,
 }
 
 /// Backwards compatibility alias for `PuristLintsConfig`.
@@ -93,6 +94,10 @@ impl PuristLintsConfig {
             "no_double_negation" | "no_negative_boolean_names" => Some(self.no_double_negation),
             "googletest_conventions" => Some(self.googletest_conventions),
             "max_file_lines" => Some(self.max_file_lines),
+            "no_trivial_getters_setters"
+            | "no_trivial_getset"
+            | "trivial_getters_setters"
+            | "trivial_getset" => Some(self.no_trivial_getters_setters),
             _ => None,
         }
     }
@@ -131,6 +136,10 @@ impl PuristLintsConfig {
             "no_double_negation" | "no_negative_boolean_names" => self.no_double_negation = level,
             "googletest_conventions" => self.googletest_conventions = level,
             "max_file_lines" => self.max_file_lines = level,
+            "no_trivial_getters_setters"
+            | "no_trivial_getset"
+            | "trivial_getters_setters"
+            | "trivial_getset" => self.no_trivial_getters_setters = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -614,6 +623,7 @@ centralized_command_execution = "allow"
         assert_that!(config.no_double_negation, eq(RuleLevel::Warn));
         assert_that!(config.googletest_conventions, eq(RuleLevel::Warn));
         assert_that!(config.max_file_lines, eq(RuleLevel::Warn));
+        assert_that!(config.no_trivial_getters_setters, eq(RuleLevel::Warn));
     }
 
     #[googletest::test]
