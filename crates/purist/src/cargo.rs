@@ -54,6 +54,7 @@ pub struct PuristLintsConfig {
     pub googletest_conventions: RuleLevel,
     pub max_file_lines: RuleLevel,
     pub no_trivial_getters_setters: RuleLevel,
+    pub max_nesting_depth: RuleLevel,
 }
 
 /// Backwards compatibility alias for `PuristLintsConfig`.
@@ -98,6 +99,7 @@ impl PuristLintsConfig {
             | "no_trivial_getset"
             | "trivial_getters_setters"
             | "trivial_getset" => Some(self.no_trivial_getters_setters),
+            "max_nesting_depth" => Some(self.max_nesting_depth),
             _ => None,
         }
     }
@@ -140,6 +142,7 @@ impl PuristLintsConfig {
             | "no_trivial_getset"
             | "trivial_getters_setters"
             | "trivial_getset" => self.no_trivial_getters_setters = level,
+            "max_nesting_depth" => self.max_nesting_depth = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -167,6 +170,12 @@ pub struct MaxFileLinesConfig {
     pub max_total_lines: Option<usize>,
 }
 
+/// Configuration options specific to `max_nesting_depth`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MaxNestingDepthConfig {
+    pub max_depth: Option<usize>,
+}
+
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
@@ -174,6 +183,7 @@ pub struct LintConfig {
     pub unrecognized: Vec<String>,
     pub deprecated: Vec<String>,
     pub max_file_lines: MaxFileLinesConfig,
+    pub max_nesting_depth: MaxNestingDepthConfig,
 }
 
 impl LintConfig {
@@ -235,6 +245,9 @@ impl LintConfig {
                 if config.max_file_lines.max_total_lines.is_none() {
                     config.max_file_lines.max_total_lines =
                         ws_config.max_file_lines.max_total_lines;
+                }
+                if config.max_nesting_depth.max_depth.is_none() {
+                    config.max_nesting_depth.max_depth = ws_config.max_nesting_depth.max_depth;
                 }
             }
             config
@@ -323,6 +336,14 @@ fn parse_metadata_purist(table: &toml_edit::Table, config: &mut LintConfig) {
             config.max_file_lines.max_total_lines = usize::try_from(val).ok();
         }
     }
+    if let Some(val) = table.get("max_nesting_depth").and_then(|v| v.as_integer()) {
+        config.max_nesting_depth.max_depth = usize::try_from(val).ok();
+    }
+    if let Some(sub) = table.get("max_nesting_depth").and_then(|t| t.as_table())
+        && let Some(val) = sub.get("max_depth").and_then(|v| v.as_integer())
+    {
+        config.max_nesting_depth.max_depth = usize::try_from(val).ok();
+    }
 }
 
 fn parse_rules_table(table: &toml_edit::Table, config: &mut LintConfig) {
@@ -351,6 +372,11 @@ fn parse_rules_table(table: &toml_edit::Table, config: &mut LintConfig) {
                     config.max_file_lines.max_total_lines = usize::try_from(val).ok();
                 }
             }
+            if key == "max_nesting_depth"
+                && let Some(val) = inline_table.get("max_depth").and_then(|v| v.as_integer())
+            {
+                config.max_nesting_depth.max_depth = usize::try_from(val).ok();
+            }
         } else if let Some(tbl) = item.as_table() {
             if let Some(level_str) = tbl.get("level").and_then(|l| l.as_str())
                 && let Some(level) = RuleLevel::parse(level_str)
@@ -364,6 +390,11 @@ fn parse_rules_table(table: &toml_edit::Table, config: &mut LintConfig) {
                 if let Some(val) = tbl.get("max_total_lines").and_then(|v| v.as_integer()) {
                     config.max_file_lines.max_total_lines = usize::try_from(val).ok();
                 }
+            }
+            if key == "max_nesting_depth"
+                && let Some(val) = tbl.get("max_depth").and_then(|v| v.as_integer())
+            {
+                config.max_nesting_depth.max_depth = usize::try_from(val).ok();
             }
         }
     }
@@ -427,28 +458,28 @@ fn collect_member_targets(root: &Path, member_pattern: &str, files: &mut Vec<Pat
     let base_path = root.join(clean_pattern);
 
     if member_pattern.contains('*') {
-        if let Ok(entries) = fs::read_dir(&base_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() && path.join("Cargo.toml").is_file() {
-                    if let Ok(content) = fs::read_to_string(path.join("Cargo.toml"))
-                        && let Ok(doc) = content.parse::<DocumentMut>()
-                    {
-                        collect_package_targets(&path, &doc, files);
-                    } else {
-                        collect_standard_package_dirs(&path, files);
-                    }
-                }
+        let Ok(entries) = fs::read_dir(&base_path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("Cargo.toml").is_file() {
+                collect_package_or_standard_dirs(&path, files);
             }
         }
     } else if base_path.is_dir() {
-        if let Ok(content) = fs::read_to_string(base_path.join("Cargo.toml"))
-            && let Ok(doc) = content.parse::<DocumentMut>()
-        {
-            collect_package_targets(&base_path, &doc, files);
-        } else {
-            collect_standard_package_dirs(&base_path, files);
-        }
+        collect_package_or_standard_dirs(&base_path, files);
+    }
+}
+
+fn collect_package_or_standard_dirs(path: &Path, files: &mut Vec<PathBuf>) {
+    let manifest_path = path.join("Cargo.toml");
+    if let Ok(content) = fs::read_to_string(&manifest_path)
+        && let Ok(doc) = content.parse::<DocumentMut>()
+    {
+        collect_package_targets(path, &doc, files);
+    } else {
+        collect_standard_package_dirs(path, files);
     }
 }
 
@@ -624,6 +655,18 @@ centralized_command_execution = "allow"
         assert_that!(config.googletest_conventions, eq(RuleLevel::Warn));
         assert_that!(config.max_file_lines, eq(RuleLevel::Warn));
         assert_that!(config.no_trivial_getters_setters, eq(RuleLevel::Warn));
+        assert_that!(config.max_nesting_depth, eq(RuleLevel::Warn));
+    }
+
+    #[googletest::test]
+    fn parse_max_nesting_depth_config() -> Result<(), Box<dyn std::error::Error>> {
+        let manifest = r#"
+[package.metadata.purist.max_nesting_depth]
+max_depth = 3
+"#;
+        let config = LintConfig::from_manifest_content(manifest).ok_or("valid manifest")?;
+        assert_that!(config.max_nesting_depth.max_depth, eq(Some(3)));
+        Ok(())
     }
 
     #[googletest::test]

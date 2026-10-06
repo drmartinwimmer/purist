@@ -358,54 +358,49 @@ fn collect_code_suppressions(file: &syn::File, ctx: &LintContext<'_>) -> Vec<Cod
 }
 
 fn collect_comment_suppressions(ctx: &LintContext<'_>) -> Vec<CodeSuppression> {
-    let mut suppressions = Vec::new();
+    ctx.lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| parse_line_suppression(idx + 1, line))
+        .collect()
+}
 
-    for (line_idx, line) in ctx.lines.iter().enumerate() {
-        let line_num = line_idx + 1; // 1-indexed
-        let trimmed = line.trim();
+fn parse_line_suppression(line_num: usize, line: &str) -> Option<CodeSuppression> {
+    let trimmed = line.trim();
 
-        // 1. Module/file-level inner comments: //! purist:allow(...) or //! opinionated:allow(...)
-        if let Some(comment) = trimmed.strip_prefix("//!") {
-            if let Some(rule) = extract_directive_rule(comment.trim()) {
-                suppressions.push(CodeSuppression {
-                    rule,
-                    start_line: 1,
-                    end_line: usize::MAX,
-                });
-            }
-        } else if let Some(idx) = line.find("//") {
-            let comment = line.get(idx + 2..).map(str::trim).unwrap_or("");
-            if let Some(rule) = extract_directive_rule(comment) {
-                if trimmed.starts_with("//") {
-                    // Line-leading comment: suppresses next line (or whole file if file-allow)
-                    if comment.starts_with("purist:file-allow")
-                        || comment.starts_with("opinionated:file-allow")
-                    {
-                        suppressions.push(CodeSuppression {
-                            rule,
-                            start_line: 1,
-                            end_line: usize::MAX,
-                        });
-                    } else {
-                        suppressions.push(CodeSuppression {
-                            rule,
-                            start_line: line_num + 1,
-                            end_line: line_num + 1,
-                        });
-                    }
-                } else {
-                    // Trailing comment on same line: suppresses current line
-                    suppressions.push(CodeSuppression {
-                        rule,
-                        start_line: line_num,
-                        end_line: line_num,
-                    });
-                }
-            }
-        }
+    if let Some(comment) = trimmed.strip_prefix("//!") {
+        let rule = extract_directive_rule(comment.trim())?;
+        return Some(CodeSuppression {
+            rule,
+            start_line: 1,
+            end_line: usize::MAX,
+        });
     }
 
-    suppressions
+    let idx = line.find("//")?;
+    let comment = line.get(idx + 2..).map(str::trim).unwrap_or("");
+    let rule = extract_directive_rule(comment)?;
+
+    if trimmed.starts_with("//") {
+        let is_file_allow = comment.starts_with("purist:file-allow")
+            || comment.starts_with("opinionated:file-allow");
+        let (start_line, end_line) = if is_file_allow {
+            (1, usize::MAX)
+        } else {
+            (line_num + 1, line_num + 1)
+        };
+        Some(CodeSuppression {
+            rule,
+            start_line,
+            end_line,
+        })
+    } else {
+        Some(CodeSuppression {
+            rule,
+            start_line: line_num,
+            end_line: line_num,
+        })
+    }
 }
 
 fn extract_directive_rule(comment: &str) -> Option<String> {
@@ -739,7 +734,7 @@ mod tests {
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::new();
-        assert_that!(engine.rules().len(), eq(27));
+        assert_that!(engine.rules().len(), eq(28));
         Ok(())
     }
 }

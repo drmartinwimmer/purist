@@ -174,26 +174,10 @@ pub fn parse_clippy_json_stream(stream: &str, target_dir: &Path) -> Vec<Diagnost
         });
 
         // Determine suggested fix from primary span replacement or child help messages
-        let mut suggested_fix = primary_span
+        let suggested_fix = primary_span
             .and_then(|s| s.suggested_replacement.clone())
-            .filter(|r| !r.is_empty());
-
-        if suggested_fix.is_none() {
-            for child in &msg.children {
-                if child.level == "help" {
-                    if let Some(child_span) = child.spans.iter().find(|s| s.is_primary)
-                        && let Some(replacement) = &child_span.suggested_replacement
-                        && !replacement.is_empty()
-                    {
-                        suggested_fix = Some(replacement.clone());
-                        break;
-                    }
-                    if suggested_fix.is_none() && !child.message.is_empty() {
-                        suggested_fix = Some(child.message.clone());
-                    }
-                }
-            }
-        }
+            .filter(|r| !r.is_empty())
+            .or_else(|| extract_child_suggested_fix(&msg.children));
 
         let mut diag = Diagnostic::new(rule, severity, msg.message);
         if let Some(s) = span {
@@ -207,6 +191,29 @@ pub fn parse_clippy_json_stream(stream: &str, target_dir: &Path) -> Vec<Diagnost
     }
 
     diagnostics
+}
+
+fn extract_child_suggested_fix(children: &[RustcChildMessage]) -> Option<String> {
+    let mut fallback_message = None;
+
+    for child in children {
+        if child.level != "help" {
+            continue;
+        }
+
+        if let Some(child_span) = child.spans.iter().find(|s| s.is_primary)
+            && let Some(replacement) = &child_span.suggested_replacement
+            && !replacement.is_empty()
+        {
+            return Some(replacement.clone());
+        }
+
+        if fallback_message.is_none() && !child.message.is_empty() {
+            fallback_message = Some(child.message.clone());
+        }
+    }
+
+    fallback_message
 }
 
 #[cfg(test)]

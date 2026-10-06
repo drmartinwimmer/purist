@@ -94,31 +94,35 @@ fn analyze_struct_implementations(
     let mut structs_with_static_functions = HashMap::new();
 
     for item in &file.items {
-        if let syn::Item::Impl(item_impl) = item {
-            let Some(ident) = extract_type_ident(&item_impl.self_ty) else {
+        let syn::Item::Impl(item_impl) = item else {
+            continue;
+        };
+
+        let Some(ident) = extract_type_ident(&item_impl.self_ty) else {
+            continue;
+        };
+        let struct_name = ident.to_string();
+
+        if !empty_structs.contains_key(&struct_name) {
+            continue;
+        }
+
+        if item_impl.trait_.is_some() {
+            implemented_traits.insert(struct_name);
+            continue;
+        }
+
+        for impl_item in &item_impl.items {
+            let syn::ImplItem::Fn(fn_item) = impl_item else {
                 continue;
             };
-            let struct_name = ident.to_string();
 
-            if !empty_structs.contains_key(&struct_name) {
-                continue;
-            }
-
-            if item_impl.trait_.is_some() {
-                implemented_traits.insert(struct_name);
-                continue;
-            }
-
-            for impl_item in &item_impl.items {
-                if let syn::ImplItem::Fn(fn_item) = impl_item {
-                    if fn_item.sig.receiver().is_some() {
-                        structs_with_instance_methods.insert(struct_name.clone());
-                    } else {
-                        *structs_with_static_functions
-                            .entry(struct_name.clone())
-                            .or_insert(0) += 1;
-                    }
-                }
+            if fn_item.sig.receiver().is_some() {
+                structs_with_instance_methods.insert(struct_name.clone());
+            } else {
+                *structs_with_static_functions
+                    .entry(struct_name.clone())
+                    .or_insert(0) += 1;
             }
         }
     }

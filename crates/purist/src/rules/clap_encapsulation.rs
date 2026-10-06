@@ -91,24 +91,36 @@ fn collect_clap_structs_and_methods(
                 }
             }
             syn::Item::Impl(item_impl) => {
-                if let syn::Type::Path(type_path) = &*item_impl.self_ty
-                    && let Some(ident) = type_path.path.get_ident()
-                {
-                    for impl_item in &item_impl.items {
-                        if let syn::ImplItem::Fn(impl_fn) = impl_item {
-                            let method_name = impl_fn.sig.ident.to_string();
-                            if method_name == "run" || method_name == "execute" {
-                                struct_has_run_method.insert(ident.to_string());
-                            }
-                        }
-                    }
-                }
+                record_runner_method_if_present(item_impl, &mut struct_has_run_method);
             }
             _ => {}
         }
     }
 
     (clap_structs, struct_has_run_method)
+}
+
+/// Records the struct identifier if this impl block defines a `run` or `execute` method.
+fn record_runner_method_if_present(
+    item_impl: &syn::ItemImpl,
+    struct_has_run_method: &mut HashSet<String>,
+) {
+    let syn::Type::Path(type_path) = &*item_impl.self_ty else {
+        return;
+    };
+    let Some(ident) = type_path.path.get_ident() else {
+        return;
+    };
+
+    for impl_item in &item_impl.items {
+        let syn::ImplItem::Fn(impl_fn) = impl_item else {
+            continue;
+        };
+        let method_name = impl_fn.sig.ident.to_string();
+        if method_name == "run" || method_name == "execute" {
+            struct_has_run_method.insert(ident.to_string());
+        }
+    }
 }
 
 /// Checks that all fields of a Clap struct are private unless explicitly flattened.

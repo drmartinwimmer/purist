@@ -8,6 +8,7 @@ pub mod exit_code_hygiene;
 pub mod free_functions;
 pub mod googletest_conventions;
 pub mod max_file_lines;
+pub mod max_nesting_depth;
 pub mod no_boxed_dyn_error;
 pub mod no_double_negation;
 pub mod no_env_access_outside_config;
@@ -36,6 +37,7 @@ pub use exit_code_hygiene::ExitCodeHygieneRule;
 pub use free_functions::FreeFunctionsRule;
 pub use googletest_conventions::GoogletestConventionsRule;
 pub use max_file_lines::MaxFileLinesRule;
+pub use max_nesting_depth::MaxNestingDepthRule;
 pub use no_boxed_dyn_error::NoBoxedDynErrorRule;
 pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
@@ -87,5 +89,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(GoogletestConventionsRule),
         Box::new(MaxFileLinesRule),
         Box::new(NoTrivialGettersSettersRule),
+        Box::new(MaxNestingDepthRule),
     ]
 }
