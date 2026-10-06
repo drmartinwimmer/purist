@@ -1,7 +1,9 @@
-/target
-/.direnv
+target/
+.direnv/
 fence-*
 *.sock
+result
+result*
 
 
 # Added by cargo

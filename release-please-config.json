@@ -1,13 +1,32 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "plugins": [
+    {
+      "type": "cargo-workspace"
+    }
+  ],
   "packages": {
     "crates/purist": {
       "release-type": "rust",
-      "package-name": "purist"
+      "package-name": "purist",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.dependencies.purist.version"
+        }
+      ]
     },
     "crates/check": {
       "release-type": "rust",
-      "package-name": "code-review-check"
+      "package-name": "code-review-check",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.dependencies['code-review-check'].version"
+        }
+      ]
     }
   }
 }
