@@ -59,6 +59,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
@@ -80,7 +81,7 @@ impl Rule for NoDoubleNegationRule {
         let mut visitor = DoubleNegationVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -92,64 +93,44 @@ impl Rule for NoDoubleNegationRule {
 struct DoubleNegationVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_test_scope: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for DoubleNegationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
-        if !self.in_test_scope {
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        if !self.test_scope.is_in_test() {
             self.check_signature(&item_fn.sig);
         }
 
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let is_test = has_test_attr(&impl_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
-        if !self.in_test_scope {
+        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
+        if !self.test_scope.is_in_test() {
             self.check_signature(&impl_fn.sig);
         }
 
         visit::visit_impl_item_fn(self, impl_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let is_test = has_test_attr(&trait_fn.attrs);
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
-        if !self.in_test_scope {
+        let prev = self.test_scope.enter_fn(&trait_fn.attrs);
+        if !self.test_scope.is_in_test() {
             self.check_signature(&trait_fn.sig);
         }
 
         visit::visit_trait_item_fn(self, trait_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 }
 
@@ -235,16 +216,15 @@ impl DoubleNegationVisitor<'_> {
 fn is_bool_type(ty: &Type) -> bool {
     match ty {
         Type::Path(type_path) => {
-            if let Some(segment) = type_path.path.segments.last() {
-                if segment.ident == "bool" {
-                    return true;
-                }
-                if segment.ident == "Option"
-                    && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                    && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
-                {
-                    return is_bool_type(inner_ty);
-                }
+            if path_ends_with_ident(&type_path.path, "bool") {
+                return true;
+            }
+            if path_ends_with_ident(&type_path.path, "Option")
+                && let Some(segment) = type_path.path.segments.last()
+                && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+            {
+                return is_bool_type(inner_ty);
             }
             false
         }
@@ -378,36 +358,6 @@ fn suggest_affirmative_predicate_name(name: &str) -> String {
     } else {
         "is_enabled".to_string()
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[googletest::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 #[cfg(test)]

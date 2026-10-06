@@ -30,6 +30,7 @@
 //! }
 //! ```
 
+use super::common::extract_type_ident;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use std::collections::{HashMap, HashSet};
@@ -94,9 +95,10 @@ fn analyze_struct_implementations(
 
     for item in &file.items {
         if let syn::Item::Impl(item_impl) = item {
-            let Some(struct_name) = extract_type_ident(&item_impl.self_ty) else {
+            let Some(ident) = extract_type_ident(&item_impl.self_ty) else {
                 continue;
             };
+            let struct_name = ident.to_string();
 
             if !empty_structs.contains_key(&struct_name) {
                 continue;
@@ -167,16 +169,6 @@ fn build_free_function_diagnostics(
 
     diagnostics.sort_by_key(|d| d.span.as_ref().map(|s| s.start_line).unwrap_or(0));
     diagnostics
-}
-
-/// Extracts the identifier of a type if it is a simple path.
-fn extract_type_ident(ty: &syn::Type) -> Option<String> {
-    if let syn::Type::Path(type_path) = ty
-        && type_path.qself.is_none()
-    {
-        return type_path.path.segments.last().map(|s| s.ident.to_string());
-    }
-    None
 }
 
 #[cfg(test)]

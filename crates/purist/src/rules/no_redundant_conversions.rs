@@ -27,6 +27,7 @@
 //! }
 //! ```
 
+use super::common::TestScopeTracker;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use std::collections::HashMap;
@@ -50,7 +51,7 @@ impl Rule for NoRedundantConversionsRule {
             ctx,
             diagnostics: Vec::new(),
             block_vars_stack: Vec::new(),
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -66,38 +67,28 @@ struct RedundantConversionsVisitor<'a> {
     diagnostics: Vec<Diagnostic>,
     /// Stack of lexical block scopes tracking variables assigned from serializer outputs.
     block_vars_stack: Vec<HashMap<String, proc_macro2::Span>>,
-    /// Indicates whether traversal is currently within a test function or `#[cfg(test)]` module.
-    in_test_scope: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = has_cfg_test_attr(&item_mod.attrs);
-        let previous_test_scope = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = previous_test_scope;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let previous_test_scope = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = previous_test_scope;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Maintains the lexical block scope stack, recording variables initialized from serializer calls.
     fn visit_block(&mut self, block: &'ast syn::Block) {
-        if self.in_test_scope {
+        if self.test_scope.is_in_test() {
             return;
         }
 
@@ -111,43 +102,13 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
 
     /// Inspects call expressions and flags nested or sequential deserialization of serialized variables.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.in_test_scope {
+        if !self.test_scope.is_in_test() {
             let findings = check_redundant_conversion_call(self.ctx, call, &self.block_vars_stack);
             self.diagnostics.extend(findings);
         }
 
         visit::visit_expr_call(self, call);
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        drop(attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        }));
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Scans local variable declarations in a block and records variables initialized with serializer calls.

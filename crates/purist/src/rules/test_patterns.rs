@@ -34,6 +34,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, macro_name};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -51,8 +52,7 @@ impl Rule for TestPatternsRule {
         let mut visitor = TestVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_cfg_test: ctx.is_test_file(),
-            current_fn_is_test: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -64,43 +64,35 @@ impl Rule for TestPatternsRule {
 struct TestVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_cfg_test: bool,
-    current_fn_is_test: bool,
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for TestVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-
-        let prev = self.in_cfg_test;
-        if is_cfg_test {
-            self.in_cfg_test = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_cfg_test = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Checks test function naming convention and tracks current test function context.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let has_test_attribute = has_test_attr(&item_fn.attrs);
-        let is_test = has_test_attribute
-            || (self.in_cfg_test && item_fn.sig.ident.to_string().starts_with("test_"));
+        let fn_name = item_fn.sig.ident.to_string();
+        let prev = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
 
-        if is_test && let Some(diag) = check_test_name(self.ctx, &item_fn.sig.ident) {
+        if self.test_scope.is_in_test_fn()
+            && let Some(diag) = check_test_name(self.ctx, &item_fn.sig.ident)
+        {
             self.diagnostics.push(diag);
         }
 
-        let prev_fn = self.current_fn_is_test;
-        self.current_fn_is_test = is_test;
         visit::visit_item_fn(self, item_fn);
-        self.current_fn_is_test = prev_fn;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Checks for standard library assertion macros inside test functions.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if self.current_fn_is_test
+        if self.test_scope.is_in_test_fn()
             && let Some(diag) = check_assertion_macro(self.ctx, mac)
         {
             self.diagnostics.push(diag);
@@ -110,43 +102,13 @@ impl<'ast> Visit<'ast> for TestVisitor<'_> {
 
     /// Checks for `.unwrap()` method calls inside test functions.
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if self.current_fn_is_test
+        if self.test_scope.is_in_test_fn()
             && let Some(diag) = check_unwrap_method_call(self.ctx, call)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_expr_method_call(self, call);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Validates that test function names follow `<verb>_<description>_<outcome>`.
@@ -174,8 +136,8 @@ fn check_test_name(ctx: &LintContext<'_>, ident: &syn::Ident) -> Option<Diagnost
 
 /// Checks if macro invocation is a legacy assertion like `assert_eq!` or `assert_ne!`.
 fn check_assertion_macro(ctx: &LintContext<'_>, mac: &syn::Macro) -> Option<Diagnostic> {
-    let mac_ident = mac.path.segments.last()?;
-    let name = mac_ident.ident.to_string();
+    let mac_ident = macro_name(mac)?;
+    let name = mac_ident.to_string();
     if name == "assert_eq" || name == "assert_ne" {
         let span = ctx.to_span(mac.path.span());
         Some(

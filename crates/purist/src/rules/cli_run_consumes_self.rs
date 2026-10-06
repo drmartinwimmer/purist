@@ -40,6 +40,7 @@
 //! }
 //! ```
 
+use super::common::extract_type_ident;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -61,8 +62,7 @@ impl Rule for CliRunConsumesSelfRule {
 
         for item in &file.items {
             if let syn::Item::Impl(item_impl) = item
-                && let syn::Type::Path(type_path) = &*item_impl.self_ty
-                && let Some(ident) = type_path.path.get_ident()
+                && let Some(ident) = extract_type_ident(&item_impl.self_ty)
             {
                 let struct_name = ident.to_string();
                 if !is_cli_or_command_struct_name(&struct_name) {

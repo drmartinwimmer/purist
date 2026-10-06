@@ -33,6 +33,7 @@
 //! }
 //! ```
 
+use super::common::{TestScopeTracker, path_ends_with_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -50,7 +51,7 @@ impl Rule for NoBoxedDynErrorRule {
         let mut visitor = BoxedDynErrorVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_cfg_test: ctx.is_test_file(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -64,82 +65,48 @@ struct BoxedDynErrorVisitor<'a> {
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Indicates whether traversal is currently inside a `#[cfg(test)]` module or test file.
-    in_cfg_test: bool,
+    /// Tracks active test scope across modules and test functions.
+    test_scope: TestScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for BoxedDynErrorVisitor<'_> {
     /// Tracks module scope and updates test status when entering `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = has_cfg_test_attr(&item_mod.attrs);
-        let prev = self.in_cfg_test;
-        if is_cfg_test {
-            self.in_cfg_test = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_cfg_test = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Inspects free function return types and flags `Box<dyn Error>` if outside test scopes.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        if let Some(diag) =
-            check_fn_signature(self.ctx, self.in_cfg_test, &item_fn.sig, &item_fn.attrs)
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), &item_fn.sig)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects methods in inherent or trait implementations and flags `Box<dyn Error>` if outside test scopes.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        if let Some(diag) =
-            check_fn_signature(self.ctx, self.in_cfg_test, &impl_fn.sig, &impl_fn.attrs)
+        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
+        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), &impl_fn.sig)
         {
             self.diagnostics.push(diag);
         }
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.exit_fn(prev);
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[...::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Inspects a function signature and returns a diagnostic if it returns `Box<dyn Error>`.
 fn check_fn_signature(
     ctx: &LintContext<'_>,
-    in_cfg_test: bool,
+    in_test: bool,
     sig: &syn::Signature,
-    attrs: &[syn::Attribute],
 ) -> Option<Diagnostic> {
-    if in_cfg_test {
+    if in_test {
         return None;
     }
 
@@ -147,11 +114,6 @@ fn check_fn_signature(
 
     // Exempt main in binary entry points
     if fn_name == "main" {
-        return None;
-    }
-
-    // Exempt test functions
-    if has_test_attr(attrs) {
         return None;
     }
 
@@ -217,20 +179,12 @@ fn contains_boxed_dyn_error(ty: &syn::Type) -> bool {
 fn is_dyn_error_trait(ty: &syn::Type) -> bool {
     match ty {
         syn::Type::TraitObject(to) => to.bounds.iter().any(|bound| match bound {
-            syn::TypeParamBound::Trait(trait_bound) => trait_bound
-                .path
-                .segments
-                .last()
-                .map(|s| s.ident == "Error")
-                .unwrap_or(false),
+            syn::TypeParamBound::Trait(trait_bound) => {
+                path_ends_with_ident(&trait_bound.path, "Error")
+            }
             _ => false,
         }),
-        syn::Type::Path(tp) => tp
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident == "Error")
-            .unwrap_or(false),
+        syn::Type::Path(tp) => path_ends_with_ident(&tp.path, "Error"),
         _ => false,
     }
 }

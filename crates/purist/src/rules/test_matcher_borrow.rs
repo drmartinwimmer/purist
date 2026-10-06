@@ -22,6 +22,7 @@
 //! expect_that!(&items, elements_are![eq(&1), eq(&2)]);
 //! ```
 
+use super::common::macro_name;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::Token;
@@ -58,11 +59,10 @@ struct MatcherBorrowVisitor<'a> {
 impl<'ast> Visit<'ast> for MatcherBorrowVisitor<'_> {
     /// Inspects macro invocations for GoogleTest `assert_that!` and `expect_that!`.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if let Some(segment) = mac.path.segments.last() {
-            let mac_name = segment.ident.to_string();
-            if mac_name == "assert_that" || mac_name == "expect_that" {
-                collect_macro_diagnostics(self.ctx, mac, &mut self.diagnostics);
-            }
+        if let Some(ident) = macro_name(mac)
+            && (ident == "assert_that" || ident == "expect_that")
+        {
+            collect_macro_diagnostics(self.ctx, mac, &mut self.diagnostics);
         }
 
         visit::visit_macro(self, mac);

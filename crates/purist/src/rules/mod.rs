@@ -2,6 +2,7 @@ pub mod centralized_commands;
 pub mod clap_encapsulation;
 pub mod cli_run_consumes_self;
 pub mod clippy_suppress;
+pub mod common;
 pub mod error_types;
 pub mod exit_code_hygiene;
 pub mod free_functions;

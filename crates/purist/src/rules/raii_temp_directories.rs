@@ -30,6 +30,9 @@
 //! }
 //! ```
 
+use super::common::{
+    TestScopeTracker, is_drop_trait_impl, path_ends_with_ident, path_ends_with_segments,
+};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -47,7 +50,7 @@ impl Rule for RaiiTempDirectoriesRule {
         let mut visitor = TempDirVisitor {
             ctx,
             diagnostics: Vec::new(),
-            in_test_scope: ctx.is_test_file(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
             in_drop_scope: false,
         };
 
@@ -60,22 +63,16 @@ impl Rule for RaiiTempDirectoriesRule {
 struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    in_test_scope: bool,
+    test_scope: TestScopeTracker,
     in_drop_scope: bool,
 }
 
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_cfg_test = is_cfg_test_attr(&item_mod.attrs);
-
-        let prev = self.in_test_scope;
-        if is_cfg_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev;
+        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from `Drop` trait implementations.
@@ -105,65 +102,24 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-
-        let prev = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-
+        let prev = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.in_test_scope = prev;
+        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function calls for manual `fs::remove_dir_all` invocations.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if let Some(diag) =
-            check_remove_dir_all_call(self.ctx, call, self.in_test_scope, self.in_drop_scope)
-        {
+        if let Some(diag) = check_remove_dir_all_call(
+            self.ctx,
+            call,
+            self.test_scope.is_in_test(),
+            self.in_drop_scope,
+        ) {
             self.diagnostics.push(diag);
         }
 
         visit::visit_expr_call(self, call);
     }
-}
-
-/// Checks whether attributes include a `#[cfg(test)]` configuration attribute.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an impl block implements the `Drop` trait.
-fn is_drop_trait_impl(item_impl: &syn::ItemImpl) -> bool {
-    item_impl
-        .trait_
-        .as_ref()
-        .is_some_and(|(_, path, _)| path.segments.last().is_some_and(|s| s.ident == "Drop"))
-}
-
-/// Checks whether attributes include a `#[test]` or `#[...::test]` attribute.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 /// Emits a diagnostic if `fs::remove_dir_all` is called manually in a test scope outside of `Drop`.
@@ -197,28 +153,8 @@ fn check_remove_dir_all_call(
 
 /// Checks whether a path refers to `remove_dir_all` or `fs::remove_dir_all`.
 fn is_remove_dir_all_path(path: &syn::Path) -> bool {
-    let segments: Vec<&syn::PathSegment> = path.segments.iter().collect();
-    if segments.is_empty() {
-        return false;
-    }
-
-    let last_ident = segments
-        .last()
-        .map(|s| s.ident.to_string())
-        .unwrap_or_default();
-    if last_ident != "remove_dir_all" {
-        return false;
-    }
-
-    if segments.len() == 1 {
-        return true;
-    }
-
-    if let Some(second) = segments.get(segments.len().saturating_sub(2)) {
-        return second.ident == "fs";
-    }
-
-    false
+    path_ends_with_segments(path, &["fs", "remove_dir_all"])
+        || (path.segments.len() == 1 && path_ends_with_ident(path, "remove_dir_all"))
 }
 
 #[cfg(test)]
