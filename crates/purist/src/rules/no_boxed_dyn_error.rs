@@ -142,37 +142,33 @@ fn check_fn_signature(
 /// Recursively detects whether a type contains `Box<dyn Error>` or any trait object targeting `Error`.
 fn contains_boxed_dyn_error(ty: &syn::Type) -> bool {
     match ty {
-        syn::Type::Path(type_path) => {
-            for segment in &type_path.path.segments {
-                if segment.ident == "Box"
-                    && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                {
-                    for arg in &args.args {
-                        if let syn::GenericArgument::Type(inner_ty) = arg
-                            && is_dyn_error_trait(inner_ty)
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                // Recursively inspect any nested generic type arguments
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    for arg in &args.args {
-                        if let syn::GenericArgument::Type(inner_ty) = arg
-                            && contains_boxed_dyn_error(inner_ty)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            false
-        }
+        syn::Type::Path(type_path) => type_path
+            .path
+            .segments
+            .iter()
+            .any(segment_contains_boxed_dyn_error),
         syn::Type::Tuple(tup) => tup.elems.iter().any(contains_boxed_dyn_error),
         syn::Type::Reference(r) => contains_boxed_dyn_error(&r.elem),
         _ => false,
     }
+}
+
+/// Checks whether a single path segment holds Box<dyn Error> or nested error types.
+fn segment_contains_boxed_dyn_error(segment: &syn::PathSegment) -> bool {
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+
+    let is_box = segment.ident == "Box";
+    for arg in &args.args {
+        let syn::GenericArgument::Type(inner_ty) = arg else {
+            continue;
+        };
+        if (is_box && is_dyn_error_trait(inner_ty)) || contains_boxed_dyn_error(inner_ty) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Returns true if the type is a trait object or path referencing `Error`.

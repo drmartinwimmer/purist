@@ -268,15 +268,7 @@ fn populate_clippy_table(table: &mut toml_edit::Table, profile: LintProfile) {
         for category in LINT_CATEGORIES {
             for lint in category.lints {
                 if profile.includes_lint(lint) {
-                    if let Some(existing) = table.get_mut(lint) {
-                        if let Some(v) = existing.as_value_mut()
-                            && v.as_str() != Some("warn")
-                        {
-                            *existing = toml_edit::value("warn");
-                        }
-                    } else {
-                        table.insert(lint, toml_edit::value("warn"));
-                    }
+                    set_lint_to_warn(table, lint);
                 }
             }
         }
@@ -300,6 +292,18 @@ fn populate_clippy_table(table: &mut toml_edit::Table, profile: LintProfile) {
         {
             k.leaf_decor_mut().set_prefix(comment);
         }
+    }
+}
+
+fn set_lint_to_warn(table: &mut Table, lint: &str) {
+    if let Some(existing) = table.get_mut(lint) {
+        if let Some(v) = existing.as_value_mut()
+            && v.as_str() != Some("warn")
+        {
+            *existing = toml_edit::value("warn");
+        }
+    } else {
+        table.insert(lint, toml_edit::value("warn"));
     }
 }
 
