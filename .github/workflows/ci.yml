@@ -73,6 +73,44 @@ jobs:
       - name: Run cargo test
         run: cargo test --all-targets --all-features
 
+  msrv:
+    name: Minimum Supported Rust Version (MSRV)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Verify MSRV consistency across manifest and badges
+        id: msrv
+        run: |
+          MSRV=$(sed -nE 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+(\.[0-9]+)?)"/\1/p' Cargo.toml | head -n 1)
+          if [ -z "$MSRV" ]; then
+            echo "Error: rust-version not found in Cargo.toml"
+            exit 1
+          fi
+          echo "Found rust-version: $MSRV"
+          MSRV_PREFIX=$(echo "$MSRV" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+
+          # Verify README badge
+          if ! grep -q "https://img.shields.io/badge/MSRV-${MSRV_PREFIX}%2B-" README.md; then
+            echo "Error: README.md MSRV badge does not match Cargo.toml rust-version ($MSRV_PREFIX+)"
+            exit 1
+          fi
+
+          echo "MSRV consistency check passed: $MSRV (badge: ${MSRV_PREFIX}+)"
+          echo "msrv=$MSRV" >> "$GITHUB_OUTPUT"
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check compilation with MSRV
+        run: cargo check --all-targets --all-features
+
   nix:
     name: Nix Flake Check & Build
     runs-on: ubuntu-latest
