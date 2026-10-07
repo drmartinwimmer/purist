@@ -40,10 +40,14 @@
 //! }
 //! ```
 
-use super::common::extract_type_ident;
+use super::common::{TestScopeTracker, extract_type_ident};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::{
+    TypeScopeTracker, is_cli_or_command_struct_name, is_command_execution_fn_name,
+};
 use syn::spanned::Spanned;
+use syn::visit::{self, Visit};
 
 /// Rule enforcing that CLI command execution methods consume `self` by value rather than `&self`.
 pub struct CliRunConsumesSelfRule;
@@ -58,29 +62,54 @@ impl Rule for CliRunConsumesSelfRule {
             return Vec::new();
         }
 
-        let mut diagnostics = Vec::new();
+        let mut visitor = CliRunVisitor {
+            ctx,
+            diagnostics: Vec::new(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            type_scope: TypeScopeTracker::new(),
+        };
 
-        for item in &file.items {
-            if let syn::Item::Impl(item_impl) = item
-                && let Some(ident) = extract_type_ident(&item_impl.self_ty)
-            {
-                let struct_name = ident.to_string();
-                if !is_cli_or_command_struct_name(&struct_name) {
-                    continue;
-                }
+        visitor.visit_file(file);
+        visitor.diagnostics
+    }
+}
 
-                for impl_item in &item_impl.items {
-                    if let syn::ImplItem::Fn(impl_fn) = impl_item
-                        && let Some(diag) =
-                            check_method_receiver(ctx, self.name(), &struct_name, impl_fn)
-                    {
-                        diagnostics.push(diag);
-                    }
-                }
-            }
+struct CliRunVisitor<'a> {
+    ctx: &'a LintContext<'a>,
+    diagnostics: Vec<Diagnostic>,
+    test_scope: TestScopeTracker,
+    type_scope: TypeScopeTracker,
+}
+
+impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
+    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        visit::visit_item_mod(self, item_mod);
+    }
+
+    fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
+        let name = extract_type_ident(&item_impl.self_ty).map(|i| i.to_string());
+        let _guard = name.map(|n| self.type_scope.enter_impl(n));
+        visit::visit_item_impl(self, item_impl);
+    }
+
+    fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
+        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+
+        if !self.test_scope.is_in_test()
+            && let Some(struct_name) = self.type_scope.current_impl_name()
+            && is_cli_or_command_struct_name(&struct_name)
+            && let Some(diag) = check_method_receiver(
+                self.ctx,
+                "purist::cli_run_consumes_self",
+                &struct_name,
+                impl_fn,
+            )
+        {
+            self.diagnostics.push(diag);
         }
 
-        diagnostics
+        visit::visit_impl_item_fn(self, impl_fn);
     }
 }
 
@@ -117,16 +146,6 @@ fn check_method_receiver(
         .with_span(span)
         .with_suggested_fix("Change method receiver from '&self' to 'self'."),
     )
-}
-
-/// Returns true if the type name matches CLI command conventions.
-fn is_cli_or_command_struct_name(name: &str) -> bool {
-    name.ends_with("Command") || name.ends_with("Cli") || name == "Cli" || name == "Commands"
-}
-
-/// Returns true if the function name represents a command execution runner.
-fn is_command_execution_fn_name(name: &str) -> bool {
-    name == "run" || name == "run_with_format" || name == "execute"
 }
 
 #[cfg(test)]

@@ -55,9 +55,8 @@ struct WildcardImportVisitor<'a> {
 impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
     /// Tracks entry into and exit from test-scoped modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Recursively checks `use` trees if outside test scope.

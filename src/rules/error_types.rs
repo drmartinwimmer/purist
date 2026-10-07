@@ -75,46 +75,36 @@ struct ErrorTypesVisitor<'a> {
 impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
-    /// Inspects free function return types and marks test scope active if annotated with `#[test]`.
+    /// Inspects free functions and marks test scope active if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
-        if !self.test_scope.is_in_test()
-            && let Some(diag) = check_fn_return_type(self.ctx, &item_fn.sig)
-        {
-            self.diagnostics.push(diag);
-        }
-
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
-    /// Inspects methods in inherent or trait implementations outside test scopes.
+    /// Inspects methods in inherent or trait implementations and marks test scope active if annotated with `#[test]`.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
-        if !self.test_scope.is_in_test()
-            && let Some(diag) = check_fn_return_type(self.ctx, &impl_fn.sig)
-        {
-            self.diagnostics.push(diag);
-        }
+        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.exit_fn(prev);
     }
 
-    /// Inspects trait definition method signatures outside test scopes.
+    /// Inspects trait definition methods and marks test scope active if annotated with `#[test]`.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let prev = self.test_scope.enter_fn(&trait_fn.attrs);
+        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        visit::visit_trait_item_fn(self, trait_fn);
+    }
+
+    /// Inspects function signatures for unstructured string error return types outside test scopes.
+    fn visit_signature(&mut self, sig: &'ast syn::Signature) {
         if !self.test_scope.is_in_test()
-            && let Some(diag) = check_fn_return_type(self.ctx, &trait_fn.sig)
+            && let Some(diag) = check_fn_return_type(self.ctx, sig)
         {
             self.diagnostics.push(diag);
         }
-        visit::visit_trait_item_fn(self, trait_fn);
-        self.test_scope.exit_fn(prev);
+        visit::visit_signature(self, sig);
     }
 }
 

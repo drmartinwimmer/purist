@@ -35,6 +35,7 @@ use super::common::{
 };
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::FlagScopeTracker;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -51,7 +52,7 @@ impl Rule for RaiiTempDirectoriesRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            in_drop_scope: false,
+            drop_scope: FlagScopeTracker::new(),
         };
 
         visitor.visit_file(file);
@@ -64,47 +65,32 @@ struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScopeTracker,
-    in_drop_scope: bool,
+    drop_scope: FlagScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from `Drop` trait implementations.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        let is_drop = is_drop_trait_impl(item_impl);
-
-        let prev = self.in_drop_scope;
-        if is_drop {
-            self.in_drop_scope = true;
-        }
-
+        let _guard = self.drop_scope.enter(is_drop_trait_impl(item_impl));
         visit::visit_item_impl(self, item_impl);
-        self.in_drop_scope = prev;
     }
 
     /// Tracks entry into and exit from `drop` method implementations.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        let is_drop_fn = method.sig.ident == "drop";
-        let prev = self.in_drop_scope;
-        if is_drop_fn {
-            self.in_drop_scope = true;
-        }
-
+        let _guard = self.drop_scope.enter(method.sig.ident == "drop");
         visit::visit_impl_item_fn(self, method);
-        self.in_drop_scope = prev;
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function calls for manual `fs::remove_dir_all` invocations.
@@ -113,7 +99,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
             self.ctx,
             call,
             self.test_scope.is_in_test(),
-            self.in_drop_scope,
+            self.drop_scope.is_active(),
         ) {
             self.diagnostics.push(diag);
         }

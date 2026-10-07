@@ -51,6 +51,7 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::derives_clap;
 use std::collections::{HashMap, HashSet};
 
 /// Rule detecting trivial getter/setter combos where direct field access suffices.
@@ -148,26 +149,6 @@ fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
                     }
                 })
                 .is_ok())
-    })
-}
-
-fn derives_clap(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| {
-        a.path().is_ident("derive")
-            && a.parse_nested_meta(|m| {
-                if m.path.is_ident("Args")
-                    || m.path.is_ident("Parser")
-                    || m.path
-                        .segments
-                        .last()
-                        .is_some_and(|s| s.ident == "Args" || s.ident == "Parser")
-                {
-                    Err(m.error("clap"))
-                } else {
-                    Ok(())
-                }
-            })
-            .is_err()
     })
 }
 

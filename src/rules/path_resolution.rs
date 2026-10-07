@@ -64,16 +64,14 @@ struct PathVisitor<'a> {
 impl<'ast> Visit<'ast> for PathVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function calls (such as `Path::new`, `File::open`) for unanchored literals.
