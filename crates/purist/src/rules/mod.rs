@@ -7,12 +7,14 @@ pub mod error_types;
 pub mod exit_code_hygiene;
 pub mod free_functions;
 pub mod googletest_conventions;
+pub mod lib_facade_hygiene;
 pub mod max_file_lines;
 pub mod max_nesting_depth;
 pub mod no_boxed_dyn_error;
 pub mod no_double_negation;
 pub mod no_env_access_outside_config;
 pub mod no_inline_mods;
+pub mod no_negative_bool;
 pub mod no_println_in_libraries;
 pub mod no_redundant_conversions;
 pub mod no_redundant_wrappers;
@@ -36,12 +38,14 @@ pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
 pub use free_functions::FreeFunctionsRule;
 pub use googletest_conventions::GoogletestConventionsRule;
+pub use lib_facade_hygiene::LibFacadeHygieneRule;
 pub use max_file_lines::MaxFileLinesRule;
 pub use max_nesting_depth::MaxNestingDepthRule;
 pub use no_boxed_dyn_error::NoBoxedDynErrorRule;
 pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
 pub use no_inline_mods::NoInlineModsRule;
+pub use no_negative_bool::NoNegativeBoolRule;
 pub use no_println_in_libraries::NoPrintlnInLibrariesRule;
 pub use no_redundant_conversions::NoRedundantConversionsRule;
 pub use no_redundant_wrappers::NoRedundantWrappersRule;
@@ -86,7 +90,9 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoPrintlnInLibrariesRule),
         Box::new(CliRunConsumesSelfRule),
         Box::new(NoDoubleNegationRule),
+        Box::new(NoNegativeBoolRule),
         Box::new(GoogletestConventionsRule),
+        Box::new(LibFacadeHygieneRule),
         Box::new(MaxFileLinesRule),
         Box::new(NoTrivialGettersSettersRule),
         Box::new(MaxNestingDepthRule),

@@ -38,7 +38,6 @@ impl<'a> LintContext<'a> {
     pub fn config(&self) -> Option<&'a LintConfig> {
         self.config
     }
-
     /// Returns the target file path.
     pub fn file_path(&self) -> &'a Path {
         self.file_path
@@ -734,7 +733,7 @@ mod tests {
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::new();
-        assert_that!(engine.rules().len(), eq(28));
+        assert_that!(engine.rules().len(), eq(30));
         Ok(())
     }
 }

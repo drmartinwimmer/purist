@@ -287,13 +287,13 @@ mod tests {
             "--fail-on",
             "errors",
             "--changed-only",
-            "--skip-fmt",
-            "--skip-clippy",
-            "--skip-purist",
-            "--skip-audit",
-            "--skip-markdown",
-            "--skip-toml",
-            "--skip-json",
+            "--fmt=false",
+            "--clippy=false",
+            "--purist=false",
+            "--audit=false",
+            "--markdown=false",
+            "--toml=false",
+            "--json=false",
             "--quiet",
         ];
         let cli = Cli::try_parse_from(args)?;
@@ -319,9 +319,9 @@ mod tests {
     }
 
     #[googletest::test]
-    fn parse_cli_check_subcommand_supports_skip_opinionated_alias()
+    fn parse_cli_check_subcommand_supports_opinionated_alias()
     -> Result<(), Box<dyn std::error::Error>> {
-        let args = ["code-review", "check", "--skip-opinionated"];
+        let args = ["code-review", "check", "--opinionated=false"];
         let cli = Cli::try_parse_from(args)?;
         match cli.command() {
             Commands::Check(cmd) => {
