@@ -36,7 +36,7 @@ jobs:
         if: ${{ steps.release.outputs.pr }}
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Ensure Cargo.lock and workspace dependencies are updated
+      - name: Ensure Cargo.lock is updated
         if: ${{ steps.release.outputs.pr }}
         run: |
           cargo check
@@ -44,22 +44,18 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet Cargo.lock Cargo.toml; then
             git add Cargo.lock Cargo.toml
-            git commit -m "chore: sync Cargo.lock and workspace dependencies"
+            git commit -m "chore: sync Cargo.lock"
             git push
           fi
 
       - name: Checkout repository
-        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs['crates/check--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' }}
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs['crates/purist--release_created'] == 'true' || steps.release.outputs['crates/check--release_created'] == 'true' || steps.release.outputs.release_created == 'true' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish purist to crates.io
-        if: ${{ steps.release.outputs['crates/purist--release_created'] == 'true' }}
-        run: cargo publish -p purist --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"
-
-      - name: Publish code-review-check to crates.io
-        if: ${{ steps.release.outputs['crates/check--release_created'] == 'true' }}
-        run: cargo publish -p code-review-check --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"
+        if: ${{ steps.release.outputs.releases_created == 'true' || steps.release.outputs.release_created == 'true' }}
+        run: cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN || secrets.CRATES_IO_TOKEN }}"

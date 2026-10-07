@@ -1,34 +1,35 @@
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-
-[workspace.package]
-version = "0.1.0"
+[package]
+name = "purist"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/drmartinwimmer/review"
+repository = "https://github.com/drmartinwimmer/purist"
+description = "Fast purist AST linter for enforcing strict Rust code hygiene"
+readme = "README.md"
+keywords = ["linter", "ast", "hygiene", "static-analysis", "purist"]
+categories = ["development-tools", "development-tools::cargo-plugins"]
 
-[workspace.dependencies]
+[[bin]]
+name = "purist"
+path = "src/main.rs"
+
+[dependencies]
 annotate-snippets = "0.12"
 anstyle = "1.0"
 anstyle-query = "1.1"
 clap = { version = "4.5", features = ["derive"] }
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+quote = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml_edit = "0.22"
-thiserror = "2.0"
-googletest = "0.14"
-code-review-diagnostics = { path = "crates/diagnostics", version = "0.1.0" }
-code-review-configure-lints = { path = "crates/configure-lints", version = "0.1.0" }
-code-review-check = { path = "crates/check", version = "0.2.0" }
-purist = { path = "crates/purist", version = "0.3.0" }
-code-review-api = { path = "crates/api", version = "0.1.0" }
-code-review-coverage = { path = "crates/coverage", version = "0.1.0" }
 syn = { version = "2.0", features = ["full", "visit", "extra-traits"] }
-quote = "1.0"
-proc-macro2 = { version = "1.0", features = ["span-locations"] }
+thiserror = "2.0"
+toml_edit = "0.22"
 
-[workspace.lints.clippy]
+[dev-dependencies]
+googletest = "0.14"
+
+[lints.clippy]
 # Don't Panic - prevent panics from unwraps and unsafe slicing or indexing
 string_slice = "warn"
 indexing_slicing = "warn"

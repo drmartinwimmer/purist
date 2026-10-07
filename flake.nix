@@ -1,5 +1,5 @@
 {
-  description = "Rust development environment";
+  description = "Fast purist AST linter for enforcing strict Rust code hygiene";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
@@ -26,9 +26,9 @@
           cargo = toolchain;
           rustc = toolchain;
         };
-        codeReviewPackage = rustPlatform.buildRustPackage {
-          pname = "code-review";
-          version = "0.1.0";
+        puristPackage = rustPlatform.buildRustPackage {
+          pname = "purist";
+          version = "0.3.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
         };
@@ -47,16 +47,16 @@
           };
 
         packages = {
-          default = codeReviewPackage;
-          code-review = codeReviewPackage;
+          default = puristPackage;
+          purist = puristPackage;
         };
 
         apps = {
           default = flake-utils.lib.mkApp {
-            drv = codeReviewPackage;
+            drv = puristPackage;
           };
-          code-review = flake-utils.lib.mkApp {
-            drv = codeReviewPackage;
+          purist = flake-utils.lib.mkApp {
+            drv = puristPackage;
           };
         };
       }
