@@ -101,7 +101,9 @@ fn check_method_receiver(
         return None;
     };
 
-    recv.reference.as_ref()?;
+    if !matches!(recv.kind, syn::ReceiverKind::Reference(..)) {
+        return None;
+    }
 
     let span = ctx.to_span(recv.span());
     Some(

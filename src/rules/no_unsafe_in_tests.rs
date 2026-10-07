@@ -120,7 +120,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
 
 /// Emits a diagnostic if the function has an `unsafe` qualifier.
 fn check_unsafe_fn(ctx: &LintContext<'_>, item_fn: &syn::ItemFn) -> Option<Diagnostic> {
-    if item_fn.sig.unsafety.is_some() {
+    if matches!(item_fn.sig.safety, syn::Safety::Unsafe(_)) {
         let span = ctx.to_span(item_fn.sig.fn_token.span());
         Some(
             Diagnostic::new(
@@ -196,6 +196,24 @@ fn test_ffi_boundary() {
         let diags = NoUnsafeInTestsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn unsafe_fn_in_test_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[test]
+unsafe fn test_foo() {
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tests.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoUnsafeInTestsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("purist::no_unsafe_in_tests"));
+        assert_that!(diag.severity, eq(Severity::Error));
         Ok(())
     }
 }

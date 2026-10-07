@@ -231,7 +231,7 @@ pub fn is_drop_trait_impl(item_impl: &ItemImpl) -> bool {
     item_impl
         .trait_
         .as_ref()
-        .is_some_and(|(_, path, _)| path_ends_with_ident(path, "Drop"))
+        .is_some_and(|(path, _)| path_ends_with_ident(path, "Drop"))
 }
 
 #[cfg(test)]

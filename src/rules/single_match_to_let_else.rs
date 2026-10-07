@@ -68,14 +68,27 @@ impl<'ast> Visit<'ast> for MatchToLetElseVisitor<'_> {
     }
 }
 
+/// Checks whether a pattern contains any guard expression.
+fn pat_has_guard(pat: &syn::Pat) -> bool {
+    struct GuardVisitor(bool);
+    impl<'ast> Visit<'ast> for GuardVisitor {
+        fn visit_pat_guard(&mut self, _node: &'ast syn::PatGuard) {
+            self.0 = true;
+        }
+    }
+    let mut visitor = GuardVisitor(false);
+    visit::visit_pat(&mut visitor, pat);
+    visitor.0
+}
+
 /// Checks whether a two-arm match expression can be replaced by `let ... else`.
 fn check_match_to_let_else(
     ctx: &LintContext<'_>,
     expr_match: &syn::ExprMatch,
 ) -> Option<Diagnostic> {
     if let [arm0, arm1] = &expr_match.arms[..]
-        && arm0.guard.is_none()
-        && arm1.guard.is_none()
+        && !pat_has_guard(&arm0.pat)
+        && !pat_has_guard(&arm1.pat)
     {
         let can_convert = if is_single_variant_pattern(&arm0.pat) && is_diverging_expr(&arm1.body) {
             let bound = extract_bound_idents(&arm1.pat);
@@ -288,6 +301,25 @@ pub fn parse_enum(val: MyEnum) -> i32 {
         MyEnum::B => 2,
         MyEnum::C => return 0,
     }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = SingleMatchToLetElseRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn match_with_guard_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub fn parse_val(opt: Option<i32>) -> i32 {
+    let val = match opt {
+        Some(v) if v > 0 => v,
+        _ => return 0,
+    };
+    val + 1
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);

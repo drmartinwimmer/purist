@@ -341,10 +341,13 @@ fn check_struct_methods(
 }
 
 fn is_receiver_ref(sig: &syn::Signature, is_mut: bool) -> bool {
-    matches!(
-        sig.inputs.first(),
-        Some(syn::FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_some() == is_mut
-    )
+    match sig.inputs.first() {
+        Some(syn::FnArg::Receiver(r)) => match &r.kind {
+            syn::ReceiverKind::Reference(_, _, mutability) => mutability.is_some() == is_mut,
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn is_self_field(expr: &syn::Expr) -> Option<&syn::Ident> {
