@@ -208,9 +208,7 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
         self.visit_expr(&expr_match.expr);
         for arm in &expr_match.arms {
-            if let Some((_, guard)) = &arm.guard {
-                self.visit_expr(guard);
-            }
+            self.visit_pat(&arm.pat);
             self.current_depth += 1;
             self.check_depth(arm.body.span());
             self.visit_expr(&arm.body);
@@ -376,6 +374,26 @@ mod tests {
                 }
             }
         }
+    }
+}
+"#;
+        let file = syn::parse_file(source)?;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let rule = MaxNestingDepthRule;
+        let diags = rule.check_file(&ctx, &file);
+        expect_that!(&diags, is_empty());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn match_with_guard_is_checked_for_depth() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+fn check_match(val: Option<i32>) {
+    match val {
+        Some(x) if x > 0 => {
+            step_1();
+        }
+        _ => {}
     }
 }
 "#;

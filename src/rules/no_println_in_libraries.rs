@@ -87,7 +87,7 @@ fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
     {
         return true;
     }
-    if let Some((_, ref trait_path, _)) = item_impl.trait_
+    if let Some((ref trait_path, _)) = item_impl.trait_
         && let Some(ident) = path_last_ident(trait_path)
     {
         let name = ident.to_string();
