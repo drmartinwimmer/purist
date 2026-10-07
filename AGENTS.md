@@ -14,41 +14,23 @@ The user uses **Jujutsu (`jj`)** for version control.
   ```
 - If you need to start a new logical change, use `jj new`.
 
-## 2. Comprehensive Quality Checks (`code-review check`)
+## 2. Comprehensive Quality Checks
 
-Before submitting changes or opening pull requests, review agents must ensure that all automated checks pass cleanly.
-
-### Unified Check Aggregator
-
-Run the unified check aggregator to run all linters, formatters, AST rules, and security audits across the codebase:
-
-```bash
-cargo run -p code-review -- check
-```
-
-The aggregator invokes:
+Before submitting changes or opening pull requests, review agents must ensure that all automated checks pass cleanly:
 
 - **Rust formatting**: `cargo fmt --check`
 - **Rust compiler & Clippy lints**: `cargo clippy --all-targets --all-features -- -D warnings`
-- **Purist AST linter**: `cargo run -p code-review -- purist --path .`
+- **Purist AST linter**: `cargo run -- --path .`
 - **Dependency security audit**: `cargo audit`
 - **TOML formatting**: `taplo fmt --check`
 - **Markdown & JSON formatting**: `prettier --check "**/*.{md,json}"` (or `mdformat`)
-
-You can also filter checks to only files modified in the active Jujutsu change:
-
-```bash
-cargo run -p code-review -- check --changed-only
-```
 
 ## 3. Purist AST Linter
 
 Review agents must always run the Purist AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
 
 ```bash
-cargo run -p code-review -- purist --path .
-# or directly:
-cargo run -p purist -- --path .
+cargo run -- --path .
 ```
 
 Ensure zero violations (errors or warnings) are reported before submitting changes.

@@ -41,7 +41,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run purist AST linter
-        run: cargo run -p code-review -- purist --path .
+        run: cargo run -- --path .
 
       - name: Check TOML formatting (Taplo)
         run: taplo fmt --check
@@ -52,13 +52,10 @@ jobs:
       - name: Run cargo security audit
         run: cargo audit
 
-      - name: Run code-review check aggregator
-        run: cargo run -p code-review -- check
-
       - name: Verify package & metadata
         run: |
           cargo metadata --format-version 1 --no-deps > /dev/null
-          cargo publish --dry-run -p purist
+          cargo publish --dry-run
 
   test:
     name: Unit & Integration Tests
@@ -72,39 +69,6 @@ jobs:
 
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Install system dependencies (Bubblewrap & Direnv)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap direnv
-
-      - name: Install Jujutsu (jj)
-        uses: taiki-e/install-action@v2
-        with:
-          tool: jj-cli
-
-      - name: Install Fence
-        run: |
-          TAG=$(curl -s https://api.github.com/repos/fencesandbox/fence/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-          VERSION="${TAG#v}"
-          echo "Installing Fence ${VERSION} (${TAG})..."
-          curl -sSL "https://github.com/fencesandbox/fence/releases/download/${TAG}/fence_${VERSION}_Linux_x86_64.tar.gz" | sudo tar -xz -C /usr/local/bin fence
-          fence --version
-
-      - name: Setup Mock AI Agent CLI (agy)
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          cat << 'EOF' > "$HOME/.local/bin/agy"
-          #!/bin/sh
-          echo "agy 1.1.24"
-          EOF
-          chmod +x "$HOME/.local/bin/agy"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Configure Git identity for tests
-        run: |
-          git config --global user.name "CI"
-          git config --global user.email "ci@example.com"
 
       - name: Run cargo test
         run: cargo test --all-targets --all-features
