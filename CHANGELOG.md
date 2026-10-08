@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.4.0...purist-v0.5.0) (2026-10-08)
+
+
+### Features
+
+* add --allow flag to disable triggered checks in Cargo.toml ([26931ad](https://github.com/drmartinwimmer/purist/commit/26931ad3f155663222027fe932d34d8a1435e9cc))
+* add --allow flag to disable triggered checks in Cargo.toml ([3cf299a](https://github.com/drmartinwimmer/purist/commit/3cf299a6a02217f425852dffcff55fb7301e4ce3))
+
 ## [0.4.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.3.0...purist-v0.4.0) (2026-10-07)
 
 
