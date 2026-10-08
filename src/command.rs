@@ -39,9 +39,6 @@ pub enum PuristError {
     LintViolationsFound { count: usize },
 }
 
-/// Backwards compatibility alias for `PuristError`.
-pub type OpinionatedError = PuristError;
-
 /// Arguments for the purist linter subcommand.
 #[derive(Args, Debug, Clone, Default, PartialEq, Eq)]
 pub struct PuristCommand {
@@ -65,9 +62,6 @@ pub struct PuristCommand {
     #[arg(long)]
     allow: bool,
 }
-
-/// Backwards compatibility alias for `PuristCommand`.
-pub type OpinionatedCommand = PuristCommand;
 
 impl PuristCommand {
     /// Creates a new `PuristCommand` instance.

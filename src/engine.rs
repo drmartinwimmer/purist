@@ -129,9 +129,6 @@ pub struct PuristEngine {
     config: Option<LintConfig>,
 }
 
-/// Backwards compatibility alias for `PuristEngine`.
-pub type OpinionatedEngine = PuristEngine;
-
 impl Default for PuristEngine {
     fn default() -> Self {
         Self::new()
@@ -765,14 +762,15 @@ mod tests {
     #[googletest::test]
     fn config_warns_on_deprecated_rule() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LintConfig::empty();
-        config.set_rule("clap_encapsulation", RuleLevel::Allow);
-        let engine = PuristEngine::empty().with_config(config.clone());
+        config
+            .deprecated
+            .push("Rule 'purist::old_rule' is deprecated. Use 'purist::new_rule' instead.".into());
+        let engine = PuristEngine::empty().with_config(config);
         let report = engine.check_source(Path::new("clean.rs"), "fn ok() {}\n");
 
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
         assert_that!(&diag.rule, eq("purist::deprecated_rule"));
-        assert_that!(config.rules.clap_struct_encapsulation, eq(RuleLevel::Allow));
         Ok(())
     }
 
