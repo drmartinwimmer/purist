@@ -22,7 +22,7 @@
 //! expect_that!(&items, elements_are![eq(&1), eq(&2)]);
 //! ```
 
-use super::common::macro_name;
+use crate::checkers::check_macro_matches;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::Token;
@@ -59,9 +59,8 @@ struct MatcherBorrowVisitor<'a> {
 impl<'ast> Visit<'ast> for MatcherBorrowVisitor<'_> {
     /// Inspects macro invocations for GoogleTest `assert_that!` and `expect_that!`.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if let Some(ident) = macro_name(mac)
-            && (ident == "assert_that" || ident == "expect_that")
-        {
+        const TARGETS: &[&str] = &["assert_that", "expect_that"];
+        if check_macro_matches(mac, TARGETS).is_some() {
             collect_macro_diagnostics(self.ctx, mac, &mut self.diagnostics);
         }
 
@@ -102,7 +101,7 @@ impl<'ast> Visit<'ast> for BorrowMethodVisitor<'_> {
 
     /// Inspects method calls and flags redundant borrow conversions.
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if let Some(diag) = check_redundant_borrow_call(self.ctx, call) {
+        if let Some(diag) = check_method_call_redundant_borrow(self.ctx, call) {
             self.diagnostics.push(diag);
         }
 
@@ -111,7 +110,7 @@ impl<'ast> Visit<'ast> for BorrowMethodVisitor<'_> {
 }
 
 /// Emits a diagnostic if the method call is a redundant `.as_str()` or `.as_slice()`.
-fn check_redundant_borrow_call(
+fn check_method_call_redundant_borrow(
     ctx: &LintContext<'_>,
     call: &syn::ExprMethodCall,
 ) -> Option<Diagnostic> {

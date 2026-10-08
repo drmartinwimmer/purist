@@ -120,7 +120,9 @@ impl<'ast> Visit<'ast> for QualifiedPathVisitor<'_> {
 
     /// Checks type paths for verbose multi-segment qualification.
     fn visit_type_path(&mut self, type_path: &'ast syn::TypePath) {
-        if let Some(diag) = check_qualified_path(self.ctx, &type_path.path, self.imported_names) {
+        if let Some(diag) =
+            check_path_excessive_qualification(self.ctx, &type_path.path, self.imported_names)
+        {
             self.diagnostics.push(diag);
         }
         visit::visit_type_path(self, type_path);
@@ -128,7 +130,9 @@ impl<'ast> Visit<'ast> for QualifiedPathVisitor<'_> {
 
     /// Checks expression paths for verbose multi-segment qualification.
     fn visit_expr_path(&mut self, expr_path: &'ast syn::ExprPath) {
-        if let Some(diag) = check_qualified_path(self.ctx, &expr_path.path, self.imported_names) {
+        if let Some(diag) =
+            check_path_excessive_qualification(self.ctx, &expr_path.path, self.imported_names)
+        {
             self.diagnostics.push(diag);
         }
         visit::visit_expr_path(self, expr_path);
@@ -136,7 +140,7 @@ impl<'ast> Visit<'ast> for QualifiedPathVisitor<'_> {
 }
 
 /// Checks whether a path qualifies as an excessively long path that should be replaced with a `use` declaration.
-fn check_qualified_path(
+fn check_path_excessive_qualification(
     ctx: &LintContext<'_>,
     path: &syn::Path,
     imported_names: &HashSet<String>,

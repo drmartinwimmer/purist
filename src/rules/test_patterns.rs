@@ -34,7 +34,8 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, macro_name};
+use super::common::TestScopeTracker;
+use crate::checkers::{check_macro_matches, check_method_call_matches_name};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -70,75 +71,72 @@ struct TestVisitor<'a> {
 impl<'ast> Visit<'ast> for TestVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Checks test function naming convention and tracks current test function context.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let fn_name = item_fn.sig.ident.to_string();
-        let _guard = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
+        self.test_scope.push_fn_with_name(&item_fn.attrs, &fn_name);
 
-        if self.test_scope.is_in_test_fn()
-            && let Some(diag) = check_test_name(self.ctx, &item_fn.sig.ident)
-        {
-            self.diagnostics.push(diag);
+        if self.test_scope.is_in_test_fn() {
+            self.check_test_fn_naming_convention(&item_fn.sig.ident);
         }
 
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Checks for standard library assertion macros inside test functions.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if self.test_scope.is_in_test_fn()
-            && let Some(diag) = check_assertion_macro(self.ctx, mac)
-        {
-            self.diagnostics.push(diag);
+        if self.test_scope.is_in_test_fn() {
+            self.check_macro_assertion_in_test(mac);
         }
         visit::visit_macro(self, mac);
     }
 
     /// Checks for `.unwrap()` method calls inside test functions.
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if self.test_scope.is_in_test_fn()
-            && let Some(diag) = check_unwrap_method_call(self.ctx, call)
-        {
-            self.diagnostics.push(diag);
+        if self.test_scope.is_in_test_fn() {
+            self.check_method_call_unwrap_in_test(call);
         }
         visit::visit_expr_method_call(self, call);
     }
 }
 
-/// Validates that test function names follow `<verb>_<description>_<outcome>`.
-fn check_test_name(ctx: &LintContext<'_>, ident: &syn::Ident) -> Option<Diagnostic> {
-    let name = ident.to_string();
-    let segments: Vec<&str> = name.split('_').filter(|s| !s.is_empty()).collect();
+impl TestVisitor<'_> {
+    /// Validates that test function names follow `<verb>_<description>_<outcome>`.
+    fn check_test_fn_naming_convention(&mut self, ident: &syn::Ident) {
+        let name = ident.to_string();
+        let segments: Vec<&str> = name.split('_').filter(|s| !s.is_empty()).collect();
 
-    if segments.len() < 3 {
-        let span = ctx.to_span(ident.span());
-        Some(
-            Diagnostic::new(
-                "purist::test_patterns",
-                Severity::Warning,
-                format!(
-                    "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Rename test to follow '<verb>_<description>_<outcome>' (e.g. 'parse_valid_input_succeeds')."),
-        )
-    } else {
-        None
+        if segments.len() < 3 {
+            let span = self.ctx.to_span(ident.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::test_patterns",
+                    Severity::Warning,
+                    format!(
+                        "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Rename test to follow '<verb>_<description>_<outcome>' (e.g. 'parse_valid_input_succeeds')."),
+            );
+        }
     }
-}
 
-/// Checks if macro invocation is a legacy assertion like `assert_eq!` or `assert_ne!`.
-fn check_assertion_macro(ctx: &LintContext<'_>, mac: &syn::Macro) -> Option<Diagnostic> {
-    let mac_ident = macro_name(mac)?;
-    let name = mac_ident.to_string();
-    if name == "assert_eq" || name == "assert_ne" {
-        let span = ctx.to_span(mac.path.span());
-        Some(
+    /// Checks if macro invocation is a legacy assertion like `assert_eq!` or `assert_ne!`.
+    fn check_macro_assertion_in_test(&mut self, mac: &syn::Macro) {
+        const TARGETS: &[&str] = &["assert_eq", "assert_ne"];
+        let Some(name) = check_macro_matches(mac, TARGETS) else {
+            return;
+        };
+
+        let span = self.ctx.to_span(mac.path.span());
+        self.diagnostics.push(
             Diagnostic::new(
                 "purist::test_patterns",
                 Severity::Warning,
@@ -148,30 +146,23 @@ fn check_assertion_macro(ctx: &LintContext<'_>, mac: &syn::Macro) -> Option<Diag
             )
             .with_span(span)
             .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))' or 'expect_that!(actual, eq(expected))'."),
-        )
-    } else {
-        None
+        );
     }
-}
 
-/// Checks if a method call inside a test is `.unwrap()`.
-fn check_unwrap_method_call(
-    ctx: &LintContext<'_>,
-    call: &syn::ExprMethodCall,
-) -> Option<Diagnostic> {
-    if call.method == "unwrap" {
-        let span = ctx.to_span(call.method.span());
-        Some(
-            Diagnostic::new(
-                "purist::test_patterns",
-                Severity::Warning,
-                "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Return Result<(), Box<dyn std::error::Error>> or googletest::Result<()> and use '?' instead of '.unwrap()'."),
-        )
-    } else {
-        None
+    /// Checks if a method call inside a test is `.unwrap()`.
+    fn check_method_call_unwrap_in_test(&mut self, call: &syn::ExprMethodCall) {
+        if check_method_call_matches_name(call, &["unwrap"]) {
+            let span = self.ctx.to_span(call.method.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::test_patterns",
+                    Severity::Warning,
+                    "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
+                )
+                .with_span(span)
+                .with_suggested_fix("Return Result<(), Box<dyn std::error::Error>> or googletest::Result<()> and use '?' instead of '.unwrap()'."),
+            );
+        }
     }
 }
 

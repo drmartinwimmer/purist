@@ -42,7 +42,8 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, path_ends_with_segments, path_last_ident};
+use super::common::TestScopeTracker;
+use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -98,69 +99,64 @@ struct EnvAccessVisitor<'a> {
 impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function calls outside test scopes and flags direct `std::env` queries.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.test_scope.is_in_test()
-            && let Some(diag) = check_env_call(self.ctx, call)
-        {
-            self.diagnostics.push(diag);
+        if !self.test_scope.is_in_test() {
+            self.check_call_uncentralized_env_access(call);
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
-/// Inspects a function call expression and returns a diagnostic if it calls `std::env::var`, `var_os`, etc.
-fn check_env_call(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Option<Diagnostic> {
-    let syn::Expr::Path(expr_path) = &*call.func else {
-        return None;
-    };
+impl EnvAccessVisitor<'_> {
+    /// Inspects a function call expression and records a diagnostic if it calls `std::env::var`, `var_os`, etc.
+    fn check_call_uncentralized_env_access(&mut self, call: &syn::ExprCall) {
+        const ENV_TARGETS: &[&[&str]] = &[
+            &["env", "var"],
+            &["env", "var_os"],
+            &["env", "set_var"],
+            &["env", "remove_var"],
+        ];
+        if !check_call_matches_path(call, ENV_TARGETS) {
+            return;
+        }
 
-    if !is_env_access_path(&expr_path.path) {
-        return None;
+        let syn::Expr::Path(expr_path) = &*call.func else {
+            return;
+        };
+        let func_name = expr_path
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_else(|| "env".to_string());
+        let span = self.ctx.to_span(call.span());
+
+        self.diagnostics.push(
+            Diagnostic::new(
+                "purist::no_env_access_outside_config",
+                Severity::Warning,
+                format!(
+                    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
+                ),
+            )
+            .with_span(span)
+            .with_suggested_fix("Parse environment variables in a centralized 'config.rs' or 'cli.rs' module and pass explicit parameters."),
+        );
     }
-
-    let func_name = expr_path
-        .path
-        .segments
-        .last()
-        .map(|s| s.ident.to_string())
-        .unwrap_or_else(|| "env".to_string());
-    let span = ctx.to_span(call.span());
-
-    Some(
-        Diagnostic::new(
-            "purist::no_env_access_outside_config",
-            Severity::Warning,
-            format!(
-                "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Parse environment variables in a centralized 'config.rs' or 'cli.rs' module and pass explicit parameters."),
-    )
-}
-
-/// Returns true if the path targets `std::env::var`, `std::env::var_os`, `set_var`, or `remove_var`.
-fn is_env_access_path(path: &syn::Path) -> bool {
-    let Some(last_ident) = path_last_ident(path) else {
-        return false;
-    };
-    let last = last_ident.to_string();
-    if !matches!(last.as_str(), "var" | "var_os" | "set_var" | "remove_var") {
-        return false;
-    }
-    path_ends_with_segments(path, &["env", &last])
 }
 
 #[cfg(test)]

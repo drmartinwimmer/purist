@@ -98,42 +98,46 @@ struct DoubleNegationVisitor<'a> {
 
 impl<'ast> Visit<'ast> for DoubleNegationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.test_scope.push_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        self.test_scope.push_fn(&trait_fn.attrs);
         visit::visit_trait_item_fn(self, trait_fn);
+        self.test_scope.pop();
     }
 
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {
         if !self.test_scope.is_in_test() {
-            self.check_signature_names(sig);
+            self.check_fn_signature_negative_naming(sig);
         }
         visit::visit_signature(self, sig);
     }
 
     fn visit_fn_arg(&mut self, arg: &'ast syn::FnArg) {
         if !self.test_scope.is_in_test() {
-            self.check_fn_arg(arg);
+            self.check_fn_arg_negative_bool(arg);
         }
         visit::visit_fn_arg(self, arg);
     }
 }
 
 impl DoubleNegationVisitor<'_> {
-    fn check_signature_names(&mut self, sig: &syn::Signature) {
+    fn check_fn_signature_negative_naming(&mut self, sig: &syn::Signature) {
         let fn_name = sig.ident.to_string();
 
         let has_bool_param = sig.inputs.iter().any(|arg| {
@@ -183,7 +187,7 @@ impl DoubleNegationVisitor<'_> {
         }
     }
 
-    fn check_fn_arg(&mut self, arg: &syn::FnArg) {
+    fn check_fn_arg_negative_bool(&mut self, arg: &syn::FnArg) {
         if let FnArg::Typed(pat_type) = arg
             && is_bool_type(&pat_type.ty)
             && let Pat::Ident(pat_ident) = &*pat_type.pat

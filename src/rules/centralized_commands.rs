@@ -32,7 +32,8 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, path_ends_with_segments};
+use super::common::TestScopeTracker;
+use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -91,44 +92,44 @@ struct CommandVisitor<'a> {
 impl<'ast> Visit<'ast> for CommandVisitor<'_> {
     /// Tracks entry into and exit from modules, updating test scope if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks entry into and exit from functions, updating test scope if annotated with `#[test]` or `#[googletest::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function call expressions and records a diagnostic if an uncentralized `Command::new` is detected.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.test_scope.is_in_test() && is_uncentralized_command_call(call) {
-            self.diagnostics.push(build_diagnostic(self.ctx, call));
+        if !self.test_scope.is_in_test() {
+            self.check_call_uncentralized_command(call);
         }
 
         visit::visit_expr_call(self, call);
     }
 }
 
-/// Returns true if a call expression targets `Command::new`.
-fn is_uncentralized_command_call(call: &syn::ExprCall) -> bool {
-    let syn::Expr::Path(expr_path) = &*call.func else {
-        return false;
-    };
-    path_ends_with_segments(&expr_path.path, &["Command", "new"])
-}
-
-/// Builds the diagnostic finding for an uncentralized `Command::new` invocation.
-fn build_diagnostic(ctx: &LintContext<'_>, call: &syn::ExprCall) -> Diagnostic {
-    let span = ctx.to_span(call.span());
-    Diagnostic::new(
-        "purist::centralized_command_execution",
-        Severity::Warning,
-        "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
-    )
-    .with_span(span)
-    .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module.")
+impl CommandVisitor<'_> {
+    fn check_call_uncentralized_command(&mut self, call: &syn::ExprCall) {
+        const TARGETS: &[&[&str]] = &[&["Command", "new"]];
+        if check_call_matches_path(call, TARGETS) {
+            let span = self.ctx.to_span(call.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::centralized_command_execution",
+                    Severity::Warning,
+                    "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
+                )
+                .with_span(span)
+                .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module."),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

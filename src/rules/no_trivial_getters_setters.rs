@@ -76,7 +76,13 @@ impl Rule for NoTrivialGettersSettersRule {
             if exempt_structs.contains(struct_name) {
                 continue;
             }
-            check_struct_methods(ctx, self.name(), struct_name, methods, &mut diagnostics);
+            check_struct_getter_setter_combos(
+                ctx,
+                self.name(),
+                struct_name,
+                methods,
+                &mut diagnostics,
+            );
         }
 
         diagnostics.sort_by_key(|d| {
@@ -263,7 +269,7 @@ impl DiagEmitter<'_, '_> {
 }
 
 /// Checks methods of a struct for trivial getter/setter combos.
-fn check_struct_methods(
+fn check_struct_getter_setter_combos(
     ctx: &LintContext<'_>,
     rule_name: &'static str,
     struct_name: &str,

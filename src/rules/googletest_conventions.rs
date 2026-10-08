@@ -41,7 +41,8 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, has_bare_test_attr, has_framework_test_attr, macro_name};
+use super::common::{TestScopeTracker, has_bare_test_attr, has_framework_test_attr};
+use crate::checkers::check_macro_matches;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::punctuated::Punctuated;
@@ -77,22 +78,25 @@ struct GoogletestConventionsVisitor<'a> {
 
 impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.check_bare_test_attr(&item_fn.attrs, &item_fn.sig.ident);
+        self.check_test_fn_bare_test_attribute(&item_fn.attrs, &item_fn.sig.ident);
         let fn_name = item_fn.sig.ident.to_string();
-        let _guard = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
+        self.test_scope.push_fn_with_name(&item_fn.attrs, &fn_name);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.check_bare_test_attr(&impl_fn.attrs, &impl_fn.sig.ident);
+        self.check_test_fn_bare_test_attribute(&impl_fn.attrs, &impl_fn.sig.ident);
         let fn_name = impl_fn.sig.ident.to_string();
-        let _guard = self.test_scope.enter_fn_with_name(&impl_fn.attrs, &fn_name);
+        self.test_scope.push_fn_with_name(&impl_fn.attrs, &fn_name);
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
@@ -101,54 +105,13 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
             return;
         }
 
-        if let Some(mac_ident) = macro_name(mac) {
-            let mac_name = mac_ident.to_string();
-            if mac_name == "assert" {
-                let span = self.ctx.to_span(mac.path.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::googletest_conventions",
-                        Severity::Warning,
-                        "Usage of 'assert!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead.",
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Replace with 'assert_that!(actual, matcher)' or 'expect_that!(actual, matcher)'."),
-                );
-            } else if mac_name == "assert_eq" || mac_name == "assert_ne" {
-                let span = self.ctx.to_span(mac.path.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::googletest_conventions",
-                        Severity::Warning,
-                        format!(
-                            "Usage of '{mac_name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))'."),
-                );
-            } else if mac_name == "assert_that" || mac_name == "expect_that" {
-                self.check_googletest_assertion_macro(mac);
-            }
-        }
-
+        self.check_macro_assertion(mac);
         visit::visit_macro(self, mac);
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if self.test_scope.is_in_test_fn() && call.method == "expect" {
-            let span = self.ctx.to_span(call.method.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    "Avoid calling '.expect(...)' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
-                )
-                .with_span(span)
-                .with_suggested_fix(
-                    "Return 'Result<(), Box<dyn std::error::Error>>' or 'googletest::Result<()>' and use '?' instead of '.expect(...)'.",
-                ),
-            );
+        if self.test_scope.is_in_test_fn() {
+            self.check_method_call_expect_in_test(call);
         }
 
         visit::visit_expr_method_call(self, call);
@@ -156,7 +119,7 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
 }
 
 impl GoogletestConventionsVisitor<'_> {
-    fn check_bare_test_attr(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
+    fn check_test_fn_bare_test_attribute(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
         let has_bare_test = has_bare_test_attr(attrs);
         let has_framework_test = has_framework_test_attr(attrs);
 
@@ -177,7 +140,65 @@ impl GoogletestConventionsVisitor<'_> {
         }
     }
 
-    fn check_googletest_assertion_macro(&mut self, mac: &syn::Macro) {
+    fn check_macro_assertion(&mut self, mac: &syn::Macro) {
+        const TARGETS: &[&str] = &[
+            "assert",
+            "assert_eq",
+            "assert_ne",
+            "assert_that",
+            "expect_that",
+        ];
+        let Some(mac_name) = check_macro_matches(mac, TARGETS) else {
+            return;
+        };
+
+        if mac_name == "assert" {
+            let span = self.ctx.to_span(mac.path.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::googletest_conventions",
+                    Severity::Warning,
+                    "Usage of 'assert!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead.",
+                )
+                .with_span(span)
+                .with_suggested_fix("Replace with 'assert_that!(actual, matcher)' or 'expect_that!(actual, matcher)'."),
+            );
+        } else if mac_name == "assert_eq" || mac_name == "assert_ne" {
+            let span = self.ctx.to_span(mac.path.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::googletest_conventions",
+                    Severity::Warning,
+                    format!(
+                        "Usage of '{mac_name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))'."),
+            );
+        } else if mac_name == "assert_that" || mac_name == "expect_that" {
+            self.check_macro_googletest_assertion(mac);
+        }
+    }
+
+    fn check_method_call_expect_in_test(&mut self, call: &syn::ExprMethodCall) {
+        if call.method == "expect" {
+            let span = self.ctx.to_span(call.method.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::googletest_conventions",
+                    Severity::Warning,
+                    "Avoid calling '.expect(...)' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
+                )
+                .with_span(span)
+                .with_suggested_fix(
+                    "Return 'Result<(), Box<dyn std::error::Error>>' or 'googletest::Result<()>' and use '?' instead of '.expect(...)'.",
+                ),
+            );
+        }
+    }
+
+    fn check_macro_googletest_assertion(&mut self, mac: &syn::Macro) {
         let Ok(args) =
             mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)
         else {

@@ -60,7 +60,7 @@ struct MatchToLetElseVisitor<'a> {
 impl<'ast> Visit<'ast> for MatchToLetElseVisitor<'_> {
     /// Inspects match expressions for candidates that can be converted to `let ... else`.
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
-        if let Some(diag) = check_match_to_let_else(self.ctx, expr_match) {
+        if let Some(diag) = check_expr_match_single_to_let_else(self.ctx, expr_match) {
             self.diagnostics.push(diag);
         }
 
@@ -82,7 +82,7 @@ fn pat_has_guard(pat: &syn::Pat) -> bool {
 }
 
 /// Checks whether a two-arm match expression can be replaced by `let ... else`.
-fn check_match_to_let_else(
+fn check_expr_match_single_to_let_else(
     ctx: &LintContext<'_>,
     expr_match: &syn::ExprMatch,
 ) -> Option<Diagnostic> {

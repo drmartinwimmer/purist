@@ -72,37 +72,43 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks module-level test configuration and suppression scoping.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
         let suppressed = has_suppression_attribute(&item_mod.attrs, "no_unsafe_in_tests");
-        let _suppress_guard = self.suppressed_scope.enter(suppressed);
-        let _test_guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.suppressed_scope.push(suppressed);
+        self.test_scope.push_mod(&item_mod.attrs);
 
         visit::visit_item_mod(self, item_mod);
+
+        self.test_scope.pop();
+        self.suppressed_scope.pop();
     }
 
     /// Tracks function-level test attributes and suppression scoping.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let suppressed = has_suppression_attribute(&item_fn.attrs, "no_unsafe_in_tests");
-        let _suppress_guard = self.suppressed_scope.enter(suppressed);
-        let _test_guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.suppressed_scope.push(suppressed);
+        self.test_scope.push_fn(&item_fn.attrs);
 
         visit::visit_item_fn(self, item_fn);
+
+        self.test_scope.pop();
+        self.suppressed_scope.pop();
     }
 
     /// Tracks impl-level function test attributes and suppression scoping.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
         let suppressed = has_suppression_attribute(&impl_fn.attrs, "no_unsafe_in_tests");
-        let _suppress_guard = self.suppressed_scope.enter(suppressed);
-        let _test_guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.suppressed_scope.push(suppressed);
+        self.test_scope.push_fn(&impl_fn.attrs);
 
         visit::visit_impl_item_fn(self, impl_fn);
+
+        self.test_scope.pop();
+        self.suppressed_scope.pop();
     }
 
     /// Checks function signatures in test contexts for `unsafe` qualifiers.
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {
-        if self.test_scope.is_in_test()
-            && !self.suppressed_scope.is_active()
-            && let Some(diag) = check_unsafe_signature(self.ctx, sig)
-        {
-            self.diagnostics.push(diag);
+        if self.test_scope.is_in_test() && !self.suppressed_scope.is_active() {
+            self.check_fn_signature_unsafe_in_test(sig);
         }
 
         visit::visit_signature(self, sig);
@@ -111,45 +117,46 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Flags raw `unsafe` blocks when encountered within a test context.
     fn visit_expr_unsafe(&mut self, expr_unsafe: &'ast syn::ExprUnsafe) {
         if self.test_scope.is_in_test() && !self.suppressed_scope.is_active() {
-            self.diagnostics
-                .push(check_unsafe_block(self.ctx, expr_unsafe));
+            self.check_expr_unsafe_block_in_test(expr_unsafe);
         }
 
         visit::visit_expr_unsafe(self, expr_unsafe);
     }
 }
 
-/// Emits a diagnostic if the function signature has an `unsafe` qualifier.
-fn check_unsafe_signature(ctx: &LintContext<'_>, sig: &syn::Signature) -> Option<Diagnostic> {
-    if matches!(sig.safety, syn::Safety::Unsafe(_)) {
-        let span = ctx.to_span(sig.fn_token.span());
-        Some(
+impl UnsafeTestVisitor<'_> {
+    /// Emits a diagnostic if the function signature has an `unsafe` qualifier.
+    fn check_fn_signature_unsafe_in_test(&mut self, sig: &syn::Signature) {
+        if matches!(sig.safety, syn::Safety::Unsafe(_)) {
+            let span = self.ctx.to_span(sig.fn_token.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::no_unsafe_in_tests",
+                    Severity::Error,
+                    format!(
+                        "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
+                        sig.ident
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Remove 'unsafe' from test code; verify behavior strictly through safe public interfaces."),
+            );
+        }
+    }
+
+    /// Emits a diagnostic for an `unsafe` block expression in test context.
+    fn check_expr_unsafe_block_in_test(&mut self, expr_unsafe: &syn::ExprUnsafe) {
+        let span = self.ctx.to_span(expr_unsafe.unsafe_token.span());
+        self.diagnostics.push(
             Diagnostic::new(
                 "purist::no_unsafe_in_tests",
                 Severity::Error,
-                format!(
-                    "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
-                    sig.ident
-                ),
+                "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions.",
             )
             .with_span(span)
-            .with_suggested_fix("Remove 'unsafe' from test code; verify behavior strictly through safe public interfaces."),
-        )
-    } else {
-        None
+            .with_suggested_fix("Remove 'unsafe' block from test code; verify behavior strictly through safe public interfaces."),
+        );
     }
-}
-
-/// Emits a diagnostic for an `unsafe` block expression in test context.
-fn check_unsafe_block(ctx: &LintContext<'_>, expr_unsafe: &syn::ExprUnsafe) -> Diagnostic {
-    let span = ctx.to_span(expr_unsafe.unsafe_token.span());
-    Diagnostic::new(
-        "purist::no_unsafe_in_tests",
-        Severity::Error,
-        "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions.",
-    )
-    .with_span(span)
-    .with_suggested_fix("Remove 'unsafe' block from test code; verify behavior strictly through safe public interfaces.")
 }
 
 #[cfg(test)]

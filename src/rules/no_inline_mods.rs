@@ -50,7 +50,7 @@ impl Rule for NoInlineModsRule {
 
         for item in &file.items {
             if let syn::Item::Mod(item_mod) = item
-                && let Some(diag) = check_inline_module(ctx, self.name(), item_mod)
+                && let Some(diag) = check_mod_forbidden_inline_in_root(ctx, self.name(), item_mod)
             {
                 diagnostics.push(diag);
             }
@@ -61,7 +61,7 @@ impl Rule for NoInlineModsRule {
 }
 
 /// Checks whether an item module is an unidiomatic inline module in a crate root file.
-fn check_inline_module(
+fn check_mod_forbidden_inline_in_root(
     ctx: &LintContext<'_>,
     rule_name: &'static str,
     item_mod: &syn::ItemMod,
