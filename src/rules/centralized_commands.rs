@@ -91,16 +91,14 @@ struct CommandVisitor<'a> {
 impl<'ast> Visit<'ast> for CommandVisitor<'_> {
     /// Tracks entry into and exit from modules, updating test scope if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Tracks entry into and exit from functions, updating test scope if annotated with `#[test]` or `#[googletest::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     /// Inspects function call expressions and records a diagnostic if an uncentralized `Command::new` is detected.

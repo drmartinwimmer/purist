@@ -70,15 +70,14 @@ struct TestVisitor<'a> {
 impl<'ast> Visit<'ast> for TestVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Checks test function naming convention and tracks current test function context.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let fn_name = item_fn.sig.ident.to_string();
-        let prev = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
+        let _guard = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
 
         if self.test_scope.is_in_test_fn()
             && let Some(diag) = check_test_name(self.ctx, &item_fn.sig.ident)
@@ -87,7 +86,6 @@ impl<'ast> Visit<'ast> for TestVisitor<'_> {
         }
 
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     /// Checks for standard library assertion macros inside test functions.

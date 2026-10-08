@@ -118,73 +118,25 @@ pub fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
     })
 }
 
-/// Tracks lexical test scopes (test files, `#[cfg(test)]` modules, and test functions) during AST traversal.
-#[derive(Debug, Clone, Copy)]
-pub struct TestScopeTracker {
-    in_test_module: bool,
-    in_test_fn: bool,
-}
+pub use crate::trackers::{ScopeGuard, TestScopeState, TestScopeTracker};
 
-impl TestScopeTracker {
-    /// Creates a new test scope tracker, initialized with whether the current file is a test file.
-    pub fn new(is_test_file: bool) -> Self {
-        Self {
-            in_test_module: is_test_file,
-            in_test_fn: false,
+/// Checks whether a type is `bool` or `Option<bool>`.
+pub fn is_bool_type(ty: &Type) -> bool {
+    match ty {
+        Type::Path(type_path) => {
+            if path_ends_with_ident(&type_path.path, "bool") {
+                return true;
+            }
+            if path_ends_with_ident(&type_path.path, "Option")
+                && let Some(segment) = type_path.path.segments.last()
+                && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+            {
+                return is_bool_type(inner_ty);
+            }
+            false
         }
-    }
-
-    /// Returns true if currently within any test context (test file, `#[cfg(test)]` module, or test function).
-    pub fn is_in_test(&self) -> bool {
-        self.in_test_module || self.in_test_fn
-    }
-
-    /// Returns true if currently within a `#[cfg(test)]` module or a dedicated test file.
-    pub fn is_in_test_module(&self) -> bool {
-        self.in_test_module
-    }
-
-    /// Returns true if currently within the body of a test function.
-    pub fn is_in_test_fn(&self) -> bool {
-        self.in_test_fn
-    }
-
-    /// Updates the tracker when entering a module with attributes, returning the previous module state.
-    pub fn enter_mod(&mut self, attrs: &[Attribute]) -> bool {
-        let prev = self.in_test_module;
-        if has_cfg_test_attr(attrs) {
-            self.in_test_module = true;
-        }
-        prev
-    }
-
-    /// Restores the previous module test state when exiting a module.
-    pub fn exit_mod(&mut self, prev: bool) {
-        self.in_test_module = prev;
-    }
-
-    /// Updates the tracker when entering a function, returning the previous function state.
-    pub fn enter_fn(&mut self, attrs: &[Attribute]) -> bool {
-        let prev = self.in_test_fn;
-        if has_test_attr(attrs) {
-            self.in_test_fn = true;
-        }
-        prev
-    }
-
-    /// Updates the tracker when entering a function, also treating functions in test modules
-    /// starting with `test_` as test functions. Returns the previous function state.
-    pub fn enter_fn_with_name(&mut self, attrs: &[Attribute], fn_name: &str) -> bool {
-        let prev = self.in_test_fn;
-        if has_test_attr(attrs) || (self.in_test_module && fn_name.starts_with("test_")) {
-            self.in_test_fn = true;
-        }
-        prev
-    }
-
-    /// Restores the previous function test state when exiting a function.
-    pub fn exit_fn(&mut self, prev: bool) {
-        self.in_test_fn = prev;
+        _ => false,
     }
 }
 
@@ -284,24 +236,36 @@ mod tests {
 
     #[googletest::test]
     fn track_test_scope_transitions_correctly() -> Result<(), Box<dyn std::error::Error>> {
-        let mut tracker = TestScopeTracker::new(false);
+        let tracker = TestScopeTracker::new(false);
         assert_that!(tracker.is_in_test(), eq(false));
 
         let test_mod: syn::ItemMod = syn::parse_str("#[cfg(test)] mod tests {}")?;
-        let prev_mod = tracker.enter_mod(&test_mod.attrs);
-        assert_that!(tracker.is_in_test(), eq(true));
-        assert_that!(tracker.is_in_test_module(), eq(true));
-
-        tracker.exit_mod(prev_mod);
+        {
+            let _guard = tracker.enter_mod(&test_mod.attrs);
+            assert_that!(tracker.is_in_test(), eq(true));
+            assert_that!(tracker.is_in_test_module(), eq(true));
+        }
         assert_that!(tracker.is_in_test(), eq(false));
 
         let test_fn: syn::ItemFn = syn::parse_str("#[test] fn check() {}")?;
-        let prev_fn = tracker.enter_fn(&test_fn.attrs);
-        assert_that!(tracker.is_in_test(), eq(true));
-        assert_that!(tracker.is_in_test_fn(), eq(true));
-
-        tracker.exit_fn(prev_fn);
+        {
+            let _guard = tracker.enter_fn(&test_fn.attrs);
+            assert_that!(tracker.is_in_test(), eq(true));
+            assert_that!(tracker.is_in_test_fn(), eq(true));
+        }
         assert_that!(tracker.is_in_test(), eq(false));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn is_bool_type_identifies_booleans() -> Result<(), Box<dyn std::error::Error>> {
+        let bool_ty: syn::Type = syn::parse_str("bool")?;
+        let opt_bool_ty: syn::Type = syn::parse_str("Option<bool>")?;
+        let str_ty: syn::Type = syn::parse_str("String")?;
+
+        assert_that!(is_bool_type(&bool_ty), eq(true));
+        assert_that!(is_bool_type(&opt_bool_ty), eq(true));
+        assert_that!(is_bool_type(&str_ty), eq(false));
         Ok(())
     }
 

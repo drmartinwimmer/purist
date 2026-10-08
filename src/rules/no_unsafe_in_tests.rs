@@ -35,6 +35,7 @@
 use super::common::{TestScopeTracker, has_suppression_attribute};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::FlagScopeTracker;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -51,7 +52,7 @@ impl Rule for NoUnsafeInTestsRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            suppressed_depth: 0,
+            suppressed_scope: FlagScopeTracker::new(),
         };
 
         visitor.visit_file(file);
@@ -64,52 +65,52 @@ struct UnsafeTestVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScopeTracker,
-    suppressed_depth: usize,
+    suppressed_scope: FlagScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks module-level test configuration and suppression scoping.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
         let suppressed = has_suppression_attribute(&item_mod.attrs, "no_unsafe_in_tests");
-        if suppressed {
-            self.suppressed_depth += 1;
-        }
+        let _suppress_guard = self.suppressed_scope.enter(suppressed);
+        let _test_guard = self.test_scope.enter_mod(&item_mod.attrs);
 
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
-
-        if suppressed {
-            self.suppressed_depth -= 1;
-        }
     }
 
-    /// Tracks function-level test attributes and checks for `unsafe fn` in test contexts.
+    /// Tracks function-level test attributes and suppression scoping.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let suppressed = has_suppression_attribute(&item_fn.attrs, "no_unsafe_in_tests");
-        if suppressed {
-            self.suppressed_depth += 1;
-        }
+        let _suppress_guard = self.suppressed_scope.enter(suppressed);
+        let _test_guard = self.test_scope.enter_fn(&item_fn.attrs);
 
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
+        visit::visit_item_fn(self, item_fn);
+    }
+
+    /// Tracks impl-level function test attributes and suppression scoping.
+    fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
+        let suppressed = has_suppression_attribute(&impl_fn.attrs, "no_unsafe_in_tests");
+        let _suppress_guard = self.suppressed_scope.enter(suppressed);
+        let _test_guard = self.test_scope.enter_fn(&impl_fn.attrs);
+
+        visit::visit_impl_item_fn(self, impl_fn);
+    }
+
+    /// Checks function signatures in test contexts for `unsafe` qualifiers.
+    fn visit_signature(&mut self, sig: &'ast syn::Signature) {
         if self.test_scope.is_in_test()
-            && self.suppressed_depth == 0
-            && let Some(diag) = check_unsafe_fn(self.ctx, item_fn)
+            && !self.suppressed_scope.is_active()
+            && let Some(diag) = check_unsafe_signature(self.ctx, sig)
         {
             self.diagnostics.push(diag);
         }
 
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
-
-        if suppressed {
-            self.suppressed_depth -= 1;
-        }
+        visit::visit_signature(self, sig);
     }
 
     /// Flags raw `unsafe` blocks when encountered within a test context.
     fn visit_expr_unsafe(&mut self, expr_unsafe: &'ast syn::ExprUnsafe) {
-        if self.test_scope.is_in_test() && self.suppressed_depth == 0 {
+        if self.test_scope.is_in_test() && !self.suppressed_scope.is_active() {
             self.diagnostics
                 .push(check_unsafe_block(self.ctx, expr_unsafe));
         }
@@ -118,17 +119,17 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     }
 }
 
-/// Emits a diagnostic if the function has an `unsafe` qualifier.
-fn check_unsafe_fn(ctx: &LintContext<'_>, item_fn: &syn::ItemFn) -> Option<Diagnostic> {
-    if matches!(item_fn.sig.safety, syn::Safety::Unsafe(_)) {
-        let span = ctx.to_span(item_fn.sig.fn_token.span());
+/// Emits a diagnostic if the function signature has an `unsafe` qualifier.
+fn check_unsafe_signature(ctx: &LintContext<'_>, sig: &syn::Signature) -> Option<Diagnostic> {
+    if matches!(sig.safety, syn::Safety::Unsafe(_)) {
+        let span = ctx.to_span(sig.fn_token.span());
         Some(
             Diagnostic::new(
                 "purist::no_unsafe_in_tests",
                 Severity::Error,
                 format!(
                     "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
-                    item_fn.sig.ident
+                    sig.ident
                 ),
             )
             .with_span(span)

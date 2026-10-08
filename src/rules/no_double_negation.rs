@@ -59,11 +59,11 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, path_ends_with_ident};
+use super::common::{TestScopeTracker, is_bool_type};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
-use syn::{FnArg, Pat, ReturnType, Type};
+use syn::{FnArg, Pat, ReturnType};
 
 /// Rule forbidding negative boolean identifiers and double negation patterns.
 pub struct NoDoubleNegationRule;
@@ -98,44 +98,42 @@ struct DoubleNegationVisitor<'a> {
 
 impl<'ast> Visit<'ast> for DoubleNegationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
-        if !self.test_scope.is_in_test() {
-            self.check_signature(&item_fn.sig);
-        }
-
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
-        if !self.test_scope.is_in_test() {
-            self.check_signature(&impl_fn.sig);
-        }
-
+        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.exit_fn(prev);
     }
 
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let prev = self.test_scope.enter_fn(&trait_fn.attrs);
-        if !self.test_scope.is_in_test() {
-            self.check_signature(&trait_fn.sig);
-        }
-
+        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
         visit::visit_trait_item_fn(self, trait_fn);
-        self.test_scope.exit_fn(prev);
+    }
+
+    fn visit_signature(&mut self, sig: &'ast syn::Signature) {
+        if !self.test_scope.is_in_test() {
+            self.check_signature_names(sig);
+        }
+        visit::visit_signature(self, sig);
+    }
+
+    fn visit_fn_arg(&mut self, arg: &'ast syn::FnArg) {
+        if !self.test_scope.is_in_test() {
+            self.check_fn_arg(arg);
+        }
+        visit::visit_fn_arg(self, arg);
     }
 }
 
 impl DoubleNegationVisitor<'_> {
-    fn check_signature(&mut self, sig: &syn::Signature) {
+    fn check_signature_names(&mut self, sig: &syn::Signature) {
         let fn_name = sig.ident.to_string();
 
         let has_bool_param = sig.inputs.iter().any(|arg| {
@@ -165,33 +163,7 @@ impl DoubleNegationVisitor<'_> {
             );
         }
 
-        // 2. Check individual boolean parameters
-        for arg in &sig.inputs {
-            if let FnArg::Typed(pat_type) = arg
-                && is_bool_type(&pat_type.ty)
-                && let Pat::Ident(pat_ident) = &*pat_type.pat
-            {
-                let param_name = pat_ident.ident.to_string();
-                if is_negative_parameter_name(&param_name) {
-                    let span = self.ctx.to_span(pat_ident.ident.span());
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "purist::no_double_negation",
-                            Severity::Warning,
-                            format!(
-                                "Parameter '{param_name}' uses negative boolean naming causing double negation when passed 'false'. Use affirmative naming instead (e.g. 'enabled', 'include')."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix(
-                            "Rename to an affirmative parameter such as 'enabled' or 'include'.",
-                        ),
-                    );
-                }
-            }
-        }
-
-        // 3. Check predicate/getter returning bool
+        // 2. Check predicate/getter returning bool
         if returns_bool(&sig.output) && is_negative_predicate_name(&fn_name) {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_predicate_name(&fn_name);
@@ -210,25 +182,30 @@ impl DoubleNegationVisitor<'_> {
             );
         }
     }
-}
 
-/// Checks whether a type is `bool` or `Option<bool>`.
-fn is_bool_type(ty: &Type) -> bool {
-    match ty {
-        Type::Path(type_path) => {
-            if path_ends_with_ident(&type_path.path, "bool") {
-                return true;
+    fn check_fn_arg(&mut self, arg: &syn::FnArg) {
+        if let FnArg::Typed(pat_type) = arg
+            && is_bool_type(&pat_type.ty)
+            && let Pat::Ident(pat_ident) = &*pat_type.pat
+        {
+            let param_name = pat_ident.ident.to_string();
+            if is_negative_parameter_name(&param_name) {
+                let span = self.ctx.to_span(pat_ident.ident.span());
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        "purist::no_double_negation",
+                        Severity::Warning,
+                        format!(
+                            "Parameter '{param_name}' uses negative boolean naming causing double negation when passed 'false'. Use affirmative naming instead (e.g. 'enabled', 'include')."
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix(
+                        "Rename to an affirmative parameter such as 'enabled' or 'include'.",
+                    ),
+                );
             }
-            if path_ends_with_ident(&type_path.path, "Option")
-                && let Some(segment) = type_path.path.segments.last()
-                && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
-            {
-                return is_bool_type(inner_ty);
-            }
-            false
         }
-        _ => false,
     }
 }
 

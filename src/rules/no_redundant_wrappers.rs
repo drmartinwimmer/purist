@@ -103,8 +103,9 @@ fn detect_redundant_forwarding(item_fn: &syn::ItemFn) -> Option<String> {
 
     match expr {
         syn::Expr::Call(call) => {
-            let arg_names = extract_arg_names(&call.args);
-            if arg_names == param_names {
+            if let Some(arg_names) = extract_arg_names(&call.args)
+                && arg_names == param_names
+            {
                 let func_name = expr_to_string(&call.func);
                 return Some(func_name);
             }
@@ -112,11 +113,11 @@ fn detect_redundant_forwarding(item_fn: &syn::ItemFn) -> Option<String> {
         syn::Expr::MethodCall(call) => {
             // E.g. workspace.forget() where workspace is the first param
             let receiver_name = expr_to_string(&call.receiver);
-            let mut all_args = vec![receiver_name];
-            all_args.extend(extract_arg_names(&call.args));
-
-            if all_args == param_names {
-                return Some(format!(".{}()", call.method));
+            if let Some(mut all_args) = extract_arg_names(&call.args) {
+                all_args.insert(0, receiver_name);
+                if all_args == param_names {
+                    return Some(format!(".{}()", call.method));
+                }
             }
         }
         _ => {}
@@ -139,26 +140,27 @@ fn extract_param_names(inputs: &Punctuated<syn::FnArg, Comma>) -> Vec<String> {
 }
 
 /// Extracts identifier names passed as arguments in a call expression.
-fn extract_arg_names(args: &Punctuated<syn::Expr, Comma>) -> Vec<String> {
+/// Returns None if any argument is an expression other than a variable identifier or reference to one.
+fn extract_arg_names(args: &Punctuated<syn::Expr, Comma>) -> Option<Vec<String>> {
     let mut names = Vec::new();
     for arg in args {
         match arg {
             syn::Expr::Path(p) => {
-                if let Some(ident) = p.path.get_ident() {
-                    names.push(ident.to_string());
-                }
+                let ident = p.path.get_ident()?;
+                names.push(ident.to_string());
             }
             syn::Expr::Reference(r) => {
-                if let syn::Expr::Path(p) = &*r.expr
-                    && let Some(ident) = p.path.get_ident()
-                {
+                if let syn::Expr::Path(p) = &*r.expr {
+                    let ident = p.path.get_ident()?;
                     names.push(ident.to_string());
+                } else {
+                    return None;
                 }
             }
-            _ => {}
+            _ => return None,
         }
     }
-    names
+    Some(names)
 }
 
 /// Converts a path expression to its string representation.
@@ -215,6 +217,22 @@ mod tests {
 pub fn run(args: Args) -> ExitCode {
     println!("Starting...");
     Cli::run(args)
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoRedundantWrappersRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn function_supplying_constant_or_extra_arguments_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub fn derives_clap(attrs: &[Attribute]) -> bool {
+    derives_any(attrs, &["Args", "Parser"])
 }
 "#;
         let ctx = LintContext::new(Path::new("src/cli.rs"), source);
