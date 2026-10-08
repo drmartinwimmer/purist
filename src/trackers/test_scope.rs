@@ -1,9 +1,6 @@
-//! Test scope tracking across modules and functions during AST traversal.
+//! Test scope tracking across modules and functions during AST traversal using a stack.
 
-use super::guard::ScopeGuard;
 use crate::rules::common::{has_cfg_test_attr, has_test_attr};
-use std::cell::Cell;
-use std::rc::Rc;
 use syn::Attribute;
 
 /// Snapshot state of the test scope.
@@ -21,75 +18,77 @@ impl TestScopeState {
 }
 
 /// Tracks lexical test scopes (test files, `#[cfg(test)]` modules, and test functions)
-/// during AST traversal using RAII guards.
-#[derive(Debug, Clone, Default)]
+/// during AST traversal using a scope stack (`Vec`).
+#[derive(Debug, Clone)]
 pub struct TestScopeTracker {
-    state: Rc<Cell<TestScopeState>>,
+    stack: Vec<TestScopeState>,
 }
 
 impl TestScopeTracker {
     /// Creates a new test scope tracker, initialized with whether the current file is a test file.
     pub fn new(is_test_file: bool) -> Self {
         Self {
-            state: Rc::new(Cell::new(TestScopeState {
+            stack: vec![TestScopeState {
                 in_test_module: is_test_file,
                 in_test_fn: false,
-            })),
+            }],
         }
+    }
+
+    fn current(&self) -> TestScopeState {
+        self.stack.last().copied().unwrap_or_default()
     }
 
     /// Returns true if currently within any test context (test file, `#[cfg(test)]` module, or test function).
     pub fn is_in_test(&self) -> bool {
-        self.state.get().is_in_test()
+        self.current().is_in_test()
     }
 
     /// Returns true if currently within a `#[cfg(test)]` module or a dedicated test file.
     pub fn is_in_test_module(&self) -> bool {
-        self.state.get().in_test_module
+        self.current().in_test_module
     }
 
     /// Returns true if currently within the body of a test function.
     pub fn is_in_test_fn(&self) -> bool {
-        self.state.get().in_test_fn
+        self.current().in_test_fn
     }
 
-    /// Updates the tracker when entering a module with attributes, returning an RAII guard
-    /// that restores the previous state when dropped.
-    pub fn enter_mod(&self, attrs: &[Attribute]) -> ScopeGuard<TestScopeState> {
-        let prev = self.state.get();
+    /// Pushes a new module scope onto the stack.
+    pub fn push_mod(&mut self, attrs: &[Attribute]) {
+        let prev = self.current();
         let mut next = prev;
         if has_cfg_test_attr(attrs) {
             next.in_test_module = true;
         }
-        self.state.set(next);
-        ScopeGuard::new(Rc::clone(&self.state), prev)
+        self.stack.push(next);
     }
 
-    /// Updates the tracker when entering a function, returning an RAII guard
-    /// that restores the previous state when dropped.
-    pub fn enter_fn(&self, attrs: &[Attribute]) -> ScopeGuard<TestScopeState> {
-        let prev = self.state.get();
+    /// Pushes a new function scope onto the stack.
+    pub fn push_fn(&mut self, attrs: &[Attribute]) {
+        let prev = self.current();
         let mut next = prev;
         if has_test_attr(attrs) {
             next.in_test_fn = true;
         }
-        self.state.set(next);
-        ScopeGuard::new(Rc::clone(&self.state), prev)
+        self.stack.push(next);
     }
 
-    /// Updates the tracker when entering a function, also treating functions in test modules
-    /// starting with `test_` as test functions. Returns an RAII guard that restores the previous state.
-    pub fn enter_fn_with_name(
-        &self,
-        attrs: &[Attribute],
-        fn_name: &str,
-    ) -> ScopeGuard<TestScopeState> {
-        let prev = self.state.get();
+    /// Pushes a new function scope onto the stack, also treating functions in test modules
+    /// starting with `test_` as test functions.
+    pub fn push_fn_with_name(&mut self, attrs: &[Attribute], fn_name: &str) {
+        let prev = self.current();
         let mut next = prev;
         if has_test_attr(attrs) || (prev.in_test_module && fn_name.starts_with("test_")) {
             next.in_test_fn = true;
         }
-        self.state.set(next);
-        ScopeGuard::new(Rc::clone(&self.state), prev)
+        self.stack.push(next);
+    }
+
+    /// Pops the active scope from the stack.
+    pub fn pop(&mut self) {
+        if self.stack.len() > 1 {
+            self.stack.pop();
+        }
     }
 }

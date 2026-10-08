@@ -32,9 +32,9 @@
 //! ```
 
 use super::common::{TestScopeTracker, path_ends_with_ident};
+use crate::checkers::extract_fn_return_type;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use syn::ReturnType;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -75,32 +75,36 @@ struct ErrorTypesVisitor<'a> {
 impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Inspects free functions and marks test scope active if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects methods in inherent or trait implementations and marks test scope active if annotated with `#[test]`.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.test_scope.push_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects trait definition methods and marks test scope active if annotated with `#[test]`.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        self.test_scope.push_fn(&trait_fn.attrs);
         visit::visit_trait_item_fn(self, trait_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function signatures for unstructured string error return types outside test scopes.
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {
         if !self.test_scope.is_in_test()
-            && let Some(diag) = check_fn_return_type(self.ctx, sig)
+            && let Some(diag) = check_fn_signature_unstructured_error(self.ctx, sig)
         {
             self.diagnostics.push(diag);
         }
@@ -109,11 +113,11 @@ impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
 }
 
 /// Inspects a function signature's return type and returns a diagnostic if it returns `Result<T, String>` or `Result<T, &str>`.
-fn check_fn_return_type(ctx: &LintContext<'_>, sig: &syn::Signature) -> Option<Diagnostic> {
-    let return_type = match &sig.output {
-        ReturnType::Type(_, ty) => ty.as_ref(),
-        ReturnType::Default => return None,
-    };
+fn check_fn_signature_unstructured_error(
+    ctx: &LintContext<'_>,
+    sig: &syn::Signature,
+) -> Option<Diagnostic> {
+    let return_type = extract_fn_return_type(sig)?;
 
     let (error_ty, err_desc) = detect_string_error_type(return_type)?;
     let span = ctx.to_span(error_ty.span());

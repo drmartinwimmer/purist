@@ -63,7 +63,7 @@ enum ElseKind {
 impl<'ast> Visit<'ast> for OptionMappingVisitor<'_> {
     /// Inspects `if` expressions for manual bool/None fallback patterns.
     fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
-        if let Some(diag) = check_option_mapping(self.ctx, expr_if) {
+        if let Some(diag) = check_expr_if_verbose_option_mapping(self.ctx, expr_if) {
             self.diagnostics.push(diag);
         }
 
@@ -72,7 +72,10 @@ impl<'ast> Visit<'ast> for OptionMappingVisitor<'_> {
 }
 
 /// Checks an `if let Some(...)` expression to determine if it matches a verbose bool or None mapping pattern.
-fn check_option_mapping(ctx: &LintContext<'_>, expr_if: &syn::ExprIf) -> Option<Diagnostic> {
+fn check_expr_if_verbose_option_mapping(
+    ctx: &LintContext<'_>,
+    expr_if: &syn::ExprIf,
+) -> Option<Diagnostic> {
     if let syn::Expr::Let(expr_let) = &*expr_if.cond
         && is_pattern_some(&expr_let.pat)
         && let Some((_, else_box)) = &expr_if.else_branch
@@ -122,19 +125,19 @@ fn inspect_else_kind(else_expr: &syn::Expr) -> ElseKind {
             }
             if let Some(stmt) = expr_block.block.stmts.first() {
                 match stmt {
-                    syn::Stmt::Expr(e, _) => check_single_expr(e),
+                    syn::Stmt::Expr(e, _) => check_expr_else_branch_kind(e),
                     _ => ElseKind::Other,
                 }
             } else {
                 ElseKind::Other
             }
         }
-        _ => check_single_expr(else_expr),
+        _ => check_expr_else_branch_kind(else_expr),
     }
 }
 
 /// Inspects a single leaf expression to determine if it is `false` or `None`.
-fn check_single_expr(expr: &syn::Expr) -> ElseKind {
+fn check_expr_else_branch_kind(expr: &syn::Expr) -> ElseKind {
     match expr {
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Bool(b),

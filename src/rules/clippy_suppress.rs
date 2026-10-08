@@ -60,7 +60,7 @@ struct SuppressVisitor<'a> {
 impl<'ast> Visit<'ast> for SuppressVisitor<'_> {
     /// Inspects attributes for lint suppressions (`#[allow]` or `#[expect]`) and verifies hygiene.
     fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
-        if let Some(diag) = check_suppression_attribute(self.ctx, attr) {
+        if let Some(diag) = check_attr_clippy_suppression(self.ctx, attr) {
             self.diagnostics.push(diag);
         }
 
@@ -69,7 +69,10 @@ impl<'ast> Visit<'ast> for SuppressVisitor<'_> {
 }
 
 /// Checks whether an attribute is an unhygienic lint suppression, returning a diagnostic if non-compliant.
-fn check_suppression_attribute(ctx: &LintContext<'_>, attr: &syn::Attribute) -> Option<Diagnostic> {
+fn check_attr_clippy_suppression(
+    ctx: &LintContext<'_>,
+    attr: &syn::Attribute,
+) -> Option<Diagnostic> {
     if !is_lint_suppression_attr(attr) {
         return None;
     }

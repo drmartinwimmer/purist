@@ -74,14 +74,16 @@ struct RedundantConversionsVisitor<'a> {
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Maintains the lexical block scope stack, recording variables initialized from serializer calls.
@@ -101,11 +103,17 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
     /// Inspects call expressions and flags nested or sequential deserialization of serialized variables.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
         if !self.test_scope.is_in_test() {
-            let findings = check_redundant_conversion_call(self.ctx, call, &self.block_vars_stack);
-            self.diagnostics.extend(findings);
+            self.check_call_redundant_conversion(call);
         }
 
         visit::visit_expr_call(self, call);
+    }
+}
+
+impl RedundantConversionsVisitor<'_> {
+    fn check_call_redundant_conversion(&mut self, call: &syn::ExprCall) {
+        let findings = check_redundant_conversion_call(self.ctx, call, &self.block_vars_stack);
+        self.diagnostics.extend(findings);
     }
 }
 

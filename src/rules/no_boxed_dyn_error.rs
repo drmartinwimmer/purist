@@ -34,6 +34,7 @@
 //! ```
 
 use super::common::{TestScopeTracker, path_ends_with_ident};
+use crate::checkers::extract_fn_return_type;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -72,31 +73,37 @@ struct BoxedDynErrorVisitor<'a> {
 impl<'ast> Visit<'ast> for BoxedDynErrorVisitor<'_> {
     /// Tracks module scope and updates test status when entering `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks free functions and enters test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Tracks methods in inherent or trait implementations and enters test scope if annotated with `#[test]`.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.test_scope.push_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 
     /// Tracks trait definition methods and enters test scope if annotated with `#[test]`.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        self.test_scope.push_fn(&trait_fn.attrs);
         visit::visit_trait_item_fn(self, trait_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function signatures and flags `Box<dyn Error>` if outside test scopes.
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {
-        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), sig) {
+        if let Some(diag) =
+            check_fn_signature_boxed_dyn_error(self.ctx, self.test_scope.is_in_test(), sig)
+        {
             self.diagnostics.push(diag);
         }
         visit::visit_signature(self, sig);
@@ -104,7 +111,7 @@ impl<'ast> Visit<'ast> for BoxedDynErrorVisitor<'_> {
 }
 
 /// Inspects a function signature and returns a diagnostic if it returns `Box<dyn Error>`.
-fn check_fn_signature(
+fn check_fn_signature_boxed_dyn_error(
     ctx: &LintContext<'_>,
     in_test: bool,
     sig: &syn::Signature,
@@ -120,9 +127,7 @@ fn check_fn_signature(
         return None;
     }
 
-    let syn::ReturnType::Type(_, ty) = &sig.output else {
-        return None;
-    };
+    let ty = extract_fn_return_type(sig)?;
 
     if !contains_boxed_dyn_error(ty) {
         return None;
