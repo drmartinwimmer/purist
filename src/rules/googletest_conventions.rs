@@ -77,61 +77,22 @@ struct GoogletestConventionsVisitor<'a> {
 
 impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let has_bare_test = has_bare_test_attr(&item_fn.attrs);
-        let has_framework_test = has_framework_test_attr(&item_fn.attrs);
-
-        if has_bare_test && !has_framework_test {
-            let span = self.ctx.to_span(item_fn.sig.ident.span());
-            let fn_name = item_fn.sig.ident.to_string();
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{fn_name}' uses standard '#[test]' attribute. Use '#[googletest::test]' instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace '#[test]' with '#[googletest::test]'."),
-            );
-        }
-
+        self.check_bare_test_attr(&item_fn.attrs, &item_fn.sig.ident);
         let fn_name = item_fn.sig.ident.to_string();
-        let prev_fn = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
+        let _guard = self.test_scope.enter_fn_with_name(&item_fn.attrs, &fn_name);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev_fn);
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let has_bare_test = has_bare_test_attr(&impl_fn.attrs);
-        let has_framework_test = has_framework_test_attr(&impl_fn.attrs);
-
-        if has_bare_test && !has_framework_test {
-            let span = self.ctx.to_span(impl_fn.sig.ident.span());
-            let fn_name = impl_fn.sig.ident.to_string();
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{fn_name}' uses standard '#[test]' attribute. Use '#[googletest::test]' instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace '#[test]' with '#[googletest::test]'."),
-            );
-        }
-
+        self.check_bare_test_attr(&impl_fn.attrs, &impl_fn.sig.ident);
         let fn_name = impl_fn.sig.ident.to_string();
-        let prev_fn = self.test_scope.enter_fn_with_name(&impl_fn.attrs, &fn_name);
+        let _guard = self.test_scope.enter_fn_with_name(&impl_fn.attrs, &fn_name);
         visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.exit_fn(prev_fn);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
@@ -195,6 +156,27 @@ impl<'ast> Visit<'ast> for GoogletestConventionsVisitor<'_> {
 }
 
 impl GoogletestConventionsVisitor<'_> {
+    fn check_bare_test_attr(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
+        let has_bare_test = has_bare_test_attr(attrs);
+        let has_framework_test = has_framework_test_attr(attrs);
+
+        if has_bare_test && !has_framework_test {
+            let span = self.ctx.to_span(ident.span());
+            let fn_name = ident.to_string();
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::googletest_conventions",
+                    Severity::Warning,
+                    format!(
+                        "Test function '{fn_name}' uses standard '#[test]' attribute. Use '#[googletest::test]' instead."
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Replace '#[test]' with '#[googletest::test]'."),
+            );
+        }
+    }
+
     fn check_googletest_assertion_macro(&mut self, mac: &syn::Macro) {
         let Ok(args) =
             mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)

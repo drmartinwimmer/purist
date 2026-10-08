@@ -60,27 +60,29 @@ struct TestPrefixVisitor<'a> {
 impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
     /// Checks top-level functions for forbidden test prefixes when in test scope.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs) || self.test_scope.is_in_test_module();
-        if is_test && let Some(diag) = check_function_name(self.ctx, &item_fn.sig.ident) {
-            self.diagnostics.push(diag);
-        }
+        self.check_fn_prefix(&item_fn.attrs, &item_fn.sig.ident);
         visit::visit_item_fn(self, item_fn);
     }
 
     /// Checks impl-level functions for forbidden test prefixes when in test scope.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let is_test = has_test_attr(&impl_fn.attrs) || self.test_scope.is_in_test_module();
-        if is_test && let Some(diag) = check_function_name(self.ctx, &impl_fn.sig.ident) {
+        self.check_fn_prefix(&impl_fn.attrs, &impl_fn.sig.ident);
+        visit::visit_impl_item_fn(self, impl_fn);
+    }
+}
+
+impl TestPrefixVisitor<'_> {
+    fn check_fn_prefix(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
+        let is_test = has_test_attr(attrs) || self.test_scope.is_in_test_module();
+        if is_test && let Some(diag) = check_function_name(self.ctx, ident) {
             self.diagnostics.push(diag);
         }
-        visit::visit_impl_item_fn(self, impl_fn);
     }
 }
 

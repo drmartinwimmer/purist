@@ -72,31 +72,34 @@ struct BoxedDynErrorVisitor<'a> {
 impl<'ast> Visit<'ast> for BoxedDynErrorVisitor<'_> {
     /// Tracks module scope and updates test status when entering `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let prev = self.test_scope.enter_mod(&item_mod.attrs);
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.test_scope.exit_mod(prev);
     }
 
-    /// Inspects free function return types and flags `Box<dyn Error>` if outside test scopes.
+    /// Tracks free functions and enters test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let prev = self.test_scope.enter_fn(&item_fn.attrs);
-        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), &item_fn.sig)
-        {
-            self.diagnostics.push(diag);
-        }
+        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
-        self.test_scope.exit_fn(prev);
     }
 
-    /// Inspects methods in inherent or trait implementations and flags `Box<dyn Error>` if outside test scopes.
+    /// Tracks methods in inherent or trait implementations and enters test scope if annotated with `#[test]`.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let prev = self.test_scope.enter_fn(&impl_fn.attrs);
-        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), &impl_fn.sig)
-        {
+        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        visit::visit_impl_item_fn(self, impl_fn);
+    }
+
+    /// Tracks trait definition methods and enters test scope if annotated with `#[test]`.
+    fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
+        let _guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        visit::visit_trait_item_fn(self, trait_fn);
+    }
+
+    /// Inspects function signatures and flags `Box<dyn Error>` if outside test scopes.
+    fn visit_signature(&mut self, sig: &'ast syn::Signature) {
+        if let Some(diag) = check_fn_signature(self.ctx, self.test_scope.is_in_test(), sig) {
             self.diagnostics.push(diag);
         }
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.exit_fn(prev);
+        visit::visit_signature(self, sig);
     }
 }
 

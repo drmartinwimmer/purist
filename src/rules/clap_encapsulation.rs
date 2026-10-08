@@ -35,11 +35,15 @@
 //! }
 //! ```
 
-use super::common::derives_any;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use std::collections::{HashMap, HashSet};
+use crate::trackers::{
+    ClapScopeTracker, TestScopeTracker, is_command_execution_fn_name, is_command_struct_name,
+    is_flattened_field,
+};
+use std::collections::HashSet;
 use syn::spanned::Spanned;
+use syn::visit::{self, Visit};
 
 /// Rule enforcing encapsulation for Clap CLI models (private fields and associated `run` method).
 pub struct ClapEncapsulationRule;
@@ -54,94 +58,108 @@ impl Rule for ClapEncapsulationRule {
             return Vec::new();
         }
 
-        let (clap_structs, struct_has_run_method) = collect_clap_structs_and_methods(file);
-        let mut diagnostics = Vec::new();
+        let mut collector = RunMethodCollector::default();
+        collector.visit_file(file);
 
-        for (struct_name, item_struct) in &clap_structs {
-            // Check 1: Struct fields must remain private unless marked with flatten
-            check_field_visibility(ctx, self.name(), struct_name, item_struct, &mut diagnostics);
+        let mut visitor = ClapEncapsulationVisitor {
+            ctx,
+            diagnostics: Vec::new(),
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            clap_scope: ClapScopeTracker::new(),
+            struct_has_run_method: collector.struct_has_run_method,
+        };
 
-            // Check 2: Command structs should have an associated run or execute method
-            check_command_execution_method(
-                ctx,
-                self.name(),
-                struct_name,
-                item_struct,
-                &struct_has_run_method,
-                &mut diagnostics,
-            );
-        }
-
-        diagnostics
+        visitor.visit_file(file);
+        visitor.diagnostics
     }
 }
 
-/// Collects all structs that derive Clap traits and identifies structs with associated `run`/`execute` methods.
-fn collect_clap_structs_and_methods(
-    file: &syn::File,
-) -> (HashMap<String, &syn::ItemStruct>, HashSet<String>) {
-    let mut clap_structs = HashMap::new();
-    let mut struct_has_run_method = HashSet::new();
+/// Visitor that collects all struct names that define an associated `run` or `execute` method.
+#[derive(Default)]
+struct RunMethodCollector {
+    struct_has_run_method: HashSet<String>,
+}
 
-    for item in &file.items {
-        match item {
-            syn::Item::Struct(item_struct) => {
-                if derives_any(&item_struct.attrs, &["Args", "Parser"]) {
-                    clap_structs.insert(item_struct.ident.to_string(), item_struct);
+impl<'ast> Visit<'ast> for RunMethodCollector {
+    fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
+        if let syn::Type::Path(type_path) = &*item_impl.self_ty
+            && let Some(ident) = type_path.path.get_ident()
+        {
+            for impl_item in &item_impl.items {
+                if let syn::ImplItem::Fn(impl_fn) = impl_item {
+                    let method_name = impl_fn.sig.ident.to_string();
+                    if is_command_execution_fn_name(&method_name) {
+                        self.struct_has_run_method.insert(ident.to_string());
+                    }
                 }
             }
-            syn::Item::Impl(item_impl) => {
-                record_runner_method_if_present(item_impl, &mut struct_has_run_method);
+        }
+        visit::visit_item_impl(self, item_impl);
+    }
+}
+
+/// Visitor that inspects Clap structs and their fields using RAII scope tracking.
+struct ClapEncapsulationVisitor<'a> {
+    ctx: &'a LintContext<'a>,
+    diagnostics: Vec<Diagnostic>,
+    test_scope: TestScopeTracker,
+    clap_scope: ClapScopeTracker,
+    struct_has_run_method: HashSet<String>,
+}
+
+impl<'ast> Visit<'ast> for ClapEncapsulationVisitor<'_> {
+    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        visit::visit_item_mod(self, item_mod);
+    }
+
+    fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
+        let _guard = self.clap_scope.enter_struct(item_struct);
+
+        if !self.test_scope.is_in_test() && self.clap_scope.is_in_clap_struct() {
+            let struct_name = item_struct.ident.to_string();
+            // Check 2: Command structs should have an associated run or execute method
+            if is_command_struct_name(&struct_name)
+                && !self.struct_has_run_method.contains(&struct_name)
+            {
+                let span = self.ctx.to_span(item_struct.ident.span());
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        "purist::clap_struct_encapsulation",
+                        Severity::Warning,
+                        format!(
+                            "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
+                );
             }
-            _ => {}
         }
+
+        visit::visit_item_struct(self, item_struct);
     }
 
-    (clap_structs, struct_has_run_method)
-}
-
-/// Records the struct identifier if this impl block defines a `run` or `execute` method.
-fn record_runner_method_if_present(
-    item_impl: &syn::ItemImpl,
-    struct_has_run_method: &mut HashSet<String>,
-) {
-    let syn::Type::Path(type_path) = &*item_impl.self_ty else {
-        return;
-    };
-    let Some(ident) = type_path.path.get_ident() else {
-        return;
-    };
-
-    for impl_item in &item_impl.items {
-        let syn::ImplItem::Fn(impl_fn) = impl_item else {
-            continue;
-        };
-        let method_name = impl_fn.sig.ident.to_string();
-        if method_name == "run" || method_name == "execute" {
-            struct_has_run_method.insert(ident.to_string());
-        }
-    }
-}
-
-/// Checks that all fields of a Clap struct are private unless explicitly flattened.
-fn check_field_visibility(
-    ctx: &LintContext<'_>,
-    rule_name: &'static str,
-    struct_name: &str,
-    item_struct: &syn::ItemStruct,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for field in &item_struct.fields {
-        if matches!(field.vis, syn::Visibility::Public(_)) && !is_flattened_field(field) {
+    fn visit_field(&mut self, field: &'ast syn::Field) {
+        // Check 1: Struct fields must remain private unless marked with flatten
+        if !self.test_scope.is_in_test()
+            && self.clap_scope.is_in_clap_struct()
+            && matches!(field.vis, syn::Visibility::Public(_))
+            && !is_flattened_field(field)
+        {
+            let struct_name = self
+                .clap_scope
+                .current_struct_name()
+                .unwrap_or_else(|| "unknown".to_string());
             let field_name = field
                 .ident
                 .as_ref()
                 .map(|i| i.to_string())
                 .unwrap_or_else(|| "unnamed".to_string());
-            let span = ctx.to_span(field.vis.span());
-            diagnostics.push(
+            let span = self.ctx.to_span(field.vis.span());
+            self.diagnostics.push(
                 Diagnostic::new(
-                    rule_name,
+                    "purist::clap_struct_encapsulation",
                     Severity::Warning,
                     format!(
                         "Field '{field_name}' in Clap struct '{struct_name}' is declared public. Clap argument fields should remain private to encapsulate command execution."
@@ -151,67 +169,9 @@ fn check_field_visibility(
                 .with_suggested_fix("Make field private and encapsulate logic within struct methods."),
             );
         }
+
+        visit::visit_field(self, field);
     }
-}
-
-/// Checks that command structs define an associated `run` or `execute` method.
-fn check_command_execution_method(
-    ctx: &LintContext<'_>,
-    rule_name: &'static str,
-    struct_name: &str,
-    item_struct: &syn::ItemStruct,
-    struct_has_run_method: &HashSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if is_command_struct_name(struct_name) && !struct_has_run_method.contains(struct_name) {
-        let span = ctx.to_span(item_struct.ident.span());
-        diagnostics.push(
-            Diagnostic::new(
-                rule_name,
-                Severity::Warning,
-                format!(
-                    "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
-        );
-    }
-}
-
-/// Checks whether a struct field is annotated with `#[command(flatten)]` or `#[arg(flatten)]`.
-fn is_flattened_field(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| {
-        if !attr.path().is_ident("command") && !attr.path().is_ident("arg") {
-            return false;
-        }
-        let mut is_flatten = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("flatten") {
-                is_flatten = true;
-            }
-            Ok(())
-        });
-        is_flatten
-    })
-}
-
-/// Returns true if the struct represents an executable command rather than shared configuration or options.
-fn is_command_struct_name(name: &str) -> bool {
-    // Shared options/config/flags or root CLI parser are not single commands
-    if name.ends_with("Options")
-        || name.ends_with("Opts")
-        || name.ends_with("Config")
-        || name.ends_with("Flags")
-        || name.starts_with("Common")
-        || name == "Cli"
-        || name == "Args"
-    {
-        return false;
-    }
-
-    // Typical command structs end in Command or represent a specific action
-    name.ends_with("Command") || name.ends_with("Args")
 }
 
 #[cfg(test)]

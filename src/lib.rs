@@ -5,6 +5,7 @@ pub mod engine;
 pub mod reporter;
 pub mod rule_config;
 pub mod rules;
+pub mod trackers;
 
 pub use cargo::{LintConfig, OpinionatedLintsConfig, PuristLintsConfig, RuleLevel};
 use clap::Args;
@@ -13,6 +14,9 @@ pub use engine::{LintContext, OpinionatedEngine, PuristEngine, Rule};
 pub use reporter::{OutputFormat, render_report, render_report_with_options};
 pub use rules::default_rules;
 use std::path::{Path, PathBuf};
+pub use trackers::{
+    ClapScopeTracker, RefScopeGuard, ScopeGuard, TestScopeTracker, TypeScopeTracker,
+};
 
 /// Error type for purist linter execution.
 #[derive(Debug, thiserror::Error)]

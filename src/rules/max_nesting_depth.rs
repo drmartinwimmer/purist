@@ -51,6 +51,7 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::{DepthTracker, TestScopeTracker};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -78,9 +79,9 @@ impl Rule for MaxNestingDepthRule {
         let mut visitor = NestingVisitor {
             ctx,
             max_depth,
-            current_depth: 0,
+            depth: DepthTracker::new(),
             is_else_if: false,
-            in_test_scope: false,
+            test_scope: TestScopeTracker::new(ctx.is_test_file()),
             diagnostics: Vec::new(),
         };
 
@@ -93,15 +94,15 @@ impl Rule for MaxNestingDepthRule {
 struct NestingVisitor<'a> {
     ctx: &'a LintContext<'a>,
     max_depth: usize,
-    current_depth: usize,
+    depth: DepthTracker,
     is_else_if: bool,
-    in_test_scope: bool,
+    test_scope: TestScopeTracker,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl<'a> NestingVisitor<'a> {
     fn check_depth(&mut self, span: proc_macro2::Span) {
-        if !self.in_test_scope && self.current_depth == self.max_depth + 1 {
+        if !self.test_scope.is_in_test() && self.depth.get() == self.max_depth + 1 {
             let diag_span = self.ctx.to_span(span);
             self.diagnostics.push(
                 Diagnostic::new(
@@ -109,7 +110,7 @@ impl<'a> NestingVisitor<'a> {
                     Severity::Warning,
                     format!(
                         "Control flow nesting depth of {} exceeds the maximum limit of {}.",
-                        self.current_depth, self.max_depth
+                        self.depth.get(), self.max_depth
                     ),
                 )
                 .with_span(diag_span)
@@ -123,69 +124,42 @@ impl<'a> NestingVisitor<'a> {
 
 impl<'ast> Visit<'ast> for NestingVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let is_test = is_cfg_test_attr(&item_mod.attrs);
-        let prev_test = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
+        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
-        self.in_test_scope = prev_test;
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let is_test = has_test_attr(&item_fn.attrs);
-        let prev_test = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-        let prev_depth = self.current_depth;
-        self.current_depth = 0;
+        let _test_guard = self.test_scope.enter_fn(&item_fn.attrs);
+        let _depth_guard = self.depth.reset();
         visit::visit_item_fn(self, item_fn);
-        self.current_depth = prev_depth;
-        self.in_test_scope = prev_test;
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let is_test = has_test_attr(&impl_fn.attrs);
-        let prev_test = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-        let prev_depth = self.current_depth;
-        self.current_depth = 0;
+        let _test_guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        let _depth_guard = self.depth.reset();
         visit::visit_impl_item_fn(self, impl_fn);
-        self.current_depth = prev_depth;
-        self.in_test_scope = prev_test;
     }
 
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        let is_test = has_test_attr(&trait_fn.attrs);
-        let prev_test = self.in_test_scope;
-        if is_test {
-            self.in_test_scope = true;
-        }
-        let prev_depth = self.current_depth;
-        self.current_depth = 0;
+        let _test_guard = self.test_scope.enter_fn(&trait_fn.attrs);
+        let _depth_guard = self.depth.reset();
         visit::visit_trait_item_fn(self, trait_fn);
-        self.current_depth = prev_depth;
-        self.in_test_scope = prev_test;
     }
 
     fn visit_expr_closure(&mut self, closure: &'ast syn::ExprClosure) {
-        let prev_depth = self.current_depth;
-        self.current_depth = 0;
+        let _depth_guard = self.depth.reset();
         visit::visit_expr_closure(self, closure);
-        self.current_depth = prev_depth;
     }
 
     fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
         let was_else_if = self.is_else_if;
         self.is_else_if = false;
 
-        if !was_else_if {
-            self.current_depth += 1;
+        let _guard = (!was_else_if).then(|| {
+            let g = self.depth.enter();
             self.check_depth(expr_if.span());
-        }
+            g
+        });
 
         self.visit_expr(&expr_if.cond);
         self.visit_block(&expr_if.then_branch);
@@ -199,75 +173,37 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
                 self.visit_expr(else_expr);
             }
         }
-
-        if !was_else_if {
-            self.current_depth -= 1;
-        }
     }
 
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
         self.visit_expr(&expr_match.expr);
         for arm in &expr_match.arms {
             self.visit_pat(&arm.pat);
-            self.current_depth += 1;
+            let _guard = self.depth.enter();
             self.check_depth(arm.body.span());
             self.visit_expr(&arm.body);
-            self.current_depth -= 1;
         }
     }
 
     fn visit_expr_for_loop(&mut self, for_loop: &'ast syn::ExprForLoop) {
         self.visit_expr(&for_loop.expr);
-        self.current_depth += 1;
+        let _guard = self.depth.enter();
         self.check_depth(for_loop.span());
         self.visit_block(&for_loop.body);
-        self.current_depth -= 1;
     }
 
     fn visit_expr_while(&mut self, while_expr: &'ast syn::ExprWhile) {
         self.visit_expr(&while_expr.cond);
-        self.current_depth += 1;
+        let _guard = self.depth.enter();
         self.check_depth(while_expr.span());
         self.visit_block(&while_expr.body);
-        self.current_depth -= 1;
     }
 
     fn visit_expr_loop(&mut self, loop_expr: &'ast syn::ExprLoop) {
-        self.current_depth += 1;
+        let _guard = self.depth.enter();
         self.check_depth(loop_expr.span());
         self.visit_block(&loop_expr.body);
-        self.current_depth -= 1;
     }
-}
-
-/// Checks whether an attribute list includes `#[cfg(test)]`.
-fn is_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if !attr.path().is_ident("cfg") {
-            return false;
-        }
-        let mut test_attr = false;
-        let _result = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("test") {
-                test_attr = true;
-            }
-            Ok(())
-        });
-        test_attr
-    })
-}
-
-/// Checks whether an attribute list includes `#[test]` or `#[googletest::test]`.
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("test")
-            || attr
-                .path()
-                .segments
-                .last()
-                .map(|s| s.ident == "test")
-                .unwrap_or(false)
-    })
 }
 
 #[cfg(test)]

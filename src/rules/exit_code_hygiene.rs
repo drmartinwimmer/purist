@@ -49,6 +49,7 @@
 use super::common::{path_ends_with_ident, path_ends_with_segments};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::trackers::FlagScopeTracker;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -71,7 +72,7 @@ impl Rule for ExitCodeHygieneRule {
             ctx,
             diagnostics: Vec::new(),
             is_main_file,
-            in_main_fn: false,
+            in_main_fn: FlagScopeTracker::new(),
         };
 
         visitor.visit_file(file);
@@ -87,28 +88,26 @@ struct ExitCodeVisitor<'a> {
     diagnostics: Vec<Diagnostic>,
     /// Indicates whether the current file is `main.rs`.
     is_main_file: bool,
-    /// Indicates whether the AST traversal is currently inside `fn main()` in `main.rs`.
-    in_main_fn: bool,
+    /// Tracks whether AST traversal is currently inside `fn main()` in `main.rs`.
+    in_main_fn: FlagScopeTracker,
 }
 
 impl<'ast> Visit<'ast> for ExitCodeVisitor<'_> {
     /// Tracks whether traversal is inside `fn main()` and flags library functions returning `ExitCode`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let is_main = self.is_main_file && item_fn.sig.ident == "main";
-        let prev = self.in_main_fn;
-        self.in_main_fn = is_main;
+        let _guard = self.in_main_fn.enter(is_main);
 
         if let Some(diag) = check_library_exit_code_return(self.ctx, self.is_main_file, item_fn) {
             self.diagnostics.push(diag);
         }
 
         visit::visit_item_fn(self, item_fn);
-        self.in_main_fn = prev;
     }
 
     /// Inspects function call expressions for unhygienic `process::exit` calls or raw integer status codes.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        let findings = check_process_exit_call(self.ctx, self.in_main_fn, call);
+        let findings = check_process_exit_call(self.ctx, self.in_main_fn.is_active(), call);
         self.diagnostics.extend(findings);
 
         visit::visit_expr_call(self, call);
