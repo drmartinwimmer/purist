@@ -37,9 +37,9 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::{
-    ClapScopeTracker, TestScopeTracker, is_command_execution_fn_name, is_command_struct_name,
-    is_flattened_field,
+use crate::scopes::{
+    ClapScope, TestScope, WithClapScope, WithTestScope, is_command_execution_fn_name,
+    is_command_struct_name, is_flattened_field,
 };
 use std::collections::HashSet;
 use syn::spanned::Spanned;
@@ -64,8 +64,8 @@ impl Rule for ClapEncapsulationRule {
         let mut visitor = ClapEncapsulationVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            clap_scope: ClapScopeTracker::new(),
+            test_scope: TestScope::new(ctx.is_test_file()),
+            clap_scope: ClapScope::new(),
             struct_has_run_method: collector.struct_has_run_method,
         };
 
@@ -99,30 +99,30 @@ impl<'ast> Visit<'ast> for RunMethodCollector {
 }
 
 /// Visitor that inspects Clap structs and their fields using RAII scope tracking.
+#[derive(WithTestScope, WithClapScope)]
 struct ClapEncapsulationVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
-    clap_scope: ClapScopeTracker,
+    test_scope: TestScope,
+    clap_scope: ClapScope,
     struct_has_run_method: HashSet<String>,
 }
 
 impl<'ast> Visit<'ast> for ClapEncapsulationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
-        self.clap_scope.push_struct(item_struct);
+        self.with_clap_struct(item_struct, |this| {
+            if !this.test_scope.is_in_test() && this.clap_scope.is_in_clap_struct() {
+                this.check_clap_struct_missing_run_method(item_struct);
+            }
 
-        if !self.test_scope.is_in_test() && self.clap_scope.is_in_clap_struct() {
-            self.check_clap_struct_missing_run_method(item_struct);
-        }
-
-        visit::visit_item_struct(self, item_struct);
-        self.clap_scope.pop();
+            visit::visit_item_struct(this, item_struct);
+        });
     }
 
     fn visit_field(&mut self, field: &'ast syn::Field) {

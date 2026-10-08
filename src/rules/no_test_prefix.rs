@@ -25,7 +25,7 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, has_test_attr};
+use super::common::{TestScope, WithTestScope, has_test_attr};
 use crate::checkers::check_ident_has_test_prefix;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
@@ -43,7 +43,7 @@ impl Rule for NoTestPrefixRule {
         let mut visitor = TestPrefixVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -52,18 +52,19 @@ impl Rule for NoTestPrefixRule {
 }
 
 /// Visitor that walks modules and functions, tracking test scope and inspecting test names.
+#[derive(WithTestScope)]
 struct TestPrefixVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Checks top-level functions for forbidden test prefixes when in test scope.

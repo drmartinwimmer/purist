@@ -32,10 +32,10 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, has_suppression_attribute};
+use super::common::{TestScope, WithTestScope, has_suppression_attribute};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::FlagScopeTracker;
+use crate::scopes::{FlagScope, run_with_scope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -51,8 +51,8 @@ impl Rule for NoUnsafeInTestsRule {
         let mut visitor = UnsafeTestVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            suppressed_scope: FlagScopeTracker::new(),
+            test_scope: TestScope::new(ctx.is_test_file()),
+            suppressed_scope: FlagScope::new(),
         };
 
         visitor.visit_file(file);
@@ -61,48 +61,56 @@ impl Rule for NoUnsafeInTestsRule {
 }
 
 /// Visitor that inspects items and expressions in test scope for forbidden `unsafe` constructs.
+#[derive(WithTestScope)]
 struct UnsafeTestVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
-    suppressed_scope: FlagScopeTracker,
+    test_scope: TestScope,
+    suppressed_scope: FlagScope,
+}
+
+impl UnsafeTestVisitor<'_> {
+    fn with_suppressed<R>(&mut self, suppressed: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |v| v.suppressed_scope.push(suppressed),
+            |v| {
+                v.suppressed_scope.pop();
+            },
+            f,
+        )
+    }
 }
 
 impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks module-level test configuration and suppression scoping.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
         let suppressed = has_suppression_attribute(&item_mod.attrs, "no_unsafe_in_tests");
-        self.suppressed_scope.push(suppressed);
-        self.test_scope.push_mod(&item_mod.attrs);
-
-        visit::visit_item_mod(self, item_mod);
-
-        self.test_scope.pop();
-        self.suppressed_scope.pop();
+        self.with_suppressed(suppressed, |this| {
+            this.with_test_mod(&item_mod.attrs, |this| {
+                visit::visit_item_mod(this, item_mod);
+            });
+        });
     }
 
     /// Tracks function-level test attributes and suppression scoping.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let suppressed = has_suppression_attribute(&item_fn.attrs, "no_unsafe_in_tests");
-        self.suppressed_scope.push(suppressed);
-        self.test_scope.push_fn(&item_fn.attrs);
-
-        visit::visit_item_fn(self, item_fn);
-
-        self.test_scope.pop();
-        self.suppressed_scope.pop();
+        self.with_suppressed(suppressed, |this| {
+            this.with_test_fn(&item_fn.attrs, |this| {
+                visit::visit_item_fn(this, item_fn);
+            });
+        });
     }
 
     /// Tracks impl-level function test attributes and suppression scoping.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
         let suppressed = has_suppression_attribute(&impl_fn.attrs, "no_unsafe_in_tests");
-        self.suppressed_scope.push(suppressed);
-        self.test_scope.push_fn(&impl_fn.attrs);
-
-        visit::visit_impl_item_fn(self, impl_fn);
-
-        self.test_scope.pop();
-        self.suppressed_scope.pop();
+        self.with_suppressed(suppressed, |this| {
+            this.with_test_fn(&impl_fn.attrs, |this| {
+                visit::visit_impl_item_fn(this, impl_fn);
+            });
+        });
     }
 
     /// Checks function signatures in test contexts for `unsafe` qualifiers.

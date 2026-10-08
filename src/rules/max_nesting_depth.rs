@@ -51,7 +51,7 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::{DepthTracker, TestScopeTracker};
+use crate::scopes::{DepthScope, TestScope, WithDepthScope, WithTestScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -79,9 +79,9 @@ impl Rule for MaxNestingDepthRule {
         let mut visitor = NestingVisitor {
             ctx,
             max_depth,
-            depth: DepthTracker::new(),
+            depth_scope: DepthScope::new(),
             is_else_if: false,
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
             diagnostics: Vec::new(),
         };
 
@@ -91,18 +91,19 @@ impl Rule for MaxNestingDepthRule {
 }
 
 /// Visitor that traverses the AST and measures control flow nesting depth.
+#[derive(WithTestScope, WithDepthScope)]
 struct NestingVisitor<'a> {
     ctx: &'a LintContext<'a>,
     max_depth: usize,
-    depth: DepthTracker,
+    depth_scope: DepthScope,
     is_else_if: bool,
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl<'a> NestingVisitor<'a> {
     fn check_expr_nesting_depth_limit(&mut self, span: proc_macro2::Span) {
-        if !self.test_scope.is_in_test() && self.depth.get() == self.max_depth + 1 {
+        if !self.test_scope.is_in_test() && self.depth_scope.get() == self.max_depth + 1 {
             let diag_span = self.ctx.to_span(span);
             self.diagnostics.push(
                 Diagnostic::new(
@@ -110,7 +111,7 @@ impl<'a> NestingVisitor<'a> {
                     Severity::Warning,
                     format!(
                         "Control flow nesting depth of {} exceeds the maximum limit of {}.",
-                        self.depth.get(), self.max_depth
+                        self.depth_scope.get(), self.max_depth
                     ),
                 )
                 .with_span(diag_span)
@@ -120,55 +121,8 @@ impl<'a> NestingVisitor<'a> {
             );
         }
     }
-}
 
-impl<'ast> Visit<'ast> for NestingVisitor<'_> {
-    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
-    }
-
-    fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        self.depth.push_root();
-        visit::visit_item_fn(self, item_fn);
-        self.depth.pop_root();
-        self.test_scope.pop();
-    }
-
-    fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&impl_fn.attrs);
-        self.depth.push_root();
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.depth.pop_root();
-        self.test_scope.pop();
-    }
-
-    fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        self.test_scope.push_fn(&trait_fn.attrs);
-        self.depth.push_root();
-        visit::visit_trait_item_fn(self, trait_fn);
-        self.depth.pop_root();
-        self.test_scope.pop();
-    }
-
-    fn visit_expr_closure(&mut self, closure: &'ast syn::ExprClosure) {
-        self.depth.push_root();
-        visit::visit_expr_closure(self, closure);
-        self.depth.pop_root();
-    }
-
-    fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
-        let was_else_if = self.is_else_if;
-        self.is_else_if = false;
-
-        let should_enter = !was_else_if;
-        if should_enter {
-            self.depth.enter();
-            self.check_expr_nesting_depth_limit(expr_if.span());
-        }
-
+    fn visit_expr_if_branches(&mut self, expr_if: &syn::ExprIf) {
         self.visit_expr(&expr_if.cond);
         self.visit_block(&expr_if.then_branch);
 
@@ -181,9 +135,58 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
                 self.visit_expr(else_expr);
             }
         }
+    }
+}
 
+impl<'ast> Visit<'ast> for NestingVisitor<'_> {
+    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
+    }
+
+    fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
+        self.with_test_fn(&item_fn.attrs, |this| {
+            this.with_depth_root(|this| {
+                visit::visit_item_fn(this, item_fn);
+            });
+        });
+    }
+
+    fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
+        self.with_test_fn(&impl_fn.attrs, |this| {
+            this.with_depth_root(|this| {
+                visit::visit_impl_item_fn(this, impl_fn);
+            });
+        });
+    }
+
+    fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
+        self.with_test_fn(&trait_fn.attrs, |this| {
+            this.with_depth_root(|this| {
+                visit::visit_trait_item_fn(this, trait_fn);
+            });
+        });
+    }
+
+    fn visit_expr_closure(&mut self, closure: &'ast syn::ExprClosure) {
+        self.with_depth_root(|this| {
+            visit::visit_expr_closure(this, closure);
+        });
+    }
+
+    fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
+        let was_else_if = self.is_else_if;
+        self.is_else_if = false;
+
+        let should_enter = !was_else_if;
         if should_enter {
-            self.depth.exit();
+            self.with_depth_step(|this| {
+                this.check_expr_nesting_depth_limit(expr_if.span());
+                this.visit_expr_if_branches(expr_if);
+            });
+        } else {
+            self.visit_expr_if_branches(expr_if);
         }
     }
 
@@ -191,34 +194,34 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
         self.visit_expr(&expr_match.expr);
         for arm in &expr_match.arms {
             self.visit_pat(&arm.pat);
-            self.depth.enter();
-            self.check_expr_nesting_depth_limit(arm.body.span());
-            self.visit_expr(&arm.body);
-            self.depth.exit();
+            self.with_depth_step(|this| {
+                this.check_expr_nesting_depth_limit(arm.body.span());
+                this.visit_expr(&arm.body);
+            });
         }
     }
 
     fn visit_expr_for_loop(&mut self, for_loop: &'ast syn::ExprForLoop) {
         self.visit_expr(&for_loop.expr);
-        self.depth.enter();
-        self.check_expr_nesting_depth_limit(for_loop.span());
-        self.visit_block(&for_loop.body);
-        self.depth.exit();
+        self.with_depth_step(|this| {
+            this.check_expr_nesting_depth_limit(for_loop.span());
+            this.visit_block(&for_loop.body);
+        });
     }
 
     fn visit_expr_while(&mut self, while_expr: &'ast syn::ExprWhile) {
         self.visit_expr(&while_expr.cond);
-        self.depth.enter();
-        self.check_expr_nesting_depth_limit(while_expr.span());
-        self.visit_block(&while_expr.body);
-        self.depth.exit();
+        self.with_depth_step(|this| {
+            this.check_expr_nesting_depth_limit(while_expr.span());
+            this.visit_block(&while_expr.body);
+        });
     }
 
     fn visit_expr_loop(&mut self, loop_expr: &'ast syn::ExprLoop) {
-        self.depth.enter();
-        self.check_expr_nesting_depth_limit(loop_expr.span());
-        self.visit_block(&loop_expr.body);
-        self.depth.exit();
+        self.with_depth_step(|this| {
+            this.check_expr_nesting_depth_limit(loop_expr.span());
+            this.visit_block(&loop_expr.body);
+        });
     }
 }
 

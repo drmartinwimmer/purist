@@ -2,7 +2,7 @@
 //!
 //! Provides reusable AST inspection utilities for purist lint rules, including:
 //! - Attribute detection (`#[cfg(test)]`, `#[test]`, derive traits, suppressions)
-//! - Test scope tracking across modules and functions (`TestScopeTracker`)
+//! - Test scope tracking across modules and functions (`TestScope`)
 //! - Path and macro segment inspection helpers (`path_ends_with_segments`, `macro_name`, `extract_type_ident`)
 //! - Trait implementation detection (e.g. `Drop`)
 
@@ -118,7 +118,7 @@ pub fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
     })
 }
 
-pub use crate::trackers::{TestScopeState, TestScopeTracker};
+pub use crate::scopes::{TestScope, TestScopeState, WithTestScope};
 
 /// Checks whether a type is `bool` or `Option<bool>`.
 pub fn is_bool_type(ty: &Type) -> bool {
@@ -236,7 +236,7 @@ mod tests {
 
     #[googletest::test]
     fn track_test_scope_transitions_correctly() -> Result<(), Box<dyn std::error::Error>> {
-        let mut tracker = TestScopeTracker::new(false);
+        let mut tracker = TestScope::new(false);
         assert_that!(tracker.is_in_test(), eq(false));
 
         let test_mod: syn::ItemMod = syn::parse_str("#[cfg(test)] mod tests {}")?;

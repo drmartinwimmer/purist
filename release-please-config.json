@@ -4,6 +4,10 @@
     ".": {
       "release-type": "rust",
       "package-name": "purist"
+    },
+    "crates/purist-derive": {
+      "release-type": "rust",
+      "package-name": "purist-derive"
     }
   }
 }

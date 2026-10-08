@@ -31,10 +31,10 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, is_bool_type};
+use super::common::{TestScope, WithTestScope, is_bool_type};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::TypeScopeTracker;
+use crate::scopes::{TypeScope, WithTypeScope};
 use syn::visit::{self, Visit};
 
 const NEGATIVE_PREFIXES: &[&str] = &[
@@ -65,8 +65,8 @@ impl Rule for NoNegativeBoolRule {
         let mut visitor = NegativeBoolVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            type_scope: TypeScopeTracker::new(),
+            test_scope: TestScope::new(ctx.is_test_file()),
+            type_scope: TypeScope::new(),
         };
 
         visitor.visit_file(file);
@@ -74,48 +74,49 @@ impl Rule for NoNegativeBoolRule {
     }
 }
 
+#[derive(WithTestScope, WithTypeScope)]
 struct NegativeBoolVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
-    type_scope: TypeScopeTracker,
+    test_scope: TestScope,
+    type_scope: TypeScope,
 }
 
 impl<'ast> Visit<'ast> for NegativeBoolVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&impl_fn.attrs);
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&impl_fn.attrs, |this| {
+            visit::visit_impl_item_fn(this, impl_fn);
+        });
     }
 
     fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
-        self.type_scope.push_struct(&item_struct.ident);
-        visit::visit_item_struct(self, item_struct);
-        self.type_scope.pop();
+        self.with_type_struct(&item_struct.ident, |this| {
+            visit::visit_item_struct(this, item_struct);
+        });
     }
 
     fn visit_item_enum(&mut self, item_enum: &'ast syn::ItemEnum) {
-        self.type_scope.push_enum(&item_enum.ident);
-        visit::visit_item_enum(self, item_enum);
-        self.type_scope.pop();
+        self.with_type_enum(&item_enum.ident, |this| {
+            visit::visit_item_enum(this, item_enum);
+        });
     }
 
     fn visit_variant(&mut self, variant: &'ast syn::Variant) {
-        self.type_scope.push_variant(&variant.ident);
-        visit::visit_variant(self, variant);
-        self.type_scope.pop();
+        self.with_type_variant(&variant.ident, |this| {
+            visit::visit_variant(this, variant);
+        });
     }
 
     fn visit_field(&mut self, field: &'ast syn::Field) {

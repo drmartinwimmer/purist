@@ -1,5 +1,6 @@
 //! Scope tracker for Clap command and argument models during AST traversal using a stack.
 
+use super::guard::run_with_scope;
 use crate::rules::common::{derives_any, derives_trait};
 use syn::{Attribute, Field, ItemStruct};
 
@@ -14,11 +15,11 @@ pub struct ClapStructInfo {
 
 /// Scope tracker that observes Clap CLI definitions during AST traversal using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
-pub struct ClapScopeTracker {
+pub struct ClapScope {
     stack: Vec<Option<ClapStructInfo>>,
 }
 
-impl ClapScopeTracker {
+impl ClapScope {
     /// Creates a new Clap scope tracker.
     pub fn new() -> Self {
         Self::default()
@@ -65,6 +66,49 @@ impl ClapScopeTracker {
     /// Pops the active struct scope from the stack.
     pub fn pop(&mut self) -> Option<Option<ClapStructInfo>> {
         self.stack.pop()
+    }
+
+    /// Executes a closure within an entered struct scope.
+    pub fn with_struct<R>(
+        &mut self,
+        item_struct: &ItemStruct,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_struct(item_struct),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+}
+
+/// Trait for visitor types that hold a [`ClapScope`], providing scoped closure methods.
+pub trait WithClapScope {
+    /// Returns a mutable reference to the underlying Clap scope.
+    fn clap_scope_mut(&mut self) -> &mut ClapScope;
+
+    /// Runs a closure within an entered Clap struct scope.
+    fn with_clap_struct<R>(&mut self, item_struct: &ItemStruct, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.clap_scope_mut().push_struct(item_struct),
+            |v| {
+                v.clap_scope_mut().pop();
+            },
+            f,
+        )
+    }
+}
+
+impl WithClapScope for ClapScope {
+    fn clap_scope_mut(&mut self) -> &mut ClapScope {
+        self
     }
 }
 

@@ -27,9 +27,10 @@
 //! }
 //! ```
 
-use super::common::TestScopeTracker;
+use super::common::{TestScope, WithTestScope};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
+use crate::scopes::run_with_scope;
 use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -51,7 +52,7 @@ impl Rule for NoRedundantConversionsRule {
             ctx,
             diagnostics: Vec::new(),
             block_vars_stack: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -60,6 +61,7 @@ impl Rule for NoRedundantConversionsRule {
 }
 
 /// Visitor tracking local variable assignments and call expressions to detect serialization roundtrips.
+#[derive(WithTestScope)]
 struct RedundantConversionsVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
@@ -68,22 +70,39 @@ struct RedundantConversionsVisitor<'a> {
     /// Stack of lexical block scopes tracking variables assigned from serializer outputs.
     block_vars_stack: Vec<HashMap<String, proc_macro2::Span>>,
     /// Tracks active test scope across modules and test functions.
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
+}
+
+impl RedundantConversionsVisitor<'_> {
+    fn with_block_vars<R>(
+        &mut self,
+        vars: HashMap<String, proc_macro2::Span>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        run_with_scope(
+            self,
+            |v| v.block_vars_stack.push(vars),
+            |v| {
+                v.block_vars_stack.pop();
+            },
+            f,
+        )
+    }
 }
 
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Maintains the lexical block scope stack, recording variables initialized from serializer calls.
@@ -93,11 +112,9 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
         }
 
         let serializer_vars = collect_block_serializer_vars(block);
-        self.block_vars_stack.push(serializer_vars);
-
-        visit::visit_block(self, block);
-
-        self.block_vars_stack.pop();
+        self.with_block_vars(serializer_vars, |this| {
+            visit::visit_block(this, block);
+        });
     }
 
     /// Inspects call expressions and flags nested or sequential deserialization of serialized variables.

@@ -51,7 +51,7 @@
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::derives_clap;
+use crate::scopes::derives_clap;
 use std::collections::{HashMap, HashSet};
 
 /// Rule detecting trivial getter/setter combos where direct field access suffices.

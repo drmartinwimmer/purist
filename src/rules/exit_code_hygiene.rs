@@ -50,7 +50,7 @@ use super::common::path_ends_with_ident;
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::FlagScopeTracker;
+use crate::scopes::{FlagScope, run_with_scope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -73,7 +73,7 @@ impl Rule for ExitCodeHygieneRule {
             ctx,
             diagnostics: Vec::new(),
             is_main_file,
-            in_main_fn: FlagScopeTracker::new(),
+            in_main_fn: FlagScope::new(),
         };
 
         visitor.visit_file(file);
@@ -90,19 +90,17 @@ struct ExitCodeVisitor<'a> {
     /// Indicates whether the current file is `main.rs`.
     is_main_file: bool,
     /// Tracks whether AST traversal is currently inside `fn main()` in `main.rs`.
-    in_main_fn: FlagScopeTracker,
+    in_main_fn: FlagScope,
 }
 
 impl<'ast> Visit<'ast> for ExitCodeVisitor<'_> {
     /// Tracks whether traversal is inside `fn main()` and flags library functions returning `ExitCode`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let is_main = self.is_main_file && item_fn.sig.ident == "main";
-        self.in_main_fn.push(is_main);
-
-        self.check_fn_return_library_exit_code(item_fn);
-
-        visit::visit_item_fn(self, item_fn);
-        self.in_main_fn.pop();
+        self.with_main_fn(is_main, |this| {
+            this.check_fn_return_library_exit_code(item_fn);
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Inspects function call expressions for unhygienic `process::exit` calls or raw integer status codes.
@@ -113,6 +111,16 @@ impl<'ast> Visit<'ast> for ExitCodeVisitor<'_> {
 }
 
 impl ExitCodeVisitor<'_> {
+    fn with_main_fn<R>(&mut self, is_main: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |v| v.in_main_fn.push(is_main),
+            |v| {
+                v.in_main_fn.pop();
+            },
+            f,
+        )
+    }
     /// Checks if a library function inappropriately returns `ExitCode`.
     fn check_fn_return_library_exit_code(&mut self, item_fn: &syn::ItemFn) {
         if self.is_main_file || !returns_exit_code(&item_fn.sig.output) {

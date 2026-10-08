@@ -1,5 +1,6 @@
 //! Test scope tracking across modules and functions during AST traversal using a stack.
 
+use super::guard::run_with_scope;
 use crate::rules::common::{has_cfg_test_attr, has_test_attr};
 use syn::Attribute;
 
@@ -20,11 +21,11 @@ impl TestScopeState {
 /// Tracks lexical test scopes (test files, `#[cfg(test)]` modules, and test functions)
 /// during AST traversal using a scope stack (`Vec`).
 #[derive(Debug, Clone)]
-pub struct TestScopeTracker {
+pub struct TestScope {
     stack: Vec<TestScopeState>,
 }
 
-impl TestScopeTracker {
+impl TestScope {
     /// Creates a new test scope tracker, initialized with whether the current file is a test file.
     pub fn new(is_test_file: bool) -> Self {
         Self {
@@ -90,5 +91,86 @@ impl TestScopeTracker {
         if self.stack.len() > 1 {
             self.stack.pop();
         }
+    }
+
+    /// Executes a closure within an entered module scope.
+    pub fn with_mod<R>(&mut self, attrs: &[Attribute], f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(self, |t| t.push_mod(attrs), |t| t.pop(), f)
+    }
+
+    /// Executes a closure within an entered function scope.
+    pub fn with_fn<R>(&mut self, attrs: &[Attribute], f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(self, |t| t.push_fn(attrs), |t| t.pop(), f)
+    }
+
+    /// Executes a closure within an entered function scope with the specified name.
+    pub fn with_fn_with_name<R>(
+        &mut self,
+        attrs: &[Attribute],
+        fn_name: &str,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_fn_with_name(attrs, fn_name),
+            |t| t.pop(),
+            f,
+        )
+    }
+}
+
+/// Trait for visitor types that hold a [`TestScope`], providing scoped closure methods.
+pub trait WithTestScope {
+    /// Returns a mutable reference to the underlying test scope.
+    fn test_scope_mut(&mut self) -> &mut TestScope;
+
+    /// Runs a closure within an entered module scope.
+    fn with_test_mod<R>(&mut self, attrs: &[Attribute], f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.test_scope_mut().push_mod(attrs),
+            |v| v.test_scope_mut().pop(),
+            f,
+        )
+    }
+
+    /// Runs a closure within an entered function scope.
+    fn with_test_fn<R>(&mut self, attrs: &[Attribute], f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.test_scope_mut().push_fn(attrs),
+            |v| v.test_scope_mut().pop(),
+            f,
+        )
+    }
+
+    /// Runs a closure within an entered function scope with a specific name.
+    fn with_test_fn_with_name<R>(
+        &mut self,
+        attrs: &[Attribute],
+        fn_name: &str,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.test_scope_mut().push_fn_with_name(attrs, fn_name),
+            |v| v.test_scope_mut().pop(),
+            f,
+        )
+    }
+}
+
+impl WithTestScope for TestScope {
+    fn test_scope_mut(&mut self) -> &mut TestScope {
+        self
     }
 }

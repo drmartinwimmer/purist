@@ -31,7 +31,7 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, path_ends_with_ident};
+use super::common::{TestScope, WithTestScope, path_ends_with_ident};
 use crate::checkers::extract_fn_return_type;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
@@ -54,7 +54,7 @@ impl Rule for ErrorTypesRule {
         let mut visitor = ErrorTypesVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -63,42 +63,43 @@ impl Rule for ErrorTypesRule {
 }
 
 /// Visitor that inspects function return types for unstructured string errors while tracking test scopes.
+#[derive(WithTestScope)]
 struct ErrorTypesVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
     /// Tracks active test scope across modules and test functions.
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for ErrorTypesVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Inspects free functions and marks test scope active if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Inspects methods in inherent or trait implementations and marks test scope active if annotated with `#[test]`.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&impl_fn.attrs);
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&impl_fn.attrs, |this| {
+            visit::visit_impl_item_fn(this, impl_fn);
+        });
     }
 
     /// Inspects trait definition methods and marks test scope active if annotated with `#[test]`.
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        self.test_scope.push_fn(&trait_fn.attrs);
-        visit::visit_trait_item_fn(self, trait_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&trait_fn.attrs, |this| {
+            visit::visit_trait_item_fn(this, trait_fn);
+        });
     }
 
     /// Inspects function signatures for unstructured string error return types outside test scopes.
