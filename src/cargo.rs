@@ -239,6 +239,22 @@ impl LintConfig {
             if let Some(ws_toml) = find_workspace_cargo_toml(&cargo_toml)
                 && let Some(ws_config) = Self::from_manifest_file(&ws_toml)
             {
+                if let Ok(content) = fs::read_to_string(&cargo_toml)
+                    && let Ok(doc) = content.parse::<DocumentMut>()
+                    && let Some(lints) = doc.get("lints")
+                    && (lints
+                        .as_table()
+                        .and_then(|t| t.get("workspace"))
+                        .and_then(|w| w.as_bool())
+                        == Some(true)
+                        || lints
+                            .as_inline_table()
+                            .and_then(|t| t.get("workspace"))
+                            .and_then(|w| w.as_bool())
+                            == Some(true))
+                {
+                    config.rules = ws_config.rules;
+                }
                 if config.max_file_lines.max_production_lines.is_none() {
                     config.max_file_lines.max_production_lines =
                         ws_config.max_file_lines.max_production_lines;
