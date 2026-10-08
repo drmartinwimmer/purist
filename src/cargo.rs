@@ -61,9 +61,6 @@ pub struct PuristLintsConfig {
     pub no_negative_bool: RuleLevel,
 }
 
-/// Backwards compatibility alias for `PuristLintsConfig`.
-pub type OpinionatedLintsConfig = PuristLintsConfig;
-
 impl PuristLintsConfig {
     pub fn get(&self, rule_name: &str) -> Option<RuleLevel> {
         let stripped = rule_name
@@ -96,16 +93,13 @@ impl PuristLintsConfig {
             "raii_temp_directories" => Some(self.raii_temp_directories),
             "no_println_in_libraries" => Some(self.no_println_in_libraries),
             "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
-            "no_double_negation" | "no_negative_boolean_names" => Some(self.no_double_negation),
+            "no_double_negation" => Some(self.no_double_negation),
             "googletest_conventions" => Some(self.googletest_conventions),
             "max_file_lines" => Some(self.max_file_lines),
-            "no_trivial_getters_setters"
-            | "no_trivial_getset"
-            | "trivial_getters_setters"
-            | "trivial_getset" => Some(self.no_trivial_getters_setters),
+            "no_trivial_getters_setters" => Some(self.no_trivial_getters_setters),
             "max_nesting_depth" => Some(self.max_nesting_depth),
             "lib_facade_hygiene" => Some(self.lib_facade_hygiene),
-            "no_negative_bool" | "no_negative_clap_flags" => Some(self.no_negative_bool),
+            "no_negative_bool" => Some(self.no_negative_bool),
             _ => None,
         }
     }
@@ -141,16 +135,13 @@ impl PuristLintsConfig {
             "raii_temp_directories" => self.raii_temp_directories = level,
             "no_println_in_libraries" => self.no_println_in_libraries = level,
             "cli_run_consumes_self" => self.cli_run_consumes_self = level,
-            "no_double_negation" | "no_negative_boolean_names" => self.no_double_negation = level,
+            "no_double_negation" => self.no_double_negation = level,
             "googletest_conventions" => self.googletest_conventions = level,
             "max_file_lines" => self.max_file_lines = level,
-            "no_trivial_getters_setters"
-            | "no_trivial_getset"
-            | "trivial_getters_setters"
-            | "trivial_getset" => self.no_trivial_getters_setters = level,
+            "no_trivial_getters_setters" => self.no_trivial_getters_setters = level,
             "max_nesting_depth" => self.max_nesting_depth = level,
             "lib_facade_hygiene" => self.lib_facade_hygiene = level,
-            "no_negative_bool" | "no_negative_clap_flags" => self.no_negative_bool = level,
+            "no_negative_bool" => self.no_negative_bool = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -159,18 +150,6 @@ impl PuristLintsConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnrecognizedRule;
-
-/// Map of deprecated rule aliases to their canonical rule names.
-const DEPRECATED_ALIASES: &[(&str, &str)] = &[
-    ("clippy_suppress", "clippy_suppression_hygiene"),
-    ("use_declarations", "use_declarations_over_qualified_paths"),
-    ("centralized_commands", "centralized_command_execution"),
-    ("clap_encapsulation", "clap_struct_encapsulation"),
-    ("option_bool_mapping", "idiomatic_option_bool_mapping"),
-    ("test_matcher_borrow", "test_matcher_borrow_simplification"),
-    ("no_negative_boolean_names", "no_double_negation"),
-    ("no_negative_clap_flags", "no_negative_bool"),
-];
 
 pub use crate::rule_config::{LibFacadeHygieneConfig, MaxFileLinesConfig, MaxNestingDepthConfig};
 
@@ -198,17 +177,7 @@ impl LintConfig {
             .or_else(|| name.strip_prefix("opinionated::"))
             .unwrap_or(&name);
 
-        if let Some((_, canonical)) = DEPRECATED_ALIASES
-            .iter()
-            .find(|(alias, _)| *alias == stripped)
-        {
-            self.deprecated.push(format!(
-                "Rule 'purist::{stripped}' is deprecated. Use 'purist::{canonical}' instead."
-            ));
-            if let Err(UnrecognizedRule) = self.rules.set(canonical, level) {
-                self.unrecognized.push(canonical.to_string());
-            }
-        } else if self.rules.set(stripped, level).is_err() {
+        if self.rules.set(stripped, level).is_err() {
             self.unrecognized.push(stripped.to_string());
         }
     }

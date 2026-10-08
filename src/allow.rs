@@ -12,18 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, value};
 
-/// Map of deprecated rule aliases to their canonical rule names.
-const DEPRECATED_ALIASES: &[(&str, &str)] = &[
-    ("clippy_suppress", "clippy_suppression_hygiene"),
-    ("use_declarations", "use_declarations_over_qualified_paths"),
-    ("centralized_commands", "centralized_command_execution"),
-    ("clap_encapsulation", "clap_struct_encapsulation"),
-    ("option_bool_mapping", "idiomatic_option_bool_mapping"),
-    ("test_matcher_borrow", "test_matcher_borrow_simplification"),
-    ("no_negative_boolean_names", "no_double_negation"),
-    ("no_negative_clap_flags", "no_negative_bool"),
-];
-
 /// Returns the canonical rule name if `rule_name` is a known purist lint rule.
 pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
     let stripped = rule_name
@@ -31,13 +19,7 @@ pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
         .or_else(|| rule_name.strip_prefix("opinionated::"))
         .unwrap_or(rule_name);
 
-    let canonical = DEPRECATED_ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == stripped)
-        .map(|(_, can)| *can)
-        .unwrap_or(stripped);
-
-    match canonical {
+    match stripped {
         "no_inline_mods" => Some("no_inline_mods"),
         "free_functions" => Some("free_functions"),
         "path_resolution" => Some("path_resolution"),
@@ -307,7 +289,7 @@ mod tests {
     }
 
     #[googletest::test]
-    fn canonical_rule_name_maps_canonical_and_deprecated_aliases_succeeds() {
+    fn canonical_rule_name_maps_canonical_rule_names_succeeds() {
         assert_that!(
             canonical_rule_name("purist::no_wildcard_imports"),
             eq(Some("no_wildcard_imports"))
@@ -319,14 +301,6 @@ mod tests {
         assert_that!(
             canonical_rule_name("no_wildcard_imports"),
             eq(Some("no_wildcard_imports"))
-        );
-        assert_that!(
-            canonical_rule_name("purist::clippy_suppress"),
-            eq(Some("clippy_suppression_hygiene"))
-        );
-        assert_that!(
-            canonical_rule_name("clap_encapsulation"),
-            eq(Some("clap_struct_encapsulation"))
         );
         assert_that!(canonical_rule_name("purist::syntax_error"), eq(None));
         assert_that!(canonical_rule_name("unknown_nonexistent_rule"), eq(None));
