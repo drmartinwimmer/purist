@@ -35,7 +35,7 @@
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::{FlagScope, run_with_scope};
+use crate::scopes::{SuppressionScope, WithSuppressionScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -52,7 +52,7 @@ impl Rule for NoUnsafeInTestsRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
-            suppressed_scope: FlagScope::new(),
+            suppression_scope: SuppressionScope::new(),
         };
 
         visitor.visit_file(file);
@@ -61,32 +61,19 @@ impl Rule for NoUnsafeInTestsRule {
 }
 
 /// Visitor that inspects items and expressions in test scope for forbidden `unsafe` constructs.
-#[derive(WithTestScope)]
+#[derive(WithTestScope, WithSuppressionScope)]
 struct UnsafeTestVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScope,
-    suppressed_scope: FlagScope,
-}
-
-impl UnsafeTestVisitor<'_> {
-    fn with_suppressed<R>(&mut self, suppressed: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |v| v.suppressed_scope.push(suppressed),
-            |v| {
-                v.suppressed_scope.pop();
-            },
-            f,
-        )
-    }
+    suppression_scope: SuppressionScope,
 }
 
 impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks module-level test configuration and suppression scoping.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
         let suppressed = has_suppression_attribute(&item_mod.attrs, "no_unsafe_in_tests");
-        self.with_suppressed(suppressed, |this| {
+        self.with_suppression(suppressed, |this| {
             this.with_test_mod(&item_mod.attrs, |this| {
                 visit::visit_item_mod(this, item_mod);
             });
@@ -96,7 +83,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks function-level test attributes and suppression scoping.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
         let suppressed = has_suppression_attribute(&item_fn.attrs, "no_unsafe_in_tests");
-        self.with_suppressed(suppressed, |this| {
+        self.with_suppression(suppressed, |this| {
             this.with_test_fn(&item_fn.attrs, |this| {
                 visit::visit_item_fn(this, item_fn);
             });
@@ -106,7 +93,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
     /// Tracks impl-level function test attributes and suppression scoping.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
         let suppressed = has_suppression_attribute(&impl_fn.attrs, "no_unsafe_in_tests");
-        self.with_suppressed(suppressed, |this| {
+        self.with_suppression(suppressed, |this| {
             this.with_test_fn(&impl_fn.attrs, |this| {
                 visit::visit_impl_item_fn(this, impl_fn);
             });
@@ -115,7 +102,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
 
     /// Checks function signatures in test contexts for `unsafe` qualifiers.
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {
-        if self.test_scope.is_in_test() && !self.suppressed_scope.is_active() {
+        if self.test_scope.is_in_test() && !self.suppression_scope.is_suppressed() {
             self.check_fn_signature_unsafe_in_test(sig);
         }
 
@@ -124,7 +111,7 @@ impl<'ast> Visit<'ast> for UnsafeTestVisitor<'_> {
 
     /// Flags raw `unsafe` blocks when encountered within a test context.
     fn visit_expr_unsafe(&mut self, expr_unsafe: &'ast syn::ExprUnsafe) {
-        if self.test_scope.is_in_test() && !self.suppressed_scope.is_active() {
+        if self.test_scope.is_in_test() && !self.suppression_scope.is_suppressed() {
             self.check_expr_unsafe_block_in_test(expr_unsafe);
         }
 

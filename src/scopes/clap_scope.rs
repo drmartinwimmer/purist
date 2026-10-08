@@ -17,6 +17,8 @@ pub struct ClapStructInfo {
 #[derive(Debug, Clone, Default)]
 pub struct ClapScope {
     stack: Vec<Option<ClapStructInfo>>,
+    cli_impl_stack: Vec<bool>,
+    command_runner_stack: Vec<bool>,
 }
 
 impl ClapScope {
@@ -83,6 +85,60 @@ impl ClapScope {
             f,
         )
     }
+
+    /// Returns true if currently traversing within a CLI implementation block.
+    pub fn is_in_cli_impl(&self) -> bool {
+        self.cli_impl_stack.last().copied().unwrap_or(false)
+    }
+
+    /// Returns true if currently traversing within a CLI command runner method (`run`, `execute`).
+    pub fn is_in_command_runner(&self) -> bool {
+        self.command_runner_stack.last().copied().unwrap_or(false)
+    }
+
+    /// Pushes the CLI implementation block status onto the stack.
+    pub fn push_cli_impl(&mut self, is_cli: bool) {
+        self.cli_impl_stack.push(is_cli);
+    }
+
+    /// Pops the active CLI implementation block status from the stack.
+    pub fn pop_cli_impl(&mut self) -> Option<bool> {
+        self.cli_impl_stack.pop()
+    }
+
+    /// Pushes the CLI command runner execution status onto the stack.
+    pub fn push_command_runner(&mut self, is_runner: bool) {
+        self.command_runner_stack.push(is_runner);
+    }
+
+    /// Pops the active CLI command runner execution status from the stack.
+    pub fn pop_command_runner(&mut self) -> Option<bool> {
+        self.command_runner_stack.pop()
+    }
+
+    /// Executes a closure within a CLI implementation block scope.
+    pub fn with_cli_impl<R>(&mut self, is_cli: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_cli_impl(is_cli),
+            |t| {
+                t.pop_cli_impl();
+            },
+            f,
+        )
+    }
+
+    /// Executes a closure within a CLI command runner scope.
+    pub fn with_command_runner<R>(&mut self, is_runner: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_command_runner(is_runner),
+            |t| {
+                t.pop_command_runner();
+            },
+            f,
+        )
+    }
 }
 
 /// Trait for visitor types that hold a [`ClapScope`], providing scoped closure methods.
@@ -100,6 +156,36 @@ pub trait WithClapScope {
             |v| v.clap_scope_mut().push_struct(item_struct),
             |v| {
                 v.clap_scope_mut().pop();
+            },
+            f,
+        )
+    }
+
+    /// Runs a closure within a CLI implementation block scope.
+    fn with_cli_impl<R>(&mut self, is_cli: bool, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.clap_scope_mut().push_cli_impl(is_cli),
+            |v| {
+                v.clap_scope_mut().pop_cli_impl();
+            },
+            f,
+        )
+    }
+
+    /// Runs a closure within a CLI command runner scope.
+    fn with_command_runner<R>(&mut self, is_runner: bool, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.clap_scope_mut().push_command_runner(is_runner),
+            |v| {
+                v.clap_scope_mut().pop_command_runner();
             },
             f,
         )
@@ -144,10 +230,14 @@ pub fn is_command_struct_name(name: &str) -> bool {
 
 /// Returns true if the type name matches CLI top-level or command conventions.
 pub fn is_cli_or_command_struct_name(name: &str) -> bool {
-    name == "Cli" || name == "App" || is_command_struct_name(name)
+    name == "Cli"
+        || name == "App"
+        || name == "Commands"
+        || name.ends_with("Cli")
+        || is_command_struct_name(name)
 }
 
 /// Returns true if the function name suggests a CLI command execution method.
 pub fn is_command_execution_fn_name(name: &str) -> bool {
-    matches!(name, "run" | "execute" | "run_command")
+    matches!(name, "run" | "execute" | "run_command" | "run_with_format")
 }

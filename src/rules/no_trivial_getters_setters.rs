@@ -49,10 +49,12 @@
 //! }
 //! ```
 
+use super::common::{extract_type_ident, has_cfg_test_attr, has_test_attr};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::derives_clap;
+use crate::scopes::{TestScope, WithTestScope, derives_clap};
 use std::collections::{HashMap, HashSet};
+use syn::visit::{self, Visit};
 
 /// Rule detecting trivial getter/setter combos where direct field access suffices.
 pub struct NoTrivialGettersSettersRule;
@@ -68,12 +70,15 @@ impl Rule for NoTrivialGettersSettersRule {
             return diagnostics;
         }
 
-        let items = collect_non_test_items(file);
-        let exempt_structs = collect_exempt_structs(&items);
-        let methods_by_struct = collect_inherent_methods(&items);
+        let mut visitor = GetterSetterVisitor {
+            test_scope: TestScope::new(ctx.is_test_file()),
+            exempt_structs: HashSet::new(),
+            methods_by_struct: HashMap::new(),
+        };
+        visitor.visit_file(file);
 
-        for (struct_name, methods) in &methods_by_struct {
-            if exempt_structs.contains(struct_name) {
+        for (struct_name, methods) in &visitor.methods_by_struct {
+            if visitor.exempt_structs.contains(struct_name) {
                 continue;
             }
             check_struct_getter_setter_combos(
@@ -110,52 +115,64 @@ struct FieldAccessors<'a> {
     mut_getter: Option<&'a MethodInfo<'a>>,
 }
 
-/// Recursively collects items from a file, skipping test modules.
-fn collect_non_test_items(file: &syn::File) -> Vec<&syn::Item> {
-    let mut collected = Vec::new();
-    collect_items_recursive(&file.items, &mut collected);
-    collected
+#[derive(WithTestScope)]
+struct GetterSetterVisitor<'a> {
+    test_scope: TestScope,
+    exempt_structs: HashSet<String>,
+    methods_by_struct: HashMap<String, Vec<MethodInfo<'a>>>,
 }
 
-fn collect_items_recursive<'a>(items: &'a [syn::Item], out: &mut Vec<&'a syn::Item>) {
-    for item in items {
-        if has_test_attr(get_item_attrs(item)) {
-            continue;
+impl<'ast> Visit<'ast> for GetterSetterVisitor<'ast> {
+    fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
+        if has_rule_suppression(&item_mod.attrs) {
+            return;
         }
-        if let syn::Item::Mod(m) = item
-            && let Some((_, inner)) = &m.content
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
+    }
+
+    fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
+        if self.test_scope.is_in_test()
+            || has_cfg_test_attr(&item_struct.attrs)
+            || has_test_attr(&item_struct.attrs)
         {
-            collect_items_recursive(inner, out);
-        } else {
-            out.push(item);
+            return;
+        }
+        if derives_clap(&item_struct.attrs) || has_rule_suppression(&item_struct.attrs) {
+            self.exempt_structs.insert(item_struct.ident.to_string());
         }
     }
-}
 
-fn get_item_attrs(item: &syn::Item) -> &[syn::Attribute] {
-    match item {
-        syn::Item::Fn(i) => &i.attrs,
-        syn::Item::Mod(i) => &i.attrs,
-        syn::Item::Struct(i) => &i.attrs,
-        syn::Item::Impl(i) => &i.attrs,
-        _ => &[],
+    fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
+        if self.test_scope.is_in_test()
+            || has_cfg_test_attr(&item_impl.attrs)
+            || has_test_attr(&item_impl.attrs)
+        {
+            return;
+        }
+        if item_impl.trait_.is_none()
+            && !has_rule_suppression(&item_impl.attrs)
+            && let Some(ident) = extract_type_ident(&item_impl.self_ty)
+        {
+            let struct_name = ident.to_string();
+            for impl_item in &item_impl.items {
+                if let syn::ImplItem::Fn(f) = impl_item
+                    && !is_exempt_method(f)
+                {
+                    self.methods_by_struct
+                        .entry(struct_name.clone())
+                        .or_default()
+                        .push(MethodInfo {
+                            name: f.sig.ident.to_string(),
+                            span: f.sig.ident.span(),
+                            sig: &f.sig,
+                            block: &f.block,
+                        });
+                }
+            }
+        }
     }
-}
-
-fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| {
-        a.path().is_ident("test")
-            || a.path().segments.last().is_some_and(|s| s.ident == "test")
-            || (a.path().is_ident("cfg")
-                && a.parse_nested_meta(|m| {
-                    if m.path.is_ident("test") {
-                        Ok(())
-                    } else {
-                        Err(m.error(""))
-                    }
-                })
-                .is_ok())
-    })
 }
 
 fn has_rule_suppression(attrs: &[syn::Attribute]) -> bool {
@@ -180,66 +197,14 @@ fn has_rule_suppression(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
-/// Collects names of structs that derive Clap or have rule-level suppressions.
-fn collect_exempt_structs(items: &[&syn::Item]) -> HashSet<String> {
-    let mut exempt = HashSet::new();
-    for item in items {
-        if let syn::Item::Struct(s) = item
-            && (derives_clap(&s.attrs) || has_rule_suppression(&s.attrs))
-        {
-            exempt.insert(s.ident.to_string());
-        }
-    }
-    exempt
-}
-
-/// Collects inherent methods grouped by struct name.
-fn collect_inherent_methods<'a>(items: &[&'a syn::Item]) -> HashMap<String, Vec<MethodInfo<'a>>> {
-    let mut map: HashMap<String, Vec<MethodInfo<'a>>> = HashMap::new();
-    for item in items {
-        if let syn::Item::Impl(item_impl) = item
-            && item_impl.trait_.is_none()
-            && !has_rule_suppression(&item_impl.attrs)
-            && let Some(name) = extract_type_ident(&item_impl.self_ty)
-        {
-            for impl_item in &item_impl.items {
-                if let syn::ImplItem::Fn(f) = impl_item
-                    && !is_exempt_method(f)
-                {
-                    map.entry(name.clone()).or_default().push(MethodInfo {
-                        name: f.sig.ident.to_string(),
-                        span: f.sig.ident.span(),
-                        sig: &f.sig,
-                        block: &f.block,
-                    });
-                }
-            }
-        }
-    }
-    map
-}
-
-fn extract_type_ident(ty: &syn::Type) -> Option<String> {
-    if let syn::Type::Path(type_path) = ty
-        && type_path.qself.is_none()
-    {
-        type_path.path.segments.last().map(|s| s.ident.to_string())
-    } else {
-        None
-    }
-}
-
 fn is_exempt_method(item_fn: &syn::ImplItemFn) -> bool {
     has_rule_suppression(&item_fn.attrs)
-        || item_fn.attrs.iter().any(|attr| {
-            attr.path().is_ident("deprecated")
-                || attr.path().is_ident("test")
-                || attr
-                    .path()
-                    .segments
-                    .last()
-                    .is_some_and(|s| s.ident == "test")
-        })
+        || has_test_attr(&item_fn.attrs)
+        || has_cfg_test_attr(&item_fn.attrs)
+        || item_fn
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("deprecated"))
 }
 
 struct DiagEmitter<'a, 'c> {

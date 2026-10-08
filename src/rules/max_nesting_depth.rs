@@ -80,7 +80,6 @@ impl Rule for MaxNestingDepthRule {
             ctx,
             max_depth,
             depth_scope: DepthScope::new(),
-            is_else_if: false,
             test_scope: TestScope::new(ctx.is_test_file()),
             diagnostics: Vec::new(),
         };
@@ -96,7 +95,6 @@ struct NestingVisitor<'a> {
     ctx: &'a LintContext<'a>,
     max_depth: usize,
     depth_scope: DepthScope,
-    is_else_if: bool,
     test_scope: TestScope,
     diagnostics: Vec<Diagnostic>,
 }
@@ -127,13 +125,10 @@ impl<'a> NestingVisitor<'a> {
         self.visit_block(&expr_if.then_branch);
 
         if let Some((_, else_expr)) = &expr_if.else_branch {
-            if matches!(**else_expr, syn::Expr::If(_)) {
-                self.is_else_if = true;
-                self.visit_expr(else_expr);
-                self.is_else_if = false;
-            } else {
-                self.visit_expr(else_expr);
-            }
+            let is_else_if = matches!(**else_expr, syn::Expr::If(_));
+            self.with_else_if(is_else_if, |this| {
+                this.visit_expr(else_expr);
+            });
         }
     }
 }
@@ -176,17 +171,16 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
     }
 
     fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
-        let was_else_if = self.is_else_if;
-        self.is_else_if = false;
-
-        let should_enter = !was_else_if;
-        if should_enter {
+        let is_else_if = self.depth_scope.is_else_if();
+        if !is_else_if {
             self.with_depth_step(|this| {
                 this.check_expr_nesting_depth_limit(expr_if.span());
                 this.visit_expr_if_branches(expr_if);
             });
         } else {
-            self.visit_expr_if_branches(expr_if);
+            self.with_else_if(false, |this| {
+                this.visit_expr_if_branches(expr_if);
+            });
         }
     }
 

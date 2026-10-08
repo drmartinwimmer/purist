@@ -13,19 +13,28 @@
 //! - [`WithTypeScope`]: Automatically implements [`WithTypeScope`].
 //! - [`WithDepthScope`]: Automatically implements [`WithDepthScope`].
 
+pub mod block_scope;
 pub mod clap_scope;
 pub mod depth_scope;
 pub mod guard;
+pub mod main_scope;
+pub mod suppression_scope;
 pub mod test_scope;
 pub mod type_scope;
 
+pub use block_scope::{BlockScope, WithBlockScope};
 pub use clap_scope::{
     ClapScope, ClapStructInfo, WithClapScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name, is_command_struct_name, is_flattened_field,
 };
 pub use depth_scope::{DepthScope, FlagScope, WithDepthScope};
-pub use guard::{ScopeGuard, run_with_scope};
-pub use purist_derive::{WithClapScope, WithDepthScope, WithTestScope, WithTypeScope};
+pub use guard::{ScopeGuard, run_with_block, run_with_exact_flag, run_with_flag, run_with_scope};
+pub use main_scope::{MainScope, WithMainScope};
+pub use purist_derive::{
+    WithBlockScope, WithClapScope, WithDepthScope, WithMainScope, WithSuppressionScope,
+    WithTestScope, WithTypeScope,
+};
+pub use suppression_scope::{SuppressionScope, WithSuppressionScope};
 pub use test_scope::{TestScope, TestScopeState, WithTestScope};
 pub use type_scope::{ContainerKind, TypeScope, WithTypeScope};
 
@@ -52,6 +61,21 @@ mod tests {
     #[derive(WithDepthScope)]
     struct DerivedDepthVisitor {
         depth_scope: DepthScope,
+    }
+
+    #[derive(WithBlockScope)]
+    struct DerivedBlockVisitor {
+        block_scope: BlockScope<String, i32>,
+    }
+
+    #[derive(WithMainScope)]
+    struct DerivedMainVisitor {
+        main_scope: MainScope,
+    }
+
+    #[derive(WithSuppressionScope)]
+    struct DerivedSuppressionVisitor {
+        suppression_scope: SuppressionScope,
     }
 
     #[derive(WithTestScope, WithClapScope, WithTypeScope, WithDepthScope)]
@@ -138,6 +162,32 @@ mod tests {
             assert_that!(v.depth_scope_mut().get(), eq(1));
         });
         assert_that!(depth_v.depth_scope_mut().get(), eq(0));
+
+        let mut block_v = DerivedBlockVisitor {
+            block_scope: BlockScope::new(),
+        };
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("val".to_string(), 42);
+        block_v.with_block(bindings, |v| {
+            assert_that!(v.block_scope_mut().get("val"), some(eq(&42)));
+        });
+        assert_that!(block_v.block_scope_mut().get("val"), none());
+
+        let mut main_v = DerivedMainVisitor {
+            main_scope: MainScope::new(),
+        };
+        main_v.with_main_fn(true, |v| {
+            assert_that!(v.main_scope_mut().is_in_main(), eq(true));
+        });
+        assert_that!(main_v.main_scope_mut().is_in_main(), eq(false));
+
+        let mut supp_v = DerivedSuppressionVisitor {
+            suppression_scope: SuppressionScope::new(),
+        };
+        supp_v.with_suppression(true, |v| {
+            assert_that!(v.suppression_scope_mut().is_suppressed(), eq(true));
+        });
+        assert_that!(supp_v.suppression_scope_mut().is_suppressed(), eq(false));
 
         let mut multi = MultiScopeVisitor {
             test_scope: TestScope::new(false),

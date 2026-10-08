@@ -50,7 +50,7 @@ use super::common::path_ends_with_ident;
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::{FlagScope, run_with_scope};
+use crate::scopes::{MainScope, WithMainScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -73,7 +73,7 @@ impl Rule for ExitCodeHygieneRule {
             ctx,
             diagnostics: Vec::new(),
             is_main_file,
-            in_main_fn: FlagScope::new(),
+            main_scope: MainScope::new(),
         };
 
         visitor.visit_file(file);
@@ -82,6 +82,7 @@ impl Rule for ExitCodeHygieneRule {
 }
 
 /// Visitor inspecting functions and calls for exit code hygiene violations.
+#[derive(WithMainScope)]
 struct ExitCodeVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
@@ -90,7 +91,7 @@ struct ExitCodeVisitor<'a> {
     /// Indicates whether the current file is `main.rs`.
     is_main_file: bool,
     /// Tracks whether AST traversal is currently inside `fn main()` in `main.rs`.
-    in_main_fn: FlagScope,
+    main_scope: MainScope,
 }
 
 impl<'ast> Visit<'ast> for ExitCodeVisitor<'_> {
@@ -111,16 +112,6 @@ impl<'ast> Visit<'ast> for ExitCodeVisitor<'_> {
 }
 
 impl ExitCodeVisitor<'_> {
-    fn with_main_fn<R>(&mut self, is_main: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |v| v.in_main_fn.push(is_main),
-            |v| {
-                v.in_main_fn.pop();
-            },
-            f,
-        )
-    }
     /// Checks if a library function inappropriately returns `ExitCode`.
     fn check_fn_return_library_exit_code(&mut self, item_fn: &syn::ItemFn) {
         if self.is_main_file || !returns_exit_code(&item_fn.sig.output) {
@@ -167,7 +158,7 @@ impl ExitCodeVisitor<'_> {
         }
 
         // Check if exit is called outside of main function in main.rs
-        if !self.in_main_fn.is_active() {
+        if !self.main_scope.is_in_main() {
             self.diagnostics.push(
                 Diagnostic::new(
                     "purist::exit_code_hygiene",

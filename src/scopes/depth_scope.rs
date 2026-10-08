@@ -7,6 +7,7 @@ use super::guard::run_with_scope;
 pub struct DepthScope {
     depth: usize,
     stack: Vec<usize>,
+    else_if_stack: Vec<bool>,
 }
 
 impl DepthScope {
@@ -60,6 +61,33 @@ impl DepthScope {
             f,
         )
     }
+
+    /// Returns true if currently traversing inside an `else if` branch.
+    pub fn is_else_if(&self) -> bool {
+        self.else_if_stack.last().copied().unwrap_or(false)
+    }
+
+    /// Pushes the else-if branch status onto the stack.
+    pub fn push_else_if(&mut self, is_else_if: bool) {
+        self.else_if_stack.push(is_else_if);
+    }
+
+    /// Pops the active else-if branch status from the stack.
+    pub fn pop_else_if(&mut self) -> Option<bool> {
+        self.else_if_stack.pop()
+    }
+
+    /// Executes a closure within an else-if branch scope.
+    pub fn with_else_if<R>(&mut self, is_else_if: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_else_if(is_else_if),
+            |t| {
+                t.pop_else_if();
+            },
+            f,
+        )
+    }
 }
 
 /// Trait for visitor types that hold a [`DepthScope`], providing scoped closure methods.
@@ -94,6 +122,21 @@ pub trait WithDepthScope {
             f,
         )
     }
+
+    /// Runs a closure within an else-if branch scope.
+    fn with_else_if<R>(&mut self, is_else_if: bool, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.depth_scope_mut().push_else_if(is_else_if),
+            |v| {
+                v.depth_scope_mut().pop_else_if();
+            },
+            f,
+        )
+    }
 }
 
 impl WithDepthScope for DepthScope {
@@ -125,6 +168,11 @@ impl FlagScope {
         self.stack.push(next);
     }
 
+    /// Pushes an exact flag state onto the stack without inheriting active status from enclosing scopes.
+    pub fn push_exact(&mut self, condition: bool) {
+        self.stack.push(condition);
+    }
+
     /// Pops the active flag scope from the stack.
     pub fn pop(&mut self) -> Option<bool> {
         self.stack.pop()
@@ -135,6 +183,18 @@ impl FlagScope {
         run_with_scope(
             self,
             |t| t.push(condition),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+
+    /// Executes a closure with an exact flag state, popping on exit.
+    pub fn with_exact_flag<R>(&mut self, condition: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_exact(condition),
             |t| {
                 t.pop();
             },

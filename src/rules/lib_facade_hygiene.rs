@@ -27,10 +27,11 @@
 //! pub use processing::{process_data, Output};
 //! ```
 
+use super::common::{count_production_lines, has_cfg_test_attr, has_test_attr};
 use crate::diagnostics::{Diagnostic, Severity, Span};
 use crate::engine::{LintContext, Rule};
+use syn::Item;
 use syn::spanned::Spanned;
-use syn::{Item, ItemFn};
 
 /// Default maximum allowed line count for production code in `lib.rs`.
 pub const DEFAULT_MAX_LIB_PRODUCTION_LINES: usize = 200;
@@ -90,7 +91,7 @@ impl Rule for LibFacadeHygieneRule {
         // 2. Check for large free functions directly in lib.rs outside cfg(test)
         for item in &file.items {
             if let Item::Fn(item_fn) = item {
-                if is_test_item(item_fn) {
+                if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
                     continue;
                 }
 
@@ -118,69 +119,6 @@ impl Rule for LibFacadeHygieneRule {
 
         diagnostics
     }
-}
-
-/// Counts lines of production code in source text, excluding any lines in `#[cfg(test)]` items.
-pub fn count_production_lines(file: &syn::File, source: &str) -> usize {
-    let test_spans = find_test_line_spans(file);
-    if test_spans.is_empty() {
-        return source.lines().count();
-    }
-
-    let mut prod_lines = 0;
-    for (line_idx, _) in source.lines().enumerate() {
-        let line_num = line_idx + 1;
-        let in_test = test_spans
-            .iter()
-            .any(|&(start, end)| line_num >= start && line_num <= end);
-        if !in_test {
-            prod_lines += 1;
-        }
-    }
-    prod_lines
-}
-
-fn find_test_line_spans(file: &syn::File) -> Vec<(usize, usize)> {
-    let mut spans = Vec::new();
-    for item in &file.items {
-        if is_test_ast_item(item) {
-            let span = item.span();
-            spans.push((span.start().line, span.end().line));
-        }
-    }
-    spans
-}
-
-fn is_test_ast_item(item: &Item) -> bool {
-    let attrs = match item {
-        Item::Mod(m) => &m.attrs,
-        Item::Fn(f) => &f.attrs,
-        Item::Struct(s) => &s.attrs,
-        Item::Enum(e) => &e.attrs,
-        Item::Const(c) => &c.attrs,
-        Item::Static(s) => &s.attrs,
-        Item::Impl(i) => &i.attrs,
-        Item::Trait(t) => &t.attrs,
-        Item::Use(u) => &u.attrs,
-        _ => return false,
-    };
-    attrs.iter().any(is_cfg_test_attr)
-}
-
-fn is_cfg_test_attr(attr: &syn::Attribute) -> bool {
-    if attr.path().is_ident("test") {
-        return true;
-    }
-    if attr.path().is_ident("cfg")
-        && let syn::Meta::List(ref list) = attr.meta
-    {
-        return list.tokens.to_string().contains("test");
-    }
-    false
-}
-
-fn is_test_item(item_fn: &ItemFn) -> bool {
-    item_fn.attrs.iter().any(is_cfg_test_attr)
 }
 
 #[cfg(test)]
