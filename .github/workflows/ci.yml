@@ -41,7 +41,7 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run purist AST linter
-        run: cargo run -- --path .
+        run: cargo run
 
       - name: Check TOML formatting (Taplo)
         run: taplo fmt --check

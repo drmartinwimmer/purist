@@ -20,7 +20,7 @@ Before submitting changes or opening pull requests, review agents must ensure th
 
 - **Rust formatting**: `cargo fmt --check`
 - **Rust compiler & Clippy lints**: `cargo clippy --all-targets --all-features -- -D warnings`
-- **Purist AST linter**: `cargo run -- --path .`
+- **Purist AST linter**: `cargo run`
 - **Dependency security audit**: `cargo audit`
 - **TOML formatting**: `taplo fmt --check`
 - **Markdown & JSON formatting**: `prettier --check "**/*.{md,json}"` (or `mdformat`)
@@ -30,7 +30,7 @@ Before submitting changes or opening pull requests, review agents must ensure th
 Review agents must always run the Purist AST linter (`purist`) to identify and resolve architectural, style, and hygiene issues:
 
 ```bash
-cargo run -- --path .
+cargo run
 ```
 
 Ensure zero violations (errors or warnings) are reported before submitting changes.

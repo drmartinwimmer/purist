@@ -1,7 +1,7 @@
-use crate::cargo::{LintConfig, RuleLevel, discover_rust_files, find_cargo_toml};
+use crate::cargo::{CargoManifest, LintConfig, RuleLevel};
 use crate::diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
+use crate::discovery::{discover_project_files, discover_project_files_from_manifest};
 use crate::rules::default_rules;
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
@@ -262,30 +262,18 @@ impl PuristEngine {
         report
     }
 
-    /// Analyzes all Rust files in the specified path (file or directory).
-    pub fn check_path(&self, target_path: &Path) -> Result<DiagnosticReport, std::io::Error> {
-        if !target_path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Path '{}' does not exist", target_path.display()),
-            ));
-        }
-
+    /// Analyzes a specific list of Rust files belonging to the project at `project_dir`
+    /// using an explicitly provided `LintConfig`.
+    pub fn check_files_with_config(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+        config: &LintConfig,
+    ) -> Result<DiagnosticReport, std::io::Error> {
         let mut report = DiagnosticReport::default();
-        let files = discover_rust_files(target_path);
-
-        // If no explicit config was supplied, discover from target path
-        let discovered_cfg;
-        let config = if let Some(cfg) = &self.config {
-            cfg
-        } else {
-            discovered_cfg = LintConfig::discover_for_path(target_path);
-            &discovered_cfg
-        };
 
         // Report manifest-level configuration warnings once for the target path
-        let manifest_path =
-            find_cargo_toml(target_path).unwrap_or_else(|| target_path.to_path_buf());
+        let manifest_path = project_dir.join("Cargo.toml");
         for warning in config.warnings() {
             let rule = if warning.starts_with("Rule 'purist::")
                 || warning.starts_with("Rule 'opinionated::")
@@ -305,9 +293,8 @@ impl PuristEngine {
             );
         }
 
-        let mut config_cache: HashMap<PathBuf, LintConfig> = HashMap::new();
         let mut targets_scanned = 0;
-        for path in &files {
+        for path in files {
             let content = match fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(err) => {
@@ -324,16 +311,7 @@ impl PuristEngine {
             };
 
             targets_scanned += 1;
-            let file_config = if let Some(cfg) = &self.config {
-                cfg
-            } else {
-                let manifest_key = find_cargo_toml(path).unwrap_or_else(|| path.clone());
-                config_cache
-                    .entry(manifest_key)
-                    .or_insert_with(|| LintConfig::discover_for_path(path))
-            };
-
-            let file_report = self.check_source_internal(path, &content, Some(file_config), false);
+            let file_report = self.check_source_internal(path, &content, Some(config), false);
             for diag in file_report.diagnostics {
                 report.add(diag);
             }
@@ -341,6 +319,69 @@ impl PuristEngine {
 
         report.summary.targets_scanned = targets_scanned;
         Ok(report)
+    }
+
+    /// Analyzes a specific list of Rust files belonging to the project at `project_dir`.
+    pub fn check_files(
+        &self,
+        project_dir: &Path,
+        files: &[PathBuf],
+    ) -> Result<DiagnosticReport, std::io::Error> {
+        if let Some(cfg) = &self.config {
+            self.check_files_with_config(project_dir, files, cfg)
+        } else {
+            let manifest = CargoManifest::load(project_dir).map_err(|e| match e {
+                crate::PuristError::Io(err) => err,
+                other => std::io::Error::other(other.to_string()),
+            })?;
+            self.check_files_with_config(project_dir, files, manifest.lint_config())
+        }
+    }
+
+    /// Analyzes all Rust files in the specified path (file or directory).
+    ///
+    /// Requires a `Cargo.toml` in the directory (or enclosing workspace for a file).
+    pub fn check_path(&self, target_path: &Path) -> Result<DiagnosticReport, std::io::Error> {
+        if !target_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Path '{}' does not exist", target_path.display()),
+            ));
+        }
+
+        let project_dir = if target_path.is_file() {
+            target_path.parent().unwrap_or(target_path)
+        } else {
+            target_path
+        };
+
+        if let Some(cfg) = &self.config {
+            let files = if target_path.is_file() {
+                vec![target_path.to_path_buf()]
+            } else {
+                discover_project_files(project_dir).map_err(|e| match e {
+                    crate::PuristError::Io(err) => err,
+                    other => std::io::Error::other(other.to_string()),
+                })?
+            };
+            self.check_files_with_config(project_dir, &files, cfg)
+        } else {
+            let manifest = CargoManifest::load(project_dir).map_err(|e| match e {
+                crate::PuristError::Io(err) => err,
+                other => std::io::Error::other(other.to_string()),
+            })?;
+            let files = if target_path.is_file() {
+                vec![target_path.to_path_buf()]
+            } else {
+                discover_project_files_from_manifest(project_dir, &manifest).map_err(
+                    |e| match e {
+                        crate::PuristError::Io(err) => err,
+                        other => std::io::Error::other(other.to_string()),
+                    },
+                )?
+            };
+            self.check_files_with_config(project_dir, &files, manifest.lint_config())
+        }
     }
 }
 

@@ -20,7 +20,15 @@ cargo install purist
 Run Purist against your repository or workspace:
 
 ```bash
-purist --path .
+purist
+```
+
+By default, Purist analyzes the Cargo project in the current working directory (`.`), which must contain a `Cargo.toml`. Discovery is strictly focused on targets defined by the Cargo manifest (including all workspace members and child crates) with no directory-crawling fallbacks.
+
+To analyze a specific file within the workspace, use the `--path` option:
+
+```bash
+purist --path src/lib.rs
 ```
 
 To onboard an existing project without a massive upfront refactoring, use `--allow`. This runs all checks and automatically disables any triggered rules under `[lints.purist]` in `Cargo.toml` by setting them to `"allow"`, allowing you to adopt Purist immediately and re-enable/resolve rules incrementally:
@@ -32,7 +40,7 @@ purist --allow
 To output results as JSON:
 
 ```bash
-purist --path . --format json
+purist --format json
 ```
 
 ## Rules Enforced
