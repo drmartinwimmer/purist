@@ -4,6 +4,7 @@
 name = "purist"
 version = "0.4.0"
 edition = "2024"
+rust-version = "1.88.0"
 license = "MIT"
 repository = "https://github.com/drmartinwimmer/purist"
 description = "Fast purist AST linter for enforcing strict Rust code hygiene"

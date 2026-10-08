@@ -7,7 +7,7 @@
 [![Docs.rs](https://docs.rs/purist/badge.svg)](https://docs.rs/purist)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/drmartinwimmer/purist/blob/main/LICENSE)
 [![Built with Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
-[![MSRV: 1.85+](https://img.shields.io/badge/MSRV-1.85%2B-blue.svg?logo=rust)](https://www.rust-lang.org/)
+[![MSRV: 1.88+](https://img.shields.io/badge/MSRV-1.88%2B-blue.svg?logo=rust)](https://www.rust-lang.org/)
 
 ## Installation
 
