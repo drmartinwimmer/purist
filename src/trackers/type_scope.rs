@@ -1,9 +1,6 @@
-//! Scope tracker for enclosing data types, implementations, and variants.
+//! Scope tracker for enclosing data types, implementations, and variants using a stack.
 
 use super::clap_scope::is_cli_or_command_struct_name;
-use super::guard::RefScopeGuard;
-use std::cell::RefCell;
-use std::rc::Rc;
 use syn::Ident;
 
 /// The kind of enclosing data type or declaration.
@@ -18,17 +15,10 @@ pub enum ContainerKind {
     Impl(String),
 }
 
-/// Snapshot state of the enclosing type scope.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TypeScopeState {
-    pub current_container: Option<ContainerKind>,
-    pub current_enum: Option<String>,
-}
-
-/// Scope tracker that observes enclosing structs, enums, variants, and impl blocks.
+/// Scope tracker that observes enclosing structs, enums, variants, and impl blocks using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
 pub struct TypeScopeTracker {
-    state: Rc<RefCell<TypeScopeState>>,
+    stack: Vec<ContainerKind>,
 }
 
 impl TypeScopeTracker {
@@ -39,8 +29,7 @@ impl TypeScopeTracker {
 
     /// Formats a human-readable description of the current container (e.g. `struct 'Foo'` or `enum variant 'Bar::Baz'`).
     pub fn container_description(&self) -> Option<String> {
-        let state = self.state.borrow();
-        state.current_container.as_ref().map(|c| match c {
+        self.stack.last().map(|c| match c {
             ContainerKind::Struct(name) => format!("struct '{name}'"),
             ContainerKind::Enum(name) => format!("enum '{name}'"),
             ContainerKind::Variant {
@@ -52,77 +41,61 @@ impl TypeScopeTracker {
     }
 
     /// Returns the name of the current struct if inside a struct definition.
-    pub fn current_struct_name(&self) -> Option<String> {
-        self.state
-            .borrow()
-            .current_container
-            .as_ref()
-            .and_then(|c| match c {
-                ContainerKind::Struct(name) => Some(name.clone()),
-                _ => None,
-            })
+    pub fn current_struct_name(&self) -> Option<&str> {
+        self.stack.iter().rev().find_map(|c| match c {
+            ContainerKind::Struct(name) => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Returns the name of the current enum if inside an enum definition.
+    pub fn current_enum_name(&self) -> Option<&str> {
+        self.stack.iter().rev().find_map(|c| match c {
+            ContainerKind::Enum(name) => Some(name.as_str()),
+            _ => None,
+        })
     }
 
     /// Returns the name of the target type if inside an impl block.
-    pub fn current_impl_name(&self) -> Option<String> {
-        self.state
-            .borrow()
-            .current_container
-            .as_ref()
-            .and_then(|c| match c {
-                ContainerKind::Impl(name) => Some(name.clone()),
-                _ => None,
-            })
+    pub fn current_impl_name(&self) -> Option<&str> {
+        self.stack.iter().rev().find_map(|c| match c {
+            ContainerKind::Impl(name) => Some(name.as_str()),
+            _ => None,
+        })
     }
 
     /// Returns true if the current impl block targets a CLI command struct.
     pub fn is_cli_command(&self) -> bool {
         self.current_impl_name()
-            .is_some_and(|name| is_cli_or_command_struct_name(&name))
+            .is_some_and(is_cli_or_command_struct_name)
     }
 
-    /// Enters a struct scope and returns an RAII guard that restores previous scope on drop.
-    pub fn enter_struct(&self, ident: &Ident) -> RefScopeGuard<TypeScopeState> {
-        let mut state = self.state.borrow_mut();
-        let prev = state.clone();
-        state.current_container = Some(ContainerKind::Struct(ident.to_string()));
-        drop(state);
-        RefScopeGuard::new(Rc::clone(&self.state), prev)
+    /// Pushes a struct scope onto the stack.
+    pub fn push_struct(&mut self, ident: &Ident) {
+        self.stack.push(ContainerKind::Struct(ident.to_string()));
     }
 
-    /// Enters an enum scope and returns an RAII guard that restores previous scope on drop.
-    pub fn enter_enum(&self, ident: &Ident) -> RefScopeGuard<TypeScopeState> {
-        let mut state = self.state.borrow_mut();
-        let prev = state.clone();
-        let enum_name = ident.to_string();
-        state.current_container = Some(ContainerKind::Enum(enum_name.clone()));
-        state.current_enum = Some(enum_name);
-        drop(state);
-        RefScopeGuard::new(Rc::clone(&self.state), prev)
+    /// Pushes an enum scope onto the stack.
+    pub fn push_enum(&mut self, ident: &Ident) {
+        self.stack.push(ContainerKind::Enum(ident.to_string()));
     }
 
-    /// Enters an enum variant scope and returns an RAII guard that restores previous scope on drop.
-    pub fn enter_variant(&self, ident: &Ident) -> RefScopeGuard<TypeScopeState> {
-        let mut state = self.state.borrow_mut();
-        let prev = state.clone();
-        let enum_name = state
-            .current_enum
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
-        state.current_container = Some(ContainerKind::Variant {
+    /// Pushes an enum variant scope onto the stack.
+    pub fn push_variant(&mut self, ident: &Ident) {
+        let enum_name = self.current_enum_name().unwrap_or("unknown").to_string();
+        self.stack.push(ContainerKind::Variant {
             enum_name,
             variant_name: ident.to_string(),
         });
-        drop(state);
-        RefScopeGuard::new(Rc::clone(&self.state), prev)
     }
 
-    /// Enters an impl scope and returns an RAII guard that restores previous scope on drop.
-    pub fn enter_impl(&self, name: String) -> RefScopeGuard<TypeScopeState> {
-        let mut state = self.state.borrow_mut();
-        let prev = state.clone();
-        state.current_container = Some(ContainerKind::Impl(name));
-        drop(state);
-        RefScopeGuard::new(Rc::clone(&self.state), prev)
+    /// Pushes an impl scope onto the stack.
+    pub fn push_impl(&mut self, name: String) {
+        self.stack.push(ContainerKind::Impl(name));
+    }
+
+    /// Pops the active scope from the stack.
+    pub fn pop(&mut self) -> Option<ContainerKind> {
+        self.stack.pop()
     }
 }

@@ -83,52 +83,58 @@ struct NegativeBoolVisitor<'a> {
 
 impl<'ast> Visit<'ast> for NegativeBoolVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.test_scope.push_fn(&impl_fn.attrs);
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 
     fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
-        let _guard = self.type_scope.enter_struct(&item_struct.ident);
+        self.type_scope.push_struct(&item_struct.ident);
         visit::visit_item_struct(self, item_struct);
+        self.type_scope.pop();
     }
 
     fn visit_item_enum(&mut self, item_enum: &'ast syn::ItemEnum) {
-        let _guard = self.type_scope.enter_enum(&item_enum.ident);
+        self.type_scope.push_enum(&item_enum.ident);
         visit::visit_item_enum(self, item_enum);
+        self.type_scope.pop();
     }
 
     fn visit_variant(&mut self, variant: &'ast syn::Variant) {
-        let _guard = self.type_scope.enter_variant(&variant.ident);
+        self.type_scope.push_variant(&variant.ident);
         visit::visit_variant(self, variant);
+        self.type_scope.pop();
     }
 
     fn visit_field(&mut self, field: &'ast syn::Field) {
         if !self.test_scope.is_in_test() {
-            self.check_field(field);
+            self.check_field_negative_bool(field);
         }
         visit::visit_field(self, field);
     }
 
     fn visit_local(&mut self, local: &'ast syn::Local) {
         if !self.test_scope.is_in_test() {
-            self.check_local(local);
+            self.check_local_binding_negative_bool(local);
         }
         visit::visit_local(self, local);
     }
 }
 
 impl NegativeBoolVisitor<'_> {
-    fn check_field(&mut self, field: &syn::Field) {
+    fn check_field_negative_bool(&mut self, field: &syn::Field) {
         let Some(ident) = &field.ident else {
             return;
         };
@@ -159,7 +165,7 @@ impl NegativeBoolVisitor<'_> {
         }
     }
 
-    fn check_local(&mut self, local: &syn::Local) {
+    fn check_local_binding_negative_bool(&mut self, local: &syn::Local) {
         let (pat_ident, explicit_ty) = match &local.pat {
             syn::Pat::Ident(pat_ident) => (pat_ident, None),
             syn::Pat::Type(pat_type) => {

@@ -109,48 +109,55 @@ struct ClapEncapsulationVisitor<'a> {
 
 impl<'ast> Visit<'ast> for ClapEncapsulationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
-        let _guard = self.clap_scope.enter_struct(item_struct);
+        self.clap_scope.push_struct(item_struct);
 
         if !self.test_scope.is_in_test() && self.clap_scope.is_in_clap_struct() {
-            let struct_name = item_struct.ident.to_string();
-            // Check 2: Command structs should have an associated run or execute method
-            if is_command_struct_name(&struct_name)
-                && !self.struct_has_run_method.contains(&struct_name)
-            {
-                let span = self.ctx.to_span(item_struct.ident.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::clap_struct_encapsulation",
-                        Severity::Warning,
-                        format!(
-                            "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
-                );
-            }
+            self.check_clap_struct_missing_run_method(item_struct);
         }
 
         visit::visit_item_struct(self, item_struct);
+        self.clap_scope.pop();
     }
 
     fn visit_field(&mut self, field: &'ast syn::Field) {
-        // Check 1: Struct fields must remain private unless marked with flatten
-        if !self.test_scope.is_in_test()
-            && self.clap_scope.is_in_clap_struct()
-            && matches!(field.vis, syn::Visibility::Public(_))
-            && !is_flattened_field(field)
+        if !self.test_scope.is_in_test() && self.clap_scope.is_in_clap_struct() {
+            self.check_clap_field_public_visibility(field);
+        }
+
+        visit::visit_field(self, field);
+    }
+}
+
+impl ClapEncapsulationVisitor<'_> {
+    fn check_clap_struct_missing_run_method(&mut self, item_struct: &syn::ItemStruct) {
+        let struct_name = item_struct.ident.to_string();
+        if is_command_struct_name(&struct_name)
+            && !self.struct_has_run_method.contains(&struct_name)
         {
-            let struct_name = self
-                .clap_scope
-                .current_struct_name()
-                .unwrap_or_else(|| "unknown".to_string());
+            let span = self.ctx.to_span(item_struct.ident.span());
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::clap_struct_encapsulation",
+                    Severity::Warning,
+                    format!(
+                        "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
+            );
+        }
+    }
+
+    fn check_clap_field_public_visibility(&mut self, field: &syn::Field) {
+        if matches!(field.vis, syn::Visibility::Public(_)) && !is_flattened_field(field) {
+            let struct_name = self.clap_scope.current_struct_name().unwrap_or("unknown");
             let field_name = field
                 .ident
                 .as_ref()
@@ -169,8 +176,6 @@ impl<'ast> Visit<'ast> for ClapEncapsulationVisitor<'_> {
                 .with_suggested_fix("Make field private and encapsulate logic within struct methods."),
             );
         }
-
-        visit::visit_field(self, field);
     }
 }
 

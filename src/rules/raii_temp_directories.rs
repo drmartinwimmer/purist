@@ -30,9 +30,8 @@
 //! }
 //! ```
 
-use super::common::{
-    TestScopeTracker, is_drop_trait_impl, path_ends_with_ident, path_ends_with_segments,
-};
+use super::common::{TestScopeTracker, is_drop_trait_impl};
+use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use crate::trackers::FlagScopeTracker;
@@ -71,59 +70,53 @@ struct TempDirVisitor<'a> {
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks entry into and exit from `Drop` trait implementations.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        let _guard = self.drop_scope.enter(is_drop_trait_impl(item_impl));
+        self.drop_scope.push(is_drop_trait_impl(item_impl));
         visit::visit_item_impl(self, item_impl);
+        self.drop_scope.pop();
     }
 
     /// Tracks entry into and exit from `drop` method implementations.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        let _guard = self.drop_scope.enter(method.sig.ident == "drop");
+        self.drop_scope.push(method.sig.ident == "drop");
         visit::visit_impl_item_fn(self, method);
+        self.drop_scope.pop();
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function calls for manual `fs::remove_dir_all` invocations.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if let Some(diag) = check_remove_dir_all_call(
-            self.ctx,
-            call,
-            self.test_scope.is_in_test(),
-            self.drop_scope.is_active(),
-        ) {
-            self.diagnostics.push(diag);
-        }
-
+        self.check_call_remove_dir_all_in_test(call);
         visit::visit_expr_call(self, call);
     }
 }
 
-/// Emits a diagnostic if `fs::remove_dir_all` is called manually in a test scope outside of `Drop`.
-fn check_remove_dir_all_call(
-    ctx: &LintContext<'_>,
-    call: &syn::ExprCall,
-    in_test_scope: bool,
-    in_drop_scope: bool,
-) -> Option<Diagnostic> {
-    if !in_test_scope || in_drop_scope {
-        return None;
-    }
+impl TempDirVisitor<'_> {
+    /// Emits a diagnostic if `fs::remove_dir_all` is called manually in a test scope outside of `Drop`.
+    fn check_call_remove_dir_all_in_test(&mut self, call: &syn::ExprCall) {
+        if !self.test_scope.is_in_test() || self.drop_scope.is_active() {
+            return;
+        }
 
-    if let syn::Expr::Path(expr_path) = &*call.func
-        && is_remove_dir_all_path(&expr_path.path)
-    {
-        let span = ctx.to_span(call.span());
-        Some(
+        const TARGETS: &[&[&str]] = &[&["fs", "remove_dir_all"], &["remove_dir_all"]];
+        if !check_call_matches_path(call, TARGETS) {
+            return;
+        }
+
+        let span = self.ctx.to_span(call.span());
+        self.diagnostics.push(
             Diagnostic::new(
                 "purist::raii_temp_directories",
                 Severity::Warning,
@@ -131,16 +124,8 @@ fn check_remove_dir_all_call(
             )
             .with_span(span)
             .with_suggested_fix("Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."),
-        )
-    } else {
-        None
+        );
     }
-}
-
-/// Checks whether a path refers to `remove_dir_all` or `fs::remove_dir_all`.
-fn is_remove_dir_all_path(path: &syn::Path) -> bool {
-    path_ends_with_segments(path, &["fs", "remove_dir_all"])
-        || (path.segments.len() == 1 && path_ends_with_ident(path, "remove_dir_all"))
 }
 
 #[cfg(test)]

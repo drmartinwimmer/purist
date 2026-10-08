@@ -23,11 +23,10 @@
 //! let file = std::fs::read_to_string(root.join("config/settings.toml"))?;
 //! ```
 
-use super::common::{TestScopeTracker, path_ends_with_segments};
+use super::common::TestScopeTracker;
+use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use syn::punctuated::Punctuated;
-use syn::token::Comma;
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
@@ -64,108 +63,91 @@ struct PathVisitor<'a> {
 impl<'ast> Visit<'ast> for PathVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects function calls (such as `Path::new`, `File::open`) for unanchored literals.
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-        if !self.test_scope.is_in_test()
-            && let Some(diag) = check_call_for_unanchored_path(self.ctx, &call.func, &call.args)
-        {
-            self.diagnostics.push(diag);
+        if !self.test_scope.is_in_test() {
+            self.check_call_unanchored_path_literal(call);
         }
         visit::visit_expr_call(self, call);
     }
 
     /// Inspects method calls (such as `.join(...)`) for unanchored literals.
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-        if !self.test_scope.is_in_test()
-            && let Some(diag) = check_method_call_for_unanchored_path(self.ctx, call)
-        {
-            self.diagnostics.push(diag);
+        if !self.test_scope.is_in_test() {
+            self.check_method_call_unanchored_path_literal(call);
         }
         visit::visit_expr_method_call(self, call);
     }
 }
 
-/// Checks if a call expression is a targeted path or fs call with an unanchored path literal.
-fn check_call_for_unanchored_path(
-    ctx: &LintContext<'_>,
-    func: &syn::Expr,
-    args: &Punctuated<syn::Expr, Comma>,
-) -> Option<Diagnostic> {
-    let path = match func {
-        syn::Expr::Path(expr_path) => &expr_path.path,
-        _ => return None,
-    };
+impl PathVisitor<'_> {
+    /// Checks if a call expression is a targeted path or fs call with an unanchored path literal.
+    fn check_call_unanchored_path_literal(&mut self, call: &syn::ExprCall) {
+        const TARGETS: &[&[&str]] = &[
+            &["Path", "new"],
+            &["PathBuf", "from"],
+            &["fs", "read"],
+            &["fs", "read_to_string"],
+            &["fs", "write"],
+            &["File", "open"],
+            &["File", "create"],
+        ];
 
-    const TARGETS: &[&[&str]] = &[
-        &["Path", "new"],
-        &["PathBuf", "from"],
-        &["fs", "read"],
-        &["fs", "read_to_string"],
-        &["fs", "write"],
-        &["File", "open"],
-        &["File", "create"],
-    ];
+        if !check_call_matches_path(call, TARGETS) {
+            return;
+        }
 
-    if !TARGETS
-        .iter()
-        .any(|target| path_ends_with_segments(path, target))
-    {
-        return None;
-    }
-
-    let first_arg = args.first()?;
-    check_expr_for_unanchored_path(ctx, first_arg)
-}
-
-/// Checks if a method call (e.g. `join`) has an unanchored path receiver.
-fn check_method_call_for_unanchored_path(
-    ctx: &LintContext<'_>,
-    call: &syn::ExprMethodCall,
-) -> Option<Diagnostic> {
-    if call.method == "join" {
-        check_expr_for_unanchored_path(ctx, &call.receiver)
-    } else {
-        None
-    }
-}
-
-/// Checks whether an expression is a string literal containing an unanchored relative path.
-fn check_expr_for_unanchored_path(ctx: &LintContext<'_>, expr: &syn::Expr) -> Option<Diagnostic> {
-    if let syn::Expr::Lit(syn::ExprLit {
-        lit: syn::Lit::Str(lit_str),
-        ..
-    }) = expr
-    {
-        let val = lit_str.value();
-        if is_unanchored_relative_path(&val) {
-            let span = ctx.to_span(lit_str.span());
-            return Some(
-                Diagnostic::new(
-                    "purist::path_resolution",
-                    Severity::Warning,
-                    format!(
-                        "Unanchored relative path '{val}' in '{}'. Relative paths break when executed outside the crate root.",
-                        ctx.file_path().display()
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Anchor path using 'Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"{val}\")' or workspace root."
-                )),
-            );
+        if let Some(first_arg) = call.args.first() {
+            self.check_expr_unanchored_path_literal(first_arg);
         }
     }
-    None
+
+    /// Checks if a method call (e.g. `join`) has an unanchored path receiver.
+    fn check_method_call_unanchored_path_literal(&mut self, call: &syn::ExprMethodCall) {
+        if call.method == "join" {
+            self.check_expr_unanchored_path_literal(&call.receiver);
+        }
+    }
+
+    /// Checks whether an expression is a string literal containing an unanchored relative path.
+    fn check_expr_unanchored_path_literal(&mut self, expr: &syn::Expr) {
+        if let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(lit_str),
+            ..
+        }) = expr
+        {
+            let val = lit_str.value();
+            if is_unanchored_relative_path(&val) {
+                let span = self.ctx.to_span(lit_str.span());
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        "purist::path_resolution",
+                        Severity::Warning,
+                        format!(
+                            "Unanchored relative path '{val}' in '{}'. Relative paths break when executed outside the crate root.",
+                            self.ctx.file_path().display()
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix(format!(
+                        "Anchor path using 'Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"{val}\")' or workspace root."
+                    )),
+                );
+            }
+        }
+    }
 }
 
 /// Checks whether a string literal is an unanchored relative path.

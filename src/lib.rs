@@ -1,4 +1,5 @@
 pub mod cargo;
+pub mod checkers;
 pub mod diagnostics;
 pub mod discovery;
 pub mod engine;
@@ -9,6 +10,12 @@ pub mod rules;
 pub mod trackers;
 
 pub use cargo::{LintConfig, OpinionatedLintsConfig, PuristLintsConfig, RuleLevel};
+pub use checkers::{
+    ReceiverKind, check_call_matches_path, check_expr_matches_path, check_fn_receiver,
+    check_ident_has_negative_name, check_ident_has_prefix, check_ident_has_test_prefix,
+    check_macro_matches, check_method_call_matches_name, check_path_matches,
+    extract_fn_return_type, extract_result_error_type,
+};
 use clap::Args;
 pub use diagnostics::{Diagnostic, DiagnosticReport, ReportSummary, Severity, Span};
 pub use engine::{LintContext, OpinionatedEngine, PuristEngine, Rule};
@@ -17,7 +24,7 @@ pub use reporter::{OutputFormat, render_report, render_report_with_options};
 pub use rules::default_rules;
 use std::path::{Path, PathBuf};
 pub use trackers::{
-    ClapScopeTracker, RefScopeGuard, ScopeGuard, TestScopeTracker, TypeScopeTracker,
+    ClapScopeTracker, DepthTracker, FlagScopeTracker, TestScopeTracker, TypeScopeTracker,
 };
 
 /// Error type for purist linter execution.

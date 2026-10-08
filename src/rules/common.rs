@@ -118,7 +118,7 @@ pub fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
     })
 }
 
-pub use crate::trackers::{ScopeGuard, TestScopeState, TestScopeTracker};
+pub use crate::trackers::{TestScopeState, TestScopeTracker};
 
 /// Checks whether a type is `bool` or `Option<bool>`.
 pub fn is_bool_type(ty: &Type) -> bool {
@@ -236,23 +236,21 @@ mod tests {
 
     #[googletest::test]
     fn track_test_scope_transitions_correctly() -> Result<(), Box<dyn std::error::Error>> {
-        let tracker = TestScopeTracker::new(false);
+        let mut tracker = TestScopeTracker::new(false);
         assert_that!(tracker.is_in_test(), eq(false));
 
         let test_mod: syn::ItemMod = syn::parse_str("#[cfg(test)] mod tests {}")?;
-        {
-            let _guard = tracker.enter_mod(&test_mod.attrs);
-            assert_that!(tracker.is_in_test(), eq(true));
-            assert_that!(tracker.is_in_test_module(), eq(true));
-        }
+        tracker.push_mod(&test_mod.attrs);
+        assert_that!(tracker.is_in_test(), eq(true));
+        assert_that!(tracker.is_in_test_module(), eq(true));
+        tracker.pop();
         assert_that!(tracker.is_in_test(), eq(false));
 
         let test_fn: syn::ItemFn = syn::parse_str("#[test] fn check() {}")?;
-        {
-            let _guard = tracker.enter_fn(&test_fn.attrs);
-            assert_that!(tracker.is_in_test(), eq(true));
-            assert_that!(tracker.is_in_test_fn(), eq(true));
-        }
+        tracker.push_fn(&test_fn.attrs);
+        assert_that!(tracker.is_in_test(), eq(true));
+        assert_that!(tracker.is_in_test_fn(), eq(true));
+        tracker.pop();
         assert_that!(tracker.is_in_test(), eq(false));
         Ok(())
     }

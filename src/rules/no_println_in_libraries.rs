@@ -33,7 +33,8 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, extract_type_ident, macro_name, path_last_ident};
+use super::common::{TestScopeTracker, extract_type_ident, path_last_ident};
+use crate::checkers::check_macro_matches;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use crate::trackers::FlagScopeTracker;
@@ -122,75 +123,69 @@ struct PrintlnVisitor<'a> {
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Tracks whether traversal is inside an impl block for a CLI command struct.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        let _guard = self.impl_is_cli.enter(is_cli_impl(item_impl));
+        self.impl_is_cli.push(is_cli_impl(item_impl));
         visit::visit_item_impl(self, item_impl);
+        self.impl_is_cli.pop();
     }
 
     /// Tracks entry into methods, noting whether the method is a CLI runner (`run`, `execute`) or a test.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        let _guard_test = self.test_scope.enter_fn(&method.attrs);
+        self.test_scope.push_fn(&method.attrs);
         let is_runner = self.impl_is_cli.is_active() && is_execution_method(&method.sig.ident);
-        let _guard_runner = self.runner_scope.enter(is_runner);
+        self.runner_scope.push(is_runner);
 
         visit::visit_impl_item_fn(self, method);
+
+        self.runner_scope.pop();
+        self.test_scope.pop();
     }
 
     /// Tracks entry into free functions, updating test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        let _guard = self.test_scope.enter_fn(&item_fn.attrs);
+        self.test_scope.push_fn(&item_fn.attrs);
         visit::visit_item_fn(self, item_fn);
+        self.test_scope.pop();
     }
 
     /// Inspects macro calls and flags `println!` or `eprintln!` in library code outside allowed scopes.
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if let Some(diag) = check_print_macro(
-            self.ctx,
-            self.test_scope.is_in_test(),
-            self.runner_scope.is_active(),
-            mac,
-        ) {
-            self.diagnostics.push(diag);
-        }
-
+        self.check_macro_println_in_library(mac);
         visit::visit_macro(self, mac);
     }
 }
 
-/// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
-fn check_print_macro(
-    ctx: &LintContext<'_>,
-    in_test_scope: bool,
-    in_cli_runner_scope: bool,
-    mac: &syn::Macro,
-) -> Option<Diagnostic> {
-    if in_test_scope || in_cli_runner_scope {
-        return None;
+impl PrintlnVisitor<'_> {
+    /// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
+    fn check_macro_println_in_library(&mut self, mac: &syn::Macro) {
+        if self.test_scope.is_in_test() || self.runner_scope.is_active() {
+            return;
+        }
+
+        const TARGETS: &[&str] = &["println", "eprintln"];
+        let Some(name) = check_macro_matches(mac, TARGETS) else {
+            return;
+        };
+
+        let span = self.ctx.to_span(mac.path.span());
+        self.diagnostics.push(
+            Diagnostic::new(
+                "purist::no_println_in_libraries",
+                Severity::Warning,
+                format!(
+                    "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
+                ),
+            )
+            .with_span(span)
+            .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
+        );
     }
-
-    let name = macro_name(mac)?.to_string();
-
-    if name != "println" && name != "eprintln" {
-        return None;
-    }
-
-    let span = ctx.to_span(mac.path.span());
-    Some(
-        Diagnostic::new(
-            "purist::no_println_in_libraries",
-            Severity::Warning,
-            format!(
-                "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
-    )
 }
 
 #[cfg(test)]

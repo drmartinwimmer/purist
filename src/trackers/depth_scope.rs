@@ -1,13 +1,10 @@
-//! Scope trackers for numeric depth and boolean flags.
+//! Scope trackers for numeric depth and boolean flags using stacks.
 
-use super::guard::ScopeGuard;
-use std::cell::Cell;
-use std::rc::Rc;
-
-/// RAII tracker for measuring nesting depth during AST traversal.
+/// Tracker for measuring nesting depth during AST traversal.
 #[derive(Debug, Clone, Default)]
 pub struct DepthTracker {
-    depth: Rc<Cell<usize>>,
+    depth: usize,
+    stack: Vec<usize>,
 }
 
 impl DepthTracker {
@@ -18,29 +15,38 @@ impl DepthTracker {
 
     /// Returns the current nesting depth.
     pub fn get(&self) -> usize {
-        self.depth.get()
+        self.depth
     }
 
-    /// Resets depth to 0 (e.g. upon entering a function or closure boundary)
-    /// and returns an RAII guard that restores the previous depth on drop.
-    pub fn reset(&self) -> ScopeGuard<usize> {
-        let prev = self.depth.get();
-        self.depth.set(0);
-        ScopeGuard::new(Rc::clone(&self.depth), prev)
+    /// Increments the current nesting depth.
+    pub fn enter(&mut self) -> usize {
+        self.depth += 1;
+        self.depth
     }
 
-    /// Increments nesting depth by 1 and returns an RAII guard that restores the previous depth on drop.
-    pub fn enter(&self) -> ScopeGuard<usize> {
-        let prev = self.depth.get();
-        self.depth.set(prev + 1);
-        ScopeGuard::new(Rc::clone(&self.depth), prev)
+    /// Decrements the current nesting depth.
+    pub fn exit(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    /// Pushes the current depth onto a stack and resets depth to 0 (e.g. upon entering a function or closure).
+    pub fn push_root(&mut self) {
+        self.stack.push(self.depth);
+        self.depth = 0;
+    }
+
+    /// Pops the previous depth from the stack when leaving a function or closure.
+    pub fn pop_root(&mut self) {
+        if let Some(prev) = self.stack.pop() {
+            self.depth = prev;
+        }
     }
 }
 
-/// RAII tracker for boolean flag scopes during AST traversal.
+/// Tracker for boolean flag scopes during AST traversal using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
 pub struct FlagScopeTracker {
-    state: Rc<Cell<bool>>,
+    stack: Vec<bool>,
 }
 
 impl FlagScopeTracker {
@@ -51,15 +57,17 @@ impl FlagScopeTracker {
 
     /// Returns true if the flag scope is currently active.
     pub fn is_active(&self) -> bool {
-        self.state.get()
+        self.stack.last().copied().unwrap_or(false)
     }
 
-    /// Activates the flag if `condition` is true, returning an RAII guard that restores previous state on drop.
-    pub fn enter(&self, condition: bool) -> ScopeGuard<bool> {
-        let prev = self.state.get();
-        if condition {
-            self.state.set(true);
-        }
-        ScopeGuard::new(Rc::clone(&self.state), prev)
+    /// Pushes a new flag state onto the stack. If `condition` is true or if already active, stays active.
+    pub fn push(&mut self, condition: bool) {
+        let next = condition || self.is_active();
+        self.stack.push(next);
+    }
+
+    /// Pops the active flag scope from the stack.
+    pub fn pop(&mut self) -> Option<bool> {
+        self.stack.pop()
     }
 }

@@ -26,6 +26,7 @@
 //! ```
 
 use super::common::{TestScopeTracker, has_test_attr};
+use crate::checkers::check_ident_has_test_prefix;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
@@ -60,48 +61,40 @@ struct TestPrefixVisitor<'a> {
 impl<'ast> Visit<'ast> for TestPrefixVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     /// Checks top-level functions for forbidden test prefixes when in test scope.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.check_fn_prefix(&item_fn.attrs, &item_fn.sig.ident);
+        self.check_test_fn_redundant_prefix(&item_fn.attrs, &item_fn.sig.ident);
         visit::visit_item_fn(self, item_fn);
     }
 
     /// Checks impl-level functions for forbidden test prefixes when in test scope.
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.check_fn_prefix(&impl_fn.attrs, &impl_fn.sig.ident);
+        self.check_test_fn_redundant_prefix(&impl_fn.attrs, &impl_fn.sig.ident);
         visit::visit_impl_item_fn(self, impl_fn);
     }
 }
 
 impl TestPrefixVisitor<'_> {
-    fn check_fn_prefix(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
+    fn check_test_fn_redundant_prefix(&mut self, attrs: &[syn::Attribute], ident: &syn::Ident) {
         let is_test = has_test_attr(attrs) || self.test_scope.is_in_test_module();
-        if is_test && let Some(diag) = check_function_name(self.ctx, ident) {
+        if is_test && let Some(diag) = check_fn_ident_forbidden_test_prefix(self.ctx, ident) {
             self.diagnostics.push(diag);
         }
     }
 }
 
-/// Determines if a function name begins with a forbidden `test_` or `test` prefix.
-fn has_forbidden_prefix(name: &str) -> bool {
-    name.starts_with("test_")
-        || name == "test"
-        || (name.starts_with("test")
-            && name
-                .chars()
-                .nth(4)
-                .map(|c| c.is_ascii_uppercase() || c == '_')
-                .unwrap_or(false))
-}
-
 /// Inspects a function identifier and attributes, returning a diagnostic if it has a redundant test prefix.
-fn check_function_name(ctx: &LintContext<'_>, ident: &syn::Ident) -> Option<Diagnostic> {
+fn check_fn_ident_forbidden_test_prefix(
+    ctx: &LintContext<'_>,
+    ident: &syn::Ident,
+) -> Option<Diagnostic> {
     let name = ident.to_string();
-    if !has_forbidden_prefix(&name) {
+    if !check_ident_has_test_prefix(&name) {
         return None;
     }
 

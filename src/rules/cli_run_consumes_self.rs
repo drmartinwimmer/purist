@@ -41,6 +41,7 @@
 //! ```
 
 use super::common::{TestScopeTracker, extract_type_ident};
+use crate::checkers::{ReceiverKind, check_fn_receiver};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use crate::trackers::{
@@ -83,26 +84,31 @@ struct CliRunVisitor<'a> {
 
 impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        let _guard = self.test_scope.enter_mod(&item_mod.attrs);
+        self.test_scope.push_mod(&item_mod.attrs);
         visit::visit_item_mod(self, item_mod);
+        self.test_scope.pop();
     }
 
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        let name = extract_type_ident(&item_impl.self_ty).map(|i| i.to_string());
-        let _guard = name.map(|n| self.type_scope.enter_impl(n));
-        visit::visit_item_impl(self, item_impl);
+        if let Some(ident) = extract_type_ident(&item_impl.self_ty) {
+            self.type_scope.push_impl(ident.to_string());
+            visit::visit_item_impl(self, item_impl);
+            self.type_scope.pop();
+        } else {
+            visit::visit_item_impl(self, item_impl);
+        }
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        let _guard = self.test_scope.enter_fn(&impl_fn.attrs);
+        self.test_scope.push_fn(&impl_fn.attrs);
 
         if !self.test_scope.is_in_test()
             && let Some(struct_name) = self.type_scope.current_impl_name()
-            && is_cli_or_command_struct_name(&struct_name)
-            && let Some(diag) = check_method_receiver(
+            && is_cli_or_command_struct_name(struct_name)
+            && let Some(diag) = check_method_receiver_consumes_self(
                 self.ctx,
                 "purist::cli_run_consumes_self",
-                &struct_name,
+                struct_name,
                 impl_fn,
             )
         {
@@ -110,11 +116,12 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
         }
 
         visit::visit_impl_item_fn(self, impl_fn);
+        self.test_scope.pop();
     }
 }
 
 /// Checks whether an implementation method on a command struct incorrectly borrows `&self`.
-fn check_method_receiver(
+fn check_method_receiver_consumes_self(
     ctx: &LintContext<'_>,
     rule_name: &'static str,
     struct_name: &str,
@@ -125,16 +132,12 @@ fn check_method_receiver(
         return None;
     }
 
-    let first_arg = impl_fn.sig.inputs.first()?;
-    let syn::FnArg::Receiver(recv) = first_arg else {
-        return None;
-    };
-
-    if !matches!(recv.kind, syn::ReceiverKind::Reference(..)) {
+    let receiver = check_fn_receiver(&impl_fn.sig);
+    if !matches!(receiver, ReceiverKind::Ref | ReceiverKind::RefMut) {
         return None;
     }
 
-    let span = ctx.to_span(recv.span());
+    let span = ctx.to_span(impl_fn.sig.inputs.first()?.span());
     Some(
         Diagnostic::new(
             rule_name,
