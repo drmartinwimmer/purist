@@ -59,10 +59,15 @@ impl<'a> LintContext<'a> {
 
     /// Returns true if the file is in a `tests/` directory or has a test suffix.
     pub fn is_test_file(&self) -> bool {
-        let path_str = self.file_path.to_string_lossy();
-        path_str.contains("/tests/")
-            || path_str.ends_with("_test.rs")
-            || path_str.ends_with("tests.rs")
+        self.file_path
+            .components()
+            .any(|c| c.as_os_str() == "tests")
+            || self.file_path.ends_with("tests.rs")
+            || self
+                .file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_test.rs"))
     }
 
     /// Converts a `proc_macro2::Span` into a `crate::diagnostics::Span`.

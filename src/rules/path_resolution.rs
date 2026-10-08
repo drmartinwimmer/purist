@@ -23,7 +23,7 @@
 //! let file = std::fs::read_to_string(root.join("config/settings.toml"))?;
 //! ```
 
-use super::common::TestScopeTracker;
+use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
@@ -45,7 +45,7 @@ impl Rule for PathResolutionRule {
         let mut visitor = PathVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -54,25 +54,26 @@ impl Rule for PathResolutionRule {
 }
 
 /// Visitor tracking test scopes and checking path constructor and filesystem calls.
+#[derive(WithTestScope)]
 struct PathVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for PathVisitor<'_> {
     /// Tracks entry into and exit from `#[cfg(test)]` modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Tracks entry into and exit from `#[test]` functions.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Inspects function calls (such as `Path::new`, `File::open`) for unanchored literals.

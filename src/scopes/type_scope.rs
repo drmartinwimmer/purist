@@ -1,6 +1,7 @@
 //! Scope tracker for enclosing data types, implementations, and variants using a stack.
 
 use super::clap_scope::is_cli_or_command_struct_name;
+use super::guard::run_with_scope;
 use syn::Ident;
 
 /// The kind of enclosing data type or declaration.
@@ -17,11 +18,11 @@ pub enum ContainerKind {
 
 /// Scope tracker that observes enclosing structs, enums, variants, and impl blocks using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
-pub struct TypeScopeTracker {
+pub struct TypeScope {
     stack: Vec<ContainerKind>,
 }
 
-impl TypeScopeTracker {
+impl TypeScope {
     /// Creates a new type scope tracker.
     pub fn new() -> Self {
         Self::default()
@@ -97,5 +98,125 @@ impl TypeScopeTracker {
     /// Pops the active scope from the stack.
     pub fn pop(&mut self) -> Option<ContainerKind> {
         self.stack.pop()
+    }
+
+    /// Executes a closure within an entered struct scope.
+    pub fn with_struct<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_struct(ident),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+
+    /// Executes a closure within an entered enum scope.
+    pub fn with_enum<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_enum(ident),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+
+    /// Executes a closure within an entered enum variant scope.
+    pub fn with_variant<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_variant(ident),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+
+    /// Executes a closure within an entered impl scope.
+    pub fn with_impl<R>(&mut self, name: String, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |t| t.push_impl(name),
+            |t| {
+                t.pop();
+            },
+            f,
+        )
+    }
+}
+
+/// Trait for visitor types that hold a [`TypeScope`], providing scoped closure methods.
+pub trait WithTypeScope {
+    /// Returns a mutable reference to the underlying type scope.
+    fn type_scope_mut(&mut self) -> &mut TypeScope;
+
+    /// Runs a closure within an entered struct scope.
+    fn with_type_struct<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.type_scope_mut().push_struct(ident),
+            |v| {
+                v.type_scope_mut().pop();
+            },
+            f,
+        )
+    }
+
+    /// Runs a closure within an entered enum scope.
+    fn with_type_enum<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.type_scope_mut().push_enum(ident),
+            |v| {
+                v.type_scope_mut().pop();
+            },
+            f,
+        )
+    }
+
+    /// Runs a closure within an entered enum variant scope.
+    fn with_type_variant<R>(&mut self, ident: &Ident, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.type_scope_mut().push_variant(ident),
+            |v| {
+                v.type_scope_mut().pop();
+            },
+            f,
+        )
+    }
+
+    /// Runs a closure within an entered impl scope.
+    fn with_type_impl<R>(&mut self, name: String, f: impl FnOnce(&mut Self) -> R) -> R
+    where
+        Self: Sized,
+    {
+        run_with_scope(
+            self,
+            |v| v.type_scope_mut().push_impl(name),
+            |v| {
+                v.type_scope_mut().pop();
+            },
+            f,
+        )
+    }
+}
+
+impl WithTypeScope for TypeScope {
+    fn type_scope_mut(&mut self) -> &mut TypeScope {
+        self
     }
 }

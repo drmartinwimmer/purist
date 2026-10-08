@@ -33,11 +33,11 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, extract_type_ident, path_last_ident};
+use super::common::{TestScope, WithTestScope, extract_type_ident, path_last_ident};
 use crate::checkers::check_macro_matches;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::FlagScopeTracker;
+use crate::scopes::{FlagScope, run_with_scope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -57,9 +57,9 @@ impl Rule for NoPrintlnInLibrariesRule {
         let mut visitor = PrintlnVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            impl_is_cli: FlagScopeTracker::new(),
-            runner_scope: FlagScopeTracker::new(),
+            test_scope: TestScope::new(ctx.is_test_file()),
+            impl_is_cli: FlagScope::new(),
+            runner_scope: FlagScope::new(),
         };
 
         visitor.visit_file(file);
@@ -107,51 +107,75 @@ fn is_execution_method(ident: &syn::Ident) -> bool {
 }
 
 /// Visitor that inspects macro invocations and flags `println!` or `eprintln!` in library contexts.
+#[derive(WithTestScope)]
 struct PrintlnVisitor<'a> {
     /// Lint context containing file path and coordinates.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
     /// Tracks active test scope across modules and test functions.
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
     /// Indicates whether traversal is currently within an impl block for a CLI struct.
-    impl_is_cli: FlagScopeTracker,
+    impl_is_cli: FlagScope,
     /// Indicates whether traversal is currently within an execution runner method (`run`, `execute`).
-    runner_scope: FlagScopeTracker,
+    runner_scope: FlagScope,
+}
+
+impl PrintlnVisitor<'_> {
+    fn with_cli_impl<R>(&mut self, is_cli: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |v| v.impl_is_cli.push(is_cli),
+            |v| {
+                v.impl_is_cli.pop();
+            },
+            f,
+        )
+    }
+
+    fn with_runner_scope<R>(&mut self, is_runner: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+        run_with_scope(
+            self,
+            |v| v.runner_scope.push(is_runner),
+            |v| {
+                v.runner_scope.pop();
+            },
+            f,
+        )
+    }
 }
 
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Tracks whether traversal is inside an impl block for a CLI command struct.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
-        self.impl_is_cli.push(is_cli_impl(item_impl));
-        visit::visit_item_impl(self, item_impl);
-        self.impl_is_cli.pop();
+        let is_cli = is_cli_impl(item_impl);
+        self.with_cli_impl(is_cli, |this| {
+            visit::visit_item_impl(this, item_impl);
+        });
     }
 
     /// Tracks entry into methods, noting whether the method is a CLI runner (`run`, `execute`) or a test.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&method.attrs);
         let is_runner = self.impl_is_cli.is_active() && is_execution_method(&method.sig.ident);
-        self.runner_scope.push(is_runner);
-
-        visit::visit_impl_item_fn(self, method);
-
-        self.runner_scope.pop();
-        self.test_scope.pop();
+        self.with_test_fn(&method.attrs, |this| {
+            this.with_runner_scope(is_runner, |this| {
+                visit::visit_impl_item_fn(this, method);
+            });
+        });
     }
 
     /// Tracks entry into free functions, updating test scope if annotated with `#[test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Inspects macro calls and flags `println!` or `eprintln!` in library code outside allowed scopes.

@@ -59,7 +59,7 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, is_bool_type};
+use super::common::{TestScope, WithTestScope, is_bool_type};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
@@ -81,7 +81,7 @@ impl Rule for NoDoubleNegationRule {
         let mut visitor = DoubleNegationVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -90,35 +90,36 @@ impl Rule for NoDoubleNegationRule {
 }
 
 /// Visitor that inspects function signatures for negative boolean naming patterns.
+#[derive(WithTestScope)]
 struct DoubleNegationVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for DoubleNegationVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&impl_fn.attrs);
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&impl_fn.attrs, |this| {
+            visit::visit_impl_item_fn(this, impl_fn);
+        });
     }
 
     fn visit_trait_item_fn(&mut self, trait_fn: &'ast syn::TraitItemFn) {
-        self.test_scope.push_fn(&trait_fn.attrs);
-        visit::visit_trait_item_fn(self, trait_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&trait_fn.attrs, |this| {
+            visit::visit_trait_item_fn(this, trait_fn);
+        });
     }
 
     fn visit_signature(&mut self, sig: &'ast syn::Signature) {

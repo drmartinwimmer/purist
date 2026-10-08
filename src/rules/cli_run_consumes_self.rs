@@ -40,12 +40,12 @@
 //! }
 //! ```
 
-use super::common::{TestScopeTracker, extract_type_ident};
+use super::common::{TestScope, WithTestScope, extract_type_ident};
 use crate::checkers::{ReceiverKind, check_fn_receiver};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::trackers::{
-    TypeScopeTracker, is_cli_or_command_struct_name, is_command_execution_fn_name,
+use crate::scopes::{
+    TypeScope, WithTypeScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
 };
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -66,8 +66,8 @@ impl Rule for CliRunConsumesSelfRule {
         let mut visitor = CliRunVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
-            type_scope: TypeScopeTracker::new(),
+            test_scope: TestScope::new(ctx.is_test_file()),
+            type_scope: TypeScope::new(),
         };
 
         visitor.visit_file(file);
@@ -75,48 +75,48 @@ impl Rule for CliRunConsumesSelfRule {
     }
 }
 
+#[derive(WithTestScope, WithTypeScope)]
 struct CliRunVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
-    type_scope: TypeScopeTracker,
+    test_scope: TestScope,
+    type_scope: TypeScope,
 }
 
 impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
         if let Some(ident) = extract_type_ident(&item_impl.self_ty) {
-            self.type_scope.push_impl(ident.to_string());
-            visit::visit_item_impl(self, item_impl);
-            self.type_scope.pop();
+            self.with_type_impl(ident.to_string(), |this| {
+                visit::visit_item_impl(this, item_impl);
+            });
         } else {
             visit::visit_item_impl(self, item_impl);
         }
     }
 
     fn visit_impl_item_fn(&mut self, impl_fn: &'ast syn::ImplItemFn) {
-        self.test_scope.push_fn(&impl_fn.attrs);
+        self.with_test_fn(&impl_fn.attrs, |this| {
+            if !this.test_scope.is_in_test()
+                && let Some(struct_name) = this.type_scope.current_impl_name()
+                && is_cli_or_command_struct_name(struct_name)
+                && let Some(diag) = check_method_receiver_consumes_self(
+                    this.ctx,
+                    "purist::cli_run_consumes_self",
+                    struct_name,
+                    impl_fn,
+                )
+            {
+                this.diagnostics.push(diag);
+            }
 
-        if !self.test_scope.is_in_test()
-            && let Some(struct_name) = self.type_scope.current_impl_name()
-            && is_cli_or_command_struct_name(struct_name)
-            && let Some(diag) = check_method_receiver_consumes_self(
-                self.ctx,
-                "purist::cli_run_consumes_self",
-                struct_name,
-                impl_fn,
-            )
-        {
-            self.diagnostics.push(diag);
-        }
-
-        visit::visit_impl_item_fn(self, impl_fn);
-        self.test_scope.pop();
+            visit::visit_impl_item_fn(this, impl_fn);
+        });
     }
 }
 

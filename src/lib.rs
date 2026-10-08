@@ -1,3 +1,5 @@
+extern crate self as purist;
+
 pub mod cargo;
 pub mod checkers;
 pub mod command;
@@ -8,7 +10,7 @@ pub mod onboard;
 pub mod reporter;
 pub mod rule_config;
 pub mod rules;
-pub mod trackers;
+pub mod scopes;
 
 pub use cargo::{CargoManifest, LintConfig, OpinionatedLintsConfig, PuristLintsConfig, RuleLevel};
 pub use checkers::{
@@ -27,8 +29,9 @@ pub use engine::{LintContext, OpinionatedEngine, PuristEngine, Rule};
 pub use onboard::{canonical_rule_name, disable_rules_in_manifest, onboard_project};
 pub use reporter::{OutputFormat, render_report, render_report_with_options};
 pub use rules::default_rules;
-pub use trackers::{
-    ClapScopeTracker, DepthTracker, FlagScopeTracker, TestScopeTracker, TypeScopeTracker,
+pub use scopes::{
+    ClapScope, DepthScope, FlagScope, TestScope, TypeScope, WithClapScope, WithDepthScope,
+    WithTestScope, WithTypeScope,
 };
 
 #[cfg(test)]

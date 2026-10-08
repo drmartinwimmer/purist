@@ -227,12 +227,22 @@ dependencies = [
  "clap",
  "googletest",
  "proc-macro2",
+ "purist-derive",
  "quote",
  "serde",
  "serde_json",
  "syn 3.0.6",
  "thiserror",
  "toml_edit",
+]
+
+[[package]]
+name = "purist-derive"
+version = "0.5.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]

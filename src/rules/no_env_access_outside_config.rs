@@ -42,7 +42,7 @@
 //! }
 //! ```
 
-use super::common::TestScopeTracker;
+use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
@@ -65,7 +65,7 @@ impl Rule for NoEnvAccessOutsideConfigRule {
         let mut visitor = EnvAccessVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -87,28 +87,29 @@ fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
 }
 
 /// Visitor inspecting function call expressions for `std::env` access while tracking test scopes.
+#[derive(WithTestScope)]
 struct EnvAccessVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
     /// Tracks active test scope across modules and test functions.
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for EnvAccessVisitor<'_> {
     /// Tracks module scope and marks test scope active if annotated with `#[cfg(test)]`.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Tracks function scope and marks test scope active if annotated with `#[test]` or `#[...::test]`.
     fn visit_item_fn(&mut self, item_fn: &'ast syn::ItemFn) {
-        self.test_scope.push_fn(&item_fn.attrs);
-        visit::visit_item_fn(self, item_fn);
-        self.test_scope.pop();
+        self.with_test_fn(&item_fn.attrs, |this| {
+            visit::visit_item_fn(this, item_fn);
+        });
     }
 
     /// Inspects function calls outside test scopes and flags direct `std::env` queries.

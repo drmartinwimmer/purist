@@ -19,7 +19,7 @@
 //! use std::collections::{BTreeMap, HashMap};
 //! ```
 
-use super::common::TestScopeTracker;
+use super::common::{TestScope, WithTestScope};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
@@ -37,7 +37,7 @@ impl Rule for NoWildcardImportsRule {
         let mut visitor = WildcardImportVisitor {
             ctx,
             diagnostics: Vec::new(),
-            test_scope: TestScopeTracker::new(ctx.is_test_file()),
+            test_scope: TestScope::new(ctx.is_test_file()),
         };
 
         visitor.visit_file(file);
@@ -46,18 +46,19 @@ impl Rule for NoWildcardImportsRule {
 }
 
 /// Visitor that inspects `use` statements outside test scope for wildcard/glob imports.
+#[derive(WithTestScope)]
 struct WildcardImportVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
-    test_scope: TestScopeTracker,
+    test_scope: TestScope,
 }
 
 impl<'ast> Visit<'ast> for WildcardImportVisitor<'_> {
     /// Tracks entry into and exit from test-scoped modules.
     fn visit_item_mod(&mut self, item_mod: &'ast syn::ItemMod) {
-        self.test_scope.push_mod(&item_mod.attrs);
-        visit::visit_item_mod(self, item_mod);
-        self.test_scope.pop();
+        self.with_test_mod(&item_mod.attrs, |this| {
+            visit::visit_item_mod(this, item_mod);
+        });
     }
 
     /// Recursively checks `use` trees if outside test scope.
