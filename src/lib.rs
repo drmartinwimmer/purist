@@ -1,17 +1,18 @@
 extern crate self as purist;
 
+pub mod allow;
 pub mod cargo;
 pub mod checkers;
 pub mod command;
 pub mod diagnostics;
 pub mod discovery;
 pub mod engine;
-pub mod onboard;
 pub mod reporter;
 pub mod rule_config;
 pub mod rules;
 pub mod scopes;
 
+pub use allow::{allow_project, canonical_rule_name, disable_rules_in_manifest};
 pub use cargo::{CargoManifest, LintConfig, OpinionatedLintsConfig, PuristLintsConfig, RuleLevel};
 pub use checkers::{
     ReceiverKind, check_call_matches_path, check_expr_matches_path, check_fn_receiver,
@@ -26,7 +27,6 @@ pub use discovery::{
     find_cargo_toml, find_workspace_cargo_toml,
 };
 pub use engine::{LintContext, OpinionatedEngine, PuristEngine, Rule};
-pub use onboard::{canonical_rule_name, disable_rules_in_manifest, onboard_project};
 pub use reporter::{OutputFormat, render_report, render_report_with_options};
 pub use rules::default_rules;
 pub use scopes::{

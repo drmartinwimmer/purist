@@ -1,8 +1,8 @@
+use crate::allow::allow_project;
 use crate::cargo::CargoManifest;
 use crate::diagnostics::DiagnosticReport;
 use crate::discovery::{discover_project_files_from_manifest, find_cargo_toml};
 use crate::engine::PuristEngine;
-use crate::onboard::onboard_project;
 use crate::reporter::{OutputFormat, render_report};
 use clap::Args;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,7 @@ pub struct PuristCommand {
     quiet: bool,
 
     /// Perform purist checks and allow any triggered rules in Cargo.toml
-    #[arg(long, alias = "onboard")]
+    #[arg(long)]
     allow: bool,
 }
 
@@ -99,11 +99,6 @@ impl PuristCommand {
         self
     }
 
-    /// Sets the allow flag (alias for `with_allow`).
-    pub fn with_onboard(self, onboard: bool) -> Self {
-        self.with_allow(onboard)
-    }
-
     /// Returns the target path, if specified.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
@@ -127,11 +122,6 @@ impl PuristCommand {
     /// Returns whether allowing triggered rules in Cargo.toml is requested.
     pub fn is_allow(&self) -> bool {
         self.allow
-    }
-
-    /// Returns whether allowing triggered rules in Cargo.toml is requested.
-    pub fn is_onboard(&self) -> bool {
-        self.is_allow()
     }
 
     /// Executes the purist rules against the target path and returns the report.
@@ -209,7 +199,7 @@ impl PuristCommand {
                 }
                 None => Path::new("."),
             };
-            let disabled_count = onboard_project(path_ref, &report)?;
+            let disabled_count = allow_project(path_ref, &report)?;
             if !is_quiet {
                 if disabled_count > 0 {
                     println!(
@@ -380,11 +370,6 @@ mod tests {
     fn parse_purist_command_with_allow_succeeds() {
         let cmd = PuristCommand::new(Some(PathBuf::from("src/lib.rs")), true).with_allow(true);
         assert_that!(cmd.is_allow(), is_true());
-        assert_that!(cmd.is_onboard(), is_true());
-
-        let cmd_alias =
-            PuristCommand::new(Some(PathBuf::from("src/lib.rs")), true).with_onboard(true);
-        assert_that!(cmd_alias.is_allow(), is_true());
     }
 
     #[googletest::test]
@@ -398,7 +383,7 @@ mod tests {
         fs::write(
             &cargo_toml,
             r#"[package]
-name = "test_onboard_app"
+name = "test_allow_app"
 version = "0.1.0"
 edition = "2024"
 "#,
