@@ -23,6 +23,12 @@ Run Purist against your repository or workspace:
 purist --path .
 ```
 
+To onboard an existing project without a massive upfront refactoring, use `--allow`. This runs all checks and automatically disables any triggered rules under `[lints.purist]` in `Cargo.toml` by setting them to `"allow"`, allowing you to adopt Purist immediately and re-enable/resolve rules incrementally:
+
+```bash
+purist --allow
+```
+
 To output results as JSON:
 
 ```bash
