@@ -92,9 +92,9 @@ To output results as JSON:
 purist --format json
 ```
 
-## Onboarding an Existing Codebase
+## Adopting Purist on an Existing Codebase
 
-Adopting a strict, opinionated linter on an existing codebase can feel intimidating if dozens of violations fail the build all at once. Purist provides a seamless onboarding path using the `--allow` flag.
+Adopting a strict, opinionated linter on an existing codebase can feel intimidating if dozens of violations fail the build all at once. Purist provides a seamless adoption path using the `--allow` flag.
 
 ### Step 1: Baseline Existing Violations
 

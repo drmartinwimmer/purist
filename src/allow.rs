@@ -1,6 +1,6 @@
-//! Project onboarding functionality for `purist`.
+//! Project rule allowing functionality for `purist`.
 //!
-//! Provides the `--onboard` capability to execute purist static analysis checks
+//! Provides the `--allow` capability to execute purist static analysis checks
 //! and automatically disable any rules that trigger in `Cargo.toml`.
 
 use crate::PuristError;
@@ -250,10 +250,7 @@ pub fn disable_rules_in_manifest(
 /// Disables purist lint rules that triggered in `report` across relevant `Cargo.toml` files.
 ///
 /// Returns the total number of rules disabled.
-pub fn onboard_project(
-    target_path: &Path,
-    report: &DiagnosticReport,
-) -> Result<usize, PuristError> {
+pub fn allow_project(target_path: &Path, report: &DiagnosticReport) -> Result<usize, PuristError> {
     let target_manifest = find_cargo_toml(target_path)
         .ok_or_else(|| PuristError::ManifestNotFound(target_path.to_path_buf()))?;
 
@@ -339,7 +336,7 @@ mod tests {
     fn disable_rules_in_clean_manifest_creates_lints_purist_table_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_clean_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_clean_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -369,7 +366,7 @@ edition = "2024"
     fn disable_rules_in_manifest_with_existing_clippy_lints_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_clippy_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_clippy_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -400,7 +397,7 @@ unwrap_used = "warn"
     fn disable_rules_in_manifest_with_existing_purist_rules_updates_and_adds_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_existing_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_existing_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -435,7 +432,7 @@ already_allowed = "allow"
     fn disable_rules_in_manifest_with_inline_table_updates_level_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_inline_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_inline_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -466,7 +463,7 @@ max_file_lines = { level = "warn", max_production_lines = 500 }
     fn disable_rules_in_manifest_with_subtable_updates_level_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_subtable_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_subtable_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -493,7 +490,7 @@ max_production_lines = 400
     #[googletest::test]
     fn disable_rules_in_virtual_workspace_manifest_creates_workspace_lints_purist_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = std::env::temp_dir().join(format!("test_onboard_ws_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("test_allow_ws_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -518,7 +515,7 @@ members = ["crates/*"]
     #[googletest::test]
     fn disable_rules_in_opinionated_manifest_preserves_opinionated_table_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = std::env::temp_dir().join(format!("test_onboard_op_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("test_allow_op_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -544,10 +541,9 @@ no_inline_mods = "warn"
     }
 
     #[googletest::test]
-    fn onboard_project_with_violations_disables_triggered_rules_succeeds()
+    fn allow_project_with_violations_disables_triggered_rules_succeeds()
     -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_proj_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("test_allow_proj_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -578,7 +574,7 @@ edition = "2024"
             .with_span(Span::new(&src_file, 5, 1, 5, 20)),
         );
 
-        let count = onboard_project(&temp_dir, &report)?;
+        let count = allow_project(&temp_dir, &report)?;
         assert_that!(count, eq(2));
 
         let updated = fs::read_to_string(&manifest_path)?;
@@ -592,15 +588,15 @@ edition = "2024"
     }
 
     #[googletest::test]
-    fn onboard_project_without_cargo_toml_returns_manifest_not_found()
+    fn allow_project_without_cargo_toml_returns_manifest_not_found()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_no_manifest_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_no_manifest_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
 
         let report = DiagnosticReport::default();
-        let result = onboard_project(&temp_dir, &report);
+        let result = allow_project(&temp_dir, &report);
         match result {
             Err(PuristError::ManifestNotFound(p)) => {
                 assert_that!(p, eq(&temp_dir));
@@ -611,10 +607,10 @@ edition = "2024"
     }
 
     #[googletest::test]
-    fn onboard_project_with_clean_code_does_not_modify_manifest()
+    fn allow_project_with_clean_code_does_not_modify_manifest()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir =
-            std::env::temp_dir().join(format!("test_onboard_clean_proj_{}", std::process::id()));
+            std::env::temp_dir().join(format!("test_allow_clean_proj_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let _guard = TempDirGuard(temp_dir.clone());
         let manifest_path = temp_dir.join("Cargo.toml");
@@ -626,7 +622,7 @@ version = "0.1.0"
         fs::write(&manifest_path, initial)?;
 
         let report = DiagnosticReport::default();
-        let count = onboard_project(&temp_dir, &report)?;
+        let count = allow_project(&temp_dir, &report)?;
         assert_that!(count, eq(0));
 
         let content = fs::read_to_string(&manifest_path)?;
