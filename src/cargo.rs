@@ -1,5 +1,7 @@
+use crate::PuristError;
+use crate::discovery::{find_cargo_toml, find_workspace_cargo_toml};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 /// Severity configuration for a purist lint rule.
@@ -235,47 +237,9 @@ impl LintConfig {
     /// inheriting workspace defaults if within a Cargo workspace.
     pub fn discover_for_path(path: &Path) -> Self {
         if let Some(cargo_toml) = find_cargo_toml(path) {
-            let mut config = Self::from_manifest_file(&cargo_toml).unwrap_or_default();
-            if let Some(ws_toml) = find_workspace_cargo_toml(&cargo_toml)
-                && let Some(ws_config) = Self::from_manifest_file(&ws_toml)
-            {
-                if let Ok(content) = fs::read_to_string(&cargo_toml)
-                    && let Ok(doc) = content.parse::<DocumentMut>()
-                    && let Some(lints) = doc.get("lints")
-                    && (lints
-                        .as_table()
-                        .and_then(|t| t.get("workspace"))
-                        .and_then(|w| w.as_bool())
-                        == Some(true)
-                        || lints
-                            .as_inline_table()
-                            .and_then(|t| t.get("workspace"))
-                            .and_then(|w| w.as_bool())
-                            == Some(true))
-                {
-                    config.rules = ws_config.rules;
-                }
-                if config.max_file_lines.max_production_lines.is_none() {
-                    config.max_file_lines.max_production_lines =
-                        ws_config.max_file_lines.max_production_lines;
-                }
-                if config.max_file_lines.max_total_lines.is_none() {
-                    config.max_file_lines.max_total_lines =
-                        ws_config.max_file_lines.max_total_lines;
-                }
-                if config.max_nesting_depth.max_depth.is_none() {
-                    config.max_nesting_depth.max_depth = ws_config.max_nesting_depth.max_depth;
-                }
-                if config.lib_facade_hygiene.max_production_lines.is_none() {
-                    config.lib_facade_hygiene.max_production_lines =
-                        ws_config.lib_facade_hygiene.max_production_lines;
-                }
-                if config.lib_facade_hygiene.max_fn_lines.is_none() {
-                    config.lib_facade_hygiene.max_fn_lines =
-                        ws_config.lib_facade_hygiene.max_fn_lines;
-                }
-            }
-            config
+            CargoManifest::load(&cargo_toml)
+                .map(CargoManifest::into_lint_config)
+                .unwrap_or_default()
         } else {
             Self::empty()
         }
@@ -284,6 +248,11 @@ impl LintConfig {
     /// Parses lint configuration from a `Cargo.toml` file content.
     pub fn from_manifest_content(content: &str) -> Option<Self> {
         let doc: DocumentMut = content.parse().ok()?;
+        Some(Self::from_document(&doc))
+    }
+
+    /// Parses lint configuration from a parsed `Cargo.toml` document.
+    pub fn from_document(doc: &DocumentMut) -> Self {
         let mut config = Self::empty();
 
         // 1. Check [lints.purist] or [workspace.lints.purist] (with [lints.opinionated] fallback)
@@ -334,7 +303,29 @@ impl LintConfig {
             }
         }
 
-        Some(config)
+        config
+    }
+
+    /// Inherits configuration settings from a workspace root `LintConfig`.
+    pub fn inherit_from_workspace(&mut self, ws_config: &Self) {
+        self.rules = ws_config.rules.clone();
+        if self.max_file_lines.max_production_lines.is_none() {
+            self.max_file_lines.max_production_lines =
+                ws_config.max_file_lines.max_production_lines;
+        }
+        if self.max_file_lines.max_total_lines.is_none() {
+            self.max_file_lines.max_total_lines = ws_config.max_file_lines.max_total_lines;
+        }
+        if self.max_nesting_depth.max_depth.is_none() {
+            self.max_nesting_depth.max_depth = ws_config.max_nesting_depth.max_depth;
+        }
+        if self.lib_facade_hygiene.max_production_lines.is_none() {
+            self.lib_facade_hygiene.max_production_lines =
+                ws_config.lib_facade_hygiene.max_production_lines;
+        }
+        if self.lib_facade_hygiene.max_fn_lines.is_none() {
+            self.lib_facade_hygiene.max_fn_lines = ws_config.lib_facade_hygiene.max_fn_lines;
+        }
     }
 
     pub fn from_manifest_file(file: &Path) -> Option<Self> {
@@ -420,7 +411,105 @@ impl LintConfig {
     }
 }
 
-pub use crate::discovery::{discover_rust_files, find_cargo_toml, find_workspace_cargo_toml};
+pub use crate::discovery::discover_rust_files;
+
+/// Represents a parsed Cargo manifest (`Cargo.toml`) and its associated lint configuration.
+#[derive(Debug, Clone)]
+pub struct CargoManifest {
+    path: PathBuf,
+    doc: DocumentMut,
+    lint_config: LintConfig,
+}
+
+impl CargoManifest {
+    /// Loads and parses the `Cargo.toml` file at `manifest_or_project_dir`.
+    ///
+    /// If passed a directory, looks for `Cargo.toml` inside it.
+    /// Inherits workspace configurations if `[lints] workspace = true`.
+    pub fn load(manifest_or_project_dir: &Path) -> Result<Self, PuristError> {
+        let manifest_path = if manifest_or_project_dir.is_file()
+            && manifest_or_project_dir
+                .file_name()
+                .is_some_and(|n| n == "Cargo.toml")
+        {
+            manifest_or_project_dir.to_path_buf()
+        } else {
+            manifest_or_project_dir.join("Cargo.toml")
+        };
+
+        if !manifest_path.is_file() {
+            let dir = if manifest_or_project_dir.is_file() {
+                manifest_or_project_dir
+                    .parent()
+                    .unwrap_or(manifest_or_project_dir)
+            } else {
+                manifest_or_project_dir
+            };
+            return Err(PuristError::CargoTomlNotFound(dir.to_path_buf()));
+        }
+
+        let content = fs::read_to_string(&manifest_path)?;
+        Self::from_content(manifest_path, &content)
+    }
+
+    /// Parses a manifest from its string content at a specified path.
+    pub fn from_content(manifest_path: PathBuf, content: &str) -> Result<Self, PuristError> {
+        let doc: DocumentMut = content
+            .parse()
+            .map_err(|e| PuristError::ManifestParse(format!("{e}")))?;
+        let mut lint_config = LintConfig::from_document(&doc);
+
+        // Workspace inheritance
+        if has_lints_workspace_true_doc(&doc)
+            && let Some(ws_path) = find_workspace_cargo_toml(&manifest_path)
+            && ws_path != manifest_path
+            && let Ok(ws_manifest) = CargoManifest::load(&ws_path)
+        {
+            lint_config.inherit_from_workspace(ws_manifest.lint_config());
+        }
+
+        Ok(Self {
+            path: manifest_path,
+            doc,
+            lint_config,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn document(&self) -> &DocumentMut {
+        &self.doc
+    }
+
+    pub fn lint_config(&self) -> &LintConfig {
+        &self.lint_config
+    }
+
+    pub fn into_lint_config(self) -> LintConfig {
+        self.lint_config
+    }
+
+    pub fn has_lints_workspace_true(&self) -> bool {
+        has_lints_workspace_true_doc(&self.doc)
+    }
+}
+
+fn has_lints_workspace_true_doc(doc: &DocumentMut) -> bool {
+    doc.get("lints").is_some_and(|lints| {
+        lints
+            .as_table()
+            .and_then(|t| t.get("workspace"))
+            .and_then(|w| w.as_bool())
+            == Some(true)
+            || lints
+                .as_inline_table()
+                .and_then(|t| t.get("workspace"))
+                .and_then(|w| w.as_bool())
+                == Some(true)
+    })
+}
 
 #[cfg(test)]
 mod tests {

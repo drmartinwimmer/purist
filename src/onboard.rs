@@ -4,6 +4,7 @@
 //! and automatically disable any rules that trigger in `Cargo.toml`.
 
 use crate::PuristError;
+use crate::cargo::CargoManifest;
 use crate::diagnostics::DiagnosticReport;
 use crate::discovery::{find_cargo_toml, find_workspace_cargo_toml};
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,24 +77,9 @@ pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
 
 /// Checks whether a manifest specifies `[lints] workspace = true`.
 fn has_lints_workspace_true(manifest_path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(manifest_path) else {
-        return false;
-    };
-    let Ok(doc) = content.parse::<DocumentMut>() else {
-        return false;
-    };
-    doc.get("lints").is_some_and(|lints| {
-        lints
-            .as_table()
-            .and_then(|t| t.get("workspace"))
-            .and_then(|w| w.as_bool())
-            == Some(true)
-            || lints
-                .as_inline_table()
-                .and_then(|t| t.get("workspace"))
-                .and_then(|w| w.as_bool())
-                == Some(true)
-    })
+    CargoManifest::load(manifest_path)
+        .map(|m| m.has_lints_workspace_true())
+        .unwrap_or(false)
 }
 
 /// Checks whether the document defines `[workspace.lints.purist]` or `[workspace.lints.opinionated]`.
