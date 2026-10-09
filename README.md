@@ -171,6 +171,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::single_match_to_let_else`: Recommends `let ... = ... else { ... };` over single-variant `match` with early exits.
   - `purist::idiomatic_option_bool_mapping`: Prefers combinators like `.is_some_and(...)` over manual `if let Some(...) = ... else { false }`.
   - `purist::no_redundant_conversions`: Flags redundant sequential serialize/deserialize roundtrips.
+  - `purist::prefer_scoped_closures`: Enforces scoped closures (`with_*`) over manual paired lifecycle calls (`push`/`pop`, `enter`/`exit`).
 - **Robustness & Error Handling**:
   - `purist::error_types`: Functions must not return raw `String` or `&str` error types.
   - `purist::no_boxed_dyn_error`: Production code must use structured error types instead of `Box<dyn Error>`.
