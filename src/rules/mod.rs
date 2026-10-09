@@ -18,6 +18,7 @@ pub mod no_double_negation;
 pub mod no_env_access_outside_config;
 pub mod no_has_trait_prefix;
 pub mod no_inline_mods;
+pub mod no_interior_mutability_in_visitors;
 pub mod no_negative_bool;
 pub mod no_primitive_flag_clutter;
 pub mod no_println_in_libraries;
@@ -55,6 +56,7 @@ pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
 pub use no_has_trait_prefix::NoHasTraitPrefixRule;
 pub use no_inline_mods::NoInlineModsRule;
+pub use no_interior_mutability_in_visitors::NoInteriorMutabilityInVisitorsRule;
 pub use no_negative_bool::NoNegativeBoolRule;
 pub use no_primitive_flag_clutter::NoPrimitiveFlagClutterRule;
 pub use no_println_in_libraries::NoPrintlnInLibrariesRule;
@@ -112,6 +114,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(GranularVisitorHooksRule),
         Box::new(NoBifurcatedTraitDispatchRule),
         Box::new(NoPrimitiveFlagClutterRule),
+        Box::new(NoInteriorMutabilityInVisitorsRule),
         Box::new(PreferScopedClosuresRule),
         Box::new(DescriptiveCheckerNamesRule),
     ]
