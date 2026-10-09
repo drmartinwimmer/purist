@@ -6,7 +6,8 @@
 //! - Path and macro segment inspection helpers (`path_ends_with_segments`, `macro_name`, `extract_type_ident`)
 //! - Trait implementation detection (e.g. `Drop`)
 
-use syn::{Attribute, Ident, ItemImpl, Macro, Path, Type};
+use syn::spanned::Spanned;
+use syn::{Attribute, File, Ident, Item, ItemImpl, Macro, Path, Type};
 
 /// Checks whether an attribute matches `#[cfg(test)]`.
 pub fn is_cfg_test_attr(attr: &Attribute) -> bool {
@@ -186,6 +187,55 @@ pub fn is_drop_trait_impl(item_impl: &ItemImpl) -> bool {
         .is_some_and(|(path, _)| path_ends_with_ident(path, "Drop"))
 }
 
+/// Returns true if an item AST node is decorated with test attributes (`#[test]`, `#[cfg(test)]`, etc.).
+pub fn is_test_ast_item(item: &Item) -> bool {
+    let attrs = match item {
+        Item::Mod(m) => &m.attrs,
+        Item::Fn(f) => &f.attrs,
+        Item::Const(c) => &c.attrs,
+        Item::Static(s) => &s.attrs,
+        Item::Struct(s) => &s.attrs,
+        Item::Enum(e) => &e.attrs,
+        Item::Impl(i) => &i.attrs,
+        Item::Trait(t) => &t.attrs,
+        Item::Use(u) => &u.attrs,
+        _ => return false,
+    };
+    has_cfg_test_attr(attrs) || has_test_attr(attrs)
+}
+
+/// Finds the 1-based start and end line ranges of test items and modules in an AST file.
+pub fn find_test_line_spans(file: &File) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    for item in &file.items {
+        if is_test_ast_item(item) {
+            let span = item.span();
+            spans.push((span.start().line, span.end().line));
+        }
+    }
+    spans
+}
+
+/// Counts lines of production code in source text, excluding all `#[cfg(test)]` modules and items.
+pub fn count_production_lines(file: &File, source: &str) -> usize {
+    let test_spans = find_test_line_spans(file);
+    if test_spans.is_empty() {
+        return source.lines().count();
+    }
+
+    let mut prod_lines = 0;
+    for (idx, _line) in source.lines().enumerate() {
+        let line_num = idx + 1;
+        let in_test = test_spans
+            .iter()
+            .any(|&(start, end)| line_num >= start && line_num <= end);
+        if !in_test {
+            prod_lines += 1;
+        }
+    }
+    prod_lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +338,15 @@ mod tests {
         let drop_impl: syn::ItemImpl =
             syn::parse_str("impl Drop for MyStruct { fn drop(&mut self) {} }")?;
         assert_that!(is_drop_trait_impl(&drop_impl), eq(true));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn count_production_lines_excludes_test_items() -> Result<(), Box<dyn std::error::Error>> {
+        let code = "fn prod() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
+        let file = syn::parse_file(code)?;
+        let prod_lines = count_production_lines(&file, code);
+        assert_that!(prod_lines, eq(1));
         Ok(())
     }
 }

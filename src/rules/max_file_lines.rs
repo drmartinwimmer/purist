@@ -25,10 +25,9 @@
 //! // parser/validation.rs
 //! ```
 
-use super::common::{has_cfg_test_attr, has_test_attr};
+use super::common::count_production_lines;
 use crate::diagnostics::{Diagnostic, Severity, Span};
 use crate::engine::{LintContext, Rule};
-use syn::spanned::Spanned;
 
 /// Default maximum allowed lines of production code in a single file (excluding `#[cfg(test)]`).
 pub const DEFAULT_MAX_PRODUCTION_LINES: usize = 600;
@@ -101,49 +100,6 @@ impl Rule for MaxFileLinesRule {
 
         diagnostics
     }
-}
-
-/// Counts lines of production code in source text, excluding all `#[cfg(test)]` modules and items.
-fn count_production_lines(file: &syn::File, source: &str) -> usize {
-    let test_spans = find_test_line_spans(file);
-    let mut prod_lines = 0;
-    for (idx, _line) in source.lines().enumerate() {
-        let line_num = idx + 1;
-        let in_test = test_spans
-            .iter()
-            .any(|(start, end)| line_num >= *start && line_num <= *end);
-        if !in_test {
-            prod_lines += 1;
-        }
-    }
-    prod_lines
-}
-
-fn find_test_line_spans(file: &syn::File) -> Vec<(usize, usize)> {
-    let mut spans = Vec::new();
-    for item in &file.items {
-        if is_test_ast_item(item) {
-            let start = item.span().start().line;
-            let end = item.span().end().line;
-            spans.push((start, end));
-        }
-    }
-    spans
-}
-
-fn is_test_ast_item(item: &syn::Item) -> bool {
-    let attrs = match item {
-        syn::Item::Mod(item_mod) => &item_mod.attrs,
-        syn::Item::Fn(item_fn) => &item_fn.attrs,
-        syn::Item::Const(item_const) => &item_const.attrs,
-        syn::Item::Static(item_static) => &item_static.attrs,
-        syn::Item::Struct(item_struct) => &item_struct.attrs,
-        syn::Item::Enum(item_enum) => &item_enum.attrs,
-        syn::Item::Impl(item_impl) => &item_impl.attrs,
-        syn::Item::Use(item_use) => &item_use.attrs,
-        _ => return false,
-    };
-    has_cfg_test_attr(attrs) || has_test_attr(attrs)
 }
 
 #[cfg(test)]

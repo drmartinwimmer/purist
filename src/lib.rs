@@ -30,7 +30,8 @@ pub use engine::{LintContext, PuristEngine, Rule};
 pub use reporter::{OutputFormat, render_report, render_report_with_options};
 pub use rules::default_rules;
 pub use scopes::{
-    ClapScope, DepthScope, FlagScope, TestScope, TypeScope, WithClapScope, WithDepthScope,
+    BlockScope, ClapScope, DepthScope, FlagScope, MainScope, SuppressionScope, TestScope,
+    TypeScope, WithBlockScope, WithClapScope, WithDepthScope, WithMainScope, WithSuppressionScope,
     WithTestScope, WithTypeScope,
 };
 

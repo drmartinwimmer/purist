@@ -2,7 +2,7 @@
 
 mod derive;
 
-use derive::derive_scope;
+use derive::{derive_block_scope, derive_scope};
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
@@ -67,5 +67,44 @@ pub fn derive_with_depth_scope(input: TokenStream) -> TokenStream {
         "depth_scope",
         &["depth_scope", "depth"],
         &["DepthScope"],
+    )
+}
+
+/// Derives the `WithBlockScope` trait for an AST visitor struct.
+#[proc_macro_derive(WithBlockScope, attributes(scope, block_scope))]
+pub fn derive_with_block_scope(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_block_scope(input)
+}
+
+/// Derives the `WithMainScope` trait for an AST visitor struct.
+#[proc_macro_derive(WithMainScope, attributes(scope, main_scope))]
+pub fn derive_with_main_scope(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_scope(
+        input,
+        "WithMainScope",
+        "main_scope_mut",
+        "MainScope",
+        "main",
+        "main_scope",
+        &["main_scope", "in_main_fn"],
+        &["MainScope"],
+    )
+}
+
+/// Derives the `WithSuppressionScope` trait for an AST visitor struct.
+#[proc_macro_derive(WithSuppressionScope, attributes(scope, suppression_scope))]
+pub fn derive_with_suppression_scope(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_scope(
+        input,
+        "WithSuppressionScope",
+        "suppression_scope_mut",
+        "SuppressionScope",
+        "suppression",
+        "suppression_scope",
+        &["suppression_scope", "suppressed_scope"],
+        &["SuppressionScope"],
     )
 }

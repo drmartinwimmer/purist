@@ -34,7 +34,7 @@ use super::common::{TestScope, WithTestScope, is_drop_trait_impl};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::{FlagScope, run_with_scope};
+use crate::scopes::{TypeScope, WithTypeScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -51,7 +51,7 @@ impl Rule for RaiiTempDirectoriesRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
-            drop_scope: FlagScope::new(),
+            type_scope: TypeScope::new(),
         };
 
         visitor.visit_file(file);
@@ -60,25 +60,12 @@ impl Rule for RaiiTempDirectoriesRule {
 }
 
 /// Visitor that tracks test contexts and Drop implementations while checking for manual directory removals.
-#[derive(WithTestScope)]
+#[derive(WithTestScope, WithTypeScope)]
 struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScope,
-    drop_scope: FlagScope,
-}
-
-impl TempDirVisitor<'_> {
-    fn with_drop_scope<R>(&mut self, in_drop: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |v| v.drop_scope.push(in_drop),
-            |v| {
-                v.drop_scope.pop();
-            },
-            f,
-        )
-    }
+    type_scope: TypeScope,
 }
 
 impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
@@ -92,7 +79,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
     /// Tracks entry into and exit from `Drop` trait implementations.
     fn visit_item_impl(&mut self, item_impl: &'ast syn::ItemImpl) {
         let in_drop = is_drop_trait_impl(item_impl);
-        self.with_drop_scope(in_drop, |this| {
+        self.with_drop_impl(in_drop, |this| {
             visit::visit_item_impl(this, item_impl);
         });
     }
@@ -100,7 +87,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
     /// Tracks entry into and exit from `drop` method implementations.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
         let in_drop = method.sig.ident == "drop";
-        self.with_drop_scope(in_drop, |this| {
+        self.with_drop_impl(in_drop, |this| {
             visit::visit_impl_item_fn(this, method);
         });
     }
@@ -122,7 +109,7 @@ impl<'ast> Visit<'ast> for TempDirVisitor<'_> {
 impl TempDirVisitor<'_> {
     /// Emits a diagnostic if `fs::remove_dir_all` is called manually in a test scope outside of `Drop`.
     fn check_call_remove_dir_all_in_test(&mut self, call: &syn::ExprCall) {
-        if !self.test_scope.is_in_test() || self.drop_scope.is_active() {
+        if !self.test_scope.is_in_test() || self.type_scope.is_in_drop_impl() {
             return;
         }
 

@@ -37,7 +37,9 @@ use super::common::{TestScope, WithTestScope, extract_type_ident, path_last_iden
 use crate::checkers::check_macro_matches;
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::{FlagScope, run_with_scope};
+use crate::scopes::{
+    ClapScope, WithClapScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
+};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -58,8 +60,7 @@ impl Rule for NoPrintlnInLibrariesRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
-            impl_is_cli: FlagScope::new(),
-            runner_scope: FlagScope::new(),
+            clap_scope: ClapScope::new(),
         };
 
         visitor.visit_file(file);
@@ -73,19 +74,10 @@ fn is_exempt_entrypoint_or_example(ctx: &LintContext<'_>) -> bool {
     path_str.ends_with("main.rs") || path_str.contains("/bin/") || path_str.contains("/examples/")
 }
 
-/// Returns true if the type name matches CLI command or argument conventions.
-fn is_cli_type_name(name: &str) -> bool {
-    name.ends_with("Command")
-        || name.ends_with("Cli")
-        || name == "Cli"
-        || name == "Commands"
-        || name.ends_with("Subcommand")
-}
-
 /// Returns true if an impl block represents a CLI command or command runner.
 fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
     if let Some(ident) = extract_type_ident(&item_impl.self_ty)
-        && is_cli_type_name(&ident.to_string())
+        && is_cli_or_command_struct_name(&ident.to_string())
     {
         return true;
     }
@@ -100,14 +92,8 @@ fn is_cli_impl(item_impl: &syn::ItemImpl) -> bool {
     false
 }
 
-/// Returns true if the identifier matches CLI command runner method names.
-fn is_execution_method(ident: &syn::Ident) -> bool {
-    let name = ident.to_string();
-    matches!(name.as_str(), "run" | "run_with_format" | "execute")
-}
-
 /// Visitor that inspects macro invocations and flags `println!` or `eprintln!` in library contexts.
-#[derive(WithTestScope)]
+#[derive(WithTestScope, WithClapScope)]
 struct PrintlnVisitor<'a> {
     /// Lint context containing file path and coordinates.
     ctx: &'a LintContext<'a>,
@@ -115,34 +101,8 @@ struct PrintlnVisitor<'a> {
     diagnostics: Vec<Diagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
-    /// Indicates whether traversal is currently within an impl block for a CLI struct.
-    impl_is_cli: FlagScope,
-    /// Indicates whether traversal is currently within an execution runner method (`run`, `execute`).
-    runner_scope: FlagScope,
-}
-
-impl PrintlnVisitor<'_> {
-    fn with_cli_impl<R>(&mut self, is_cli: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |v| v.impl_is_cli.push(is_cli),
-            |v| {
-                v.impl_is_cli.pop();
-            },
-            f,
-        )
-    }
-
-    fn with_runner_scope<R>(&mut self, is_runner: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |v| v.runner_scope.push(is_runner),
-            |v| {
-                v.runner_scope.pop();
-            },
-            f,
-        )
-    }
+    /// Tracks active Clap and CLI implementation and runner scopes.
+    clap_scope: ClapScope,
 }
 
 impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
@@ -163,9 +123,10 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
 
     /// Tracks entry into methods, noting whether the method is a CLI runner (`run`, `execute`) or a test.
     fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
-        let is_runner = self.impl_is_cli.is_active() && is_execution_method(&method.sig.ident);
+        let is_runner = self.clap_scope.is_in_cli_impl()
+            && is_command_execution_fn_name(&method.sig.ident.to_string());
         self.with_test_fn(&method.attrs, |this| {
-            this.with_runner_scope(is_runner, |this| {
+            this.with_command_runner(is_runner, |this| {
                 visit::visit_impl_item_fn(this, method);
             });
         });
@@ -188,7 +149,7 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
 impl PrintlnVisitor<'_> {
     /// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
     fn check_macro_println_in_library(&mut self, mac: &syn::Macro) {
-        if self.test_scope.is_in_test() || self.runner_scope.is_active() {
+        if self.test_scope.is_in_test() || self.clap_scope.is_in_command_runner() {
             return;
         }
 

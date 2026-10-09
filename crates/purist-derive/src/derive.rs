@@ -207,3 +207,86 @@ pub fn derive_scope(
 
     expanded.into()
 }
+
+/// Derives the `WithBlockScope` trait for the given input struct.
+pub fn derive_block_scope(input: DeriveInput) -> TokenStream {
+    let struct_name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let Data::Struct(data_struct) = &input.data else {
+        return Error::new_spanned(
+            struct_name,
+            "`WithBlockScope` can only be derived for structs",
+        )
+        .to_compile_error()
+        .into();
+    };
+
+    let Fields::Named(fields_named) = &data_struct.fields else {
+        return Error::new_spanned(
+            struct_name,
+            "`WithBlockScope` can only be derived for structs with named fields",
+        )
+        .to_compile_error()
+        .into();
+    };
+
+    let field = match find_scope_field(
+        struct_name,
+        &fields_named.named,
+        "block",
+        "block_scope",
+        &["block_scope"],
+        &["BlockScope"],
+    ) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            return Error::new_spanned(
+                struct_name,
+                "`WithBlockScope` requires a field named `block_scope` or of type `BlockScope<K, V>`, or annotated with `#[block_scope]` / `#[scope(block)]`",
+            )
+            .to_compile_error()
+            .into();
+        }
+        Err(err) => {
+            return err.to_compile_error().into();
+        }
+    };
+
+    let (k_ty, v_ty) = match &field.ty {
+        Type::Path(type_path) => {
+            let last = type_path.path.segments.last().unwrap();
+            if let syn::PathArguments::AngleBracketed(args) = &last.arguments
+                && args.args.len() == 2
+                && let syn::GenericArgument::Type(ref k) = args.args[0]
+                && let syn::GenericArgument::Type(ref v) = args.args[1]
+            {
+                (k.clone(), v.clone())
+            } else {
+                return Error::new_spanned(
+                    &field.ty,
+                    "`BlockScope` requires two generic type arguments: `BlockScope<K, V>`",
+                )
+                .to_compile_error()
+                .into();
+            }
+        }
+        _ => {
+            return Error::new_spanned(&field.ty, "Expected `BlockScope<K, V>` type")
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    let field_ident = &field.ident;
+
+    let expanded = quote! {
+        impl #impl_generics ::purist::scopes::WithBlockScope<#k_ty, #v_ty> for #struct_name #ty_generics #where_clause {
+            fn block_scope_mut(&mut self) -> &mut ::purist::scopes::BlockScope<#k_ty, #v_ty> {
+                &mut self.#field_ident
+            }
+        }
+    };
+
+    expanded.into()
+}

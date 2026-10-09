@@ -30,7 +30,7 @@
 use super::common::{TestScope, WithTestScope};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
-use crate::scopes::run_with_scope;
+use crate::scopes::{BlockScope, WithBlockScope};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -51,7 +51,7 @@ impl Rule for NoRedundantConversionsRule {
         let mut visitor = RedundantConversionsVisitor {
             ctx,
             diagnostics: Vec::new(),
-            block_vars_stack: Vec::new(),
+            block_scope: BlockScope::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
         };
 
@@ -61,33 +61,16 @@ impl Rule for NoRedundantConversionsRule {
 }
 
 /// Visitor tracking local variable assignments and call expressions to detect serialization roundtrips.
-#[derive(WithTestScope)]
+#[derive(WithTestScope, WithBlockScope)]
 struct RedundantConversionsVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
     diagnostics: Vec<Diagnostic>,
-    /// Stack of lexical block scopes tracking variables assigned from serializer outputs.
-    block_vars_stack: Vec<HashMap<String, proc_macro2::Span>>,
+    /// Lexical block scope tracking variables assigned from serializer outputs.
+    block_scope: BlockScope<String, proc_macro2::Span>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
-}
-
-impl RedundantConversionsVisitor<'_> {
-    fn with_block_vars<R>(
-        &mut self,
-        vars: HashMap<String, proc_macro2::Span>,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        run_with_scope(
-            self,
-            |v| v.block_vars_stack.push(vars),
-            |v| {
-                v.block_vars_stack.pop();
-            },
-            f,
-        )
-    }
 }
 
 impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
@@ -112,7 +95,7 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
         }
 
         let serializer_vars = collect_block_serializer_vars(block);
-        self.with_block_vars(serializer_vars, |this| {
+        self.with_block(serializer_vars, |this| {
             visit::visit_block(this, block);
         });
     }
@@ -129,7 +112,7 @@ impl<'ast> Visit<'ast> for RedundantConversionsVisitor<'_> {
 
 impl RedundantConversionsVisitor<'_> {
     fn check_call_redundant_conversion(&mut self, call: &syn::ExprCall) {
-        let findings = check_redundant_conversion_call(self.ctx, call, &self.block_vars_stack);
+        let findings = check_redundant_conversion_call(self.ctx, call, &self.block_scope);
         self.diagnostics.extend(findings);
     }
 }
@@ -153,7 +136,7 @@ fn collect_block_serializer_vars(block: &syn::Block) -> HashMap<String, proc_mac
 fn check_redundant_conversion_call(
     ctx: &LintContext<'_>,
     call: &syn::ExprCall,
-    block_vars_stack: &[HashMap<String, proc_macro2::Span>],
+    block_scope: &BlockScope<String, proc_macro2::Span>,
 ) -> Vec<Diagnostic> {
     let mut findings = Vec::new();
 
@@ -178,24 +161,22 @@ fn check_redundant_conversion_call(
     }
 
     // 2. Check sequential variable usage across active lexical blocks
-    for vars in block_vars_stack.iter().rev() {
-        for arg in &call.args {
-            if let Some(ident) = extract_ident_from_arg(arg)
-                && let Some(&init_span) = vars.get(&ident)
-            {
-                let span = ctx.to_span(init_span);
-                findings.push(
-                    Diagnostic::new(
-                        "purist::no_redundant_conversions",
-                        Severity::Warning,
-                        format!(
-                            "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
-                );
-            }
+    for arg in &call.args {
+        if let Some(ident) = extract_ident_from_arg(arg)
+            && let Some(&init_span) = block_scope.get(&ident)
+        {
+            let span = ctx.to_span(init_span);
+            findings.push(
+                Diagnostic::new(
+                    "purist::no_redundant_conversions",
+                    Severity::Warning,
+                    format!(
+                        "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
+                    ),
+                )
+                .with_span(span)
+                .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
+            );
         }
     }
 
