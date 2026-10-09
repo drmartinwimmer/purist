@@ -3,6 +3,7 @@ pub mod clap_encapsulation;
 pub mod cli_run_consumes_self;
 pub mod clippy_suppress;
 pub mod common;
+pub mod descriptive_checker_names;
 pub mod error_types;
 pub mod exit_code_hygiene;
 pub mod free_functions;
@@ -38,6 +39,7 @@ pub use centralized_commands::CentralizedCommandsRule;
 pub use clap_encapsulation::ClapEncapsulationRule;
 pub use cli_run_consumes_self::CliRunConsumesSelfRule;
 pub use clippy_suppress::ClippySuppressRule;
+pub use descriptive_checker_names::DescriptiveCheckerNamesRule;
 pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
 pub use free_functions::FreeFunctionsRule;
@@ -108,5 +110,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(GranularVisitorHooksRule),
         Box::new(NoBifurcatedTraitDispatchRule),
         Box::new(PreferScopedClosuresRule),
+        Box::new(DescriptiveCheckerNamesRule),
     ]
 }

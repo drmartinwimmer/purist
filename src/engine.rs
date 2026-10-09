@@ -485,7 +485,7 @@ struct SuppressionVisitor {
 }
 
 impl SuppressionVisitor {
-    fn check_attr(&mut self, attr: &syn::Attribute, start: usize, end: usize) {
+    fn check_attr_suppression(&mut self, attr: &syn::Attribute, start: usize, end: usize) {
         if !attr.path().is_ident("allow") && !attr.path().is_ident("expect") {
             return;
         }
@@ -529,7 +529,7 @@ impl SuppressionVisitor {
 impl<'ast> Visit<'ast> for SuppressionVisitor {
     fn visit_file(&mut self, file: &'ast syn::File) {
         for attr in &file.attrs {
-            self.check_attr(attr, 1, usize::MAX);
+            self.check_attr_suppression(attr, 1, usize::MAX);
         }
         visit::visit_file(self, file);
     }
@@ -539,7 +539,7 @@ impl<'ast> Visit<'ast> for SuppressionVisitor {
         let start = span.start().line;
         let end = span.end().line;
         for attr in get_item_attrs(item) {
-            self.check_attr(attr, start, end);
+            self.check_attr_suppression(attr, start, end);
         }
         visit::visit_item(self, item);
     }
@@ -777,7 +777,7 @@ mod tests {
     #[googletest::test]
     fn engine_default_registers_all_rules() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::new();
-        assert_that!(engine.rules().len(), eq(34));
+        assert_that!(engine.rules().len(), eq(35));
         Ok(())
     }
 }
