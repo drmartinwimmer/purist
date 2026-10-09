@@ -13,6 +13,7 @@ pub mod max_nesting_depth;
 pub mod no_boxed_dyn_error;
 pub mod no_double_negation;
 pub mod no_env_access_outside_config;
+pub mod no_has_trait_prefix;
 pub mod no_inline_mods;
 pub mod no_negative_bool;
 pub mod no_println_in_libraries;
@@ -44,6 +45,7 @@ pub use max_nesting_depth::MaxNestingDepthRule;
 pub use no_boxed_dyn_error::NoBoxedDynErrorRule;
 pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
+pub use no_has_trait_prefix::NoHasTraitPrefixRule;
 pub use no_inline_mods::NoInlineModsRule;
 pub use no_negative_bool::NoNegativeBoolRule;
 pub use no_println_in_libraries::NoPrintlnInLibrariesRule;
@@ -96,5 +98,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MaxFileLinesRule),
         Box::new(NoTrivialGettersSettersRule),
         Box::new(MaxNestingDepthRule),
+        Box::new(NoHasTraitPrefixRule),
     ]
 }
