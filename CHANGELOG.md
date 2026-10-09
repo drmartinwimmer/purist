@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.5.0...purist-v0.6.0) (2026-10-09)
+
+
+### Features
+
+* **cli:** load Cargo.toml once, default to working directory, and restrict --path to workspace files ([7ae9c35](https://github.com/drmartinwimmer/purist/commit/7ae9c35198881d02ef398024cf91f031b63239b3))
+* **cli:** load Cargo.toml once, default to working directory, and restrict --path to workspace files ([b3f26ea](https://github.com/drmartinwimmer/purist/commit/b3f26ea9a8bebd0ed10e38d26daee40ec5101caa))
+
 ## [0.5.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.4.0...purist-v0.5.0) (2026-10-08)
 
 
