@@ -185,14 +185,15 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
     }
 
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
-        self.visit_expr(&expr_match.expr);
-        for arm in &expr_match.arms {
-            self.visit_pat(&arm.pat);
-            self.with_depth_step(|this| {
-                this.check_expr_nesting_depth_limit(arm.body.span());
-                this.visit_expr(&arm.body);
-            });
-        }
+        visit::visit_expr_match(self, expr_match);
+    }
+
+    fn visit_arm(&mut self, arm: &'ast syn::Arm) {
+        self.visit_pat(&arm.pat);
+        self.with_depth_step(|this| {
+            this.check_expr_nesting_depth_limit(arm.body.span());
+            this.visit_expr(&arm.body);
+        });
     }
 
     fn visit_expr_for_loop(&mut self, for_loop: &'ast syn::ExprForLoop) {
