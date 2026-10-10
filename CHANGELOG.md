@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/drmartinwimmer/purist/compare/purist-v0.6.0...purist-v0.6.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **ci:** publish workspace packages to crates.io ([7d6e332](https://github.com/drmartinwimmer/purist/commit/7d6e3328b9b89d1ed1aee0fd842515041c9cb920))
+* **ci:** publish workspace packages to crates.io ([0b7228e](https://github.com/drmartinwimmer/purist/commit/0b7228e5cee8c28608cf2e92adbf3c18ff278939))
+
 ## [0.6.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.5.0...purist-v0.6.0) (2026-10-09)
 
 
