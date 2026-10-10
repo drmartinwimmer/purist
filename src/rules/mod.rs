@@ -17,6 +17,7 @@ pub mod no_double_negation;
 pub mod no_env_access_outside_config;
 pub mod no_has_trait_prefix;
 pub mod no_inline_mods;
+pub mod no_interior_mutability_in_visitors;
 pub mod no_negative_bool;
 pub mod no_println_in_libraries;
 pub mod no_redundant_conversions;
@@ -52,6 +53,7 @@ pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
 pub use no_has_trait_prefix::NoHasTraitPrefixRule;
 pub use no_inline_mods::NoInlineModsRule;
+pub use no_interior_mutability_in_visitors::NoInteriorMutabilityInVisitorsRule;
 pub use no_negative_bool::NoNegativeBoolRule;
 pub use no_println_in_libraries::NoPrintlnInLibrariesRule;
 pub use no_redundant_conversions::NoRedundantConversionsRule;
@@ -107,6 +109,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoHasTraitPrefixRule),
         Box::new(GranularVisitorHooksRule),
         Box::new(NoBifurcatedTraitDispatchRule),
+        Box::new(NoInteriorMutabilityInVisitorsRule),
         Box::new(PreferScopedClosuresRule),
     ]
 }
