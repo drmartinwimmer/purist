@@ -11,6 +11,7 @@ pub mod granular_visitor_hooks;
 pub mod lib_facade_hygiene;
 pub mod max_file_lines;
 pub mod max_nesting_depth;
+pub mod no_bifurcated_trait_dispatch;
 pub mod no_boxed_dyn_error;
 pub mod no_double_negation;
 pub mod no_env_access_outside_config;
@@ -45,6 +46,7 @@ pub use granular_visitor_hooks::GranularVisitorHooksRule;
 pub use lib_facade_hygiene::LibFacadeHygieneRule;
 pub use max_file_lines::MaxFileLinesRule;
 pub use max_nesting_depth::MaxNestingDepthRule;
+pub use no_bifurcated_trait_dispatch::NoBifurcatedTraitDispatchRule;
 pub use no_boxed_dyn_error::NoBoxedDynErrorRule;
 pub use no_double_negation::NoDoubleNegationRule;
 pub use no_env_access_outside_config::NoEnvAccessOutsideConfigRule;
@@ -104,6 +106,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MaxNestingDepthRule),
         Box::new(NoHasTraitPrefixRule),
         Box::new(GranularVisitorHooksRule),
+        Box::new(NoBifurcatedTraitDispatchRule),
         Box::new(PreferScopedClosuresRule),
     ]
 }
