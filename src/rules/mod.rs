@@ -7,6 +7,7 @@ pub mod error_types;
 pub mod exit_code_hygiene;
 pub mod free_functions;
 pub mod googletest_conventions;
+pub mod granular_visitor_hooks;
 pub mod lib_facade_hygiene;
 pub mod max_file_lines;
 pub mod max_nesting_depth;
@@ -39,6 +40,7 @@ pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
 pub use free_functions::FreeFunctionsRule;
 pub use googletest_conventions::GoogletestConventionsRule;
+pub use granular_visitor_hooks::GranularVisitorHooksRule;
 pub use lib_facade_hygiene::LibFacadeHygieneRule;
 pub use max_file_lines::MaxFileLinesRule;
 pub use max_nesting_depth::MaxNestingDepthRule;
@@ -99,5 +101,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoTrivialGettersSettersRule),
         Box::new(MaxNestingDepthRule),
         Box::new(NoHasTraitPrefixRule),
+        Box::new(GranularVisitorHooksRule),
     ]
 }
