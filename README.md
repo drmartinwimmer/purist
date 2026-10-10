@@ -159,6 +159,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::free_functions`: Functions should not be namespaced in dummy empty structs.
   - `purist::no_trivial_getters_setters`: Flags trivial getter/setter combos where exposing or accessing the field directly would suffice (YAGNI).
   - `purist::granular_visitor_hooks`: Enforces specialized leaf visitor hooks over manual iteration over child AST collections.
+  - `purist::no_bifurcated_trait_dispatch`: Forbids conditional branches from instantiating alternate sibling types to dispatch the same trait method.
 - **Hygiene & Readability**:
   - `purist::use_declarations_over_qualified_paths`: Disallows long inline qualified paths (`crate::a::b::C`) in favor of clear `use` imports.
   - `purist::no_wildcard_imports`: Wildcard imports (`use foo::*`) are prohibited outside test contexts and preludes.
