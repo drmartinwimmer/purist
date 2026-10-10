@@ -76,7 +76,7 @@ impl Rule for GranularVisitorHooksRule {
     }
 }
 
-/// Visitor that inspects both visitor hooks and standalone functions for manual child AST loops.
+/// Visitor that inspects functions and methods for manual child AST collection iteration loops.
 struct AstHookScanner<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
@@ -116,56 +116,9 @@ impl<'ast> Visit<'ast> for AstHookScanner<'_> {
 impl AstHookScanner<'_> {
     fn inspect_fn(&mut self, sig: &syn::Signature, block: &syn::Block, in_visitor: bool) {
         let fn_name = sig.ident.to_string();
+        let in_visitor_file_hook = in_visitor && fn_name == "visit_file";
 
-        if in_visitor && is_visitor_container_hook(&fn_name) {
-            self.inspect_visitor_container_hook(&fn_name, block);
-        } else {
-            self.inspect_non_visitor_body(&fn_name, sig, block);
-        }
-    }
-
-    fn inspect_visitor_container_hook(&mut self, fn_name: &str, block: &syn::Block) {
-        let target_collection = match fn_name {
-            "visit_item_struct" => Some(("fields", "visit_field", "struct fields")),
-            "visit_item_enum" => Some(("variants", "visit_variant", "enum variants")),
-            "visit_expr_match" => Some(("arms", "visit_arm", "match arms")),
-            "visit_file" => Some(("items", "visit_item", "file items")),
-            _ => None,
-        };
-
-        if let Some((collection_name, hook_name, description)) = target_collection {
-            let mut loop_checker = ChildCollectionLoopChecker {
-                target_field: collection_name,
-                found_spans: Vec::new(),
-            };
-            loop_checker.visit_block(block);
-
-            for span in loop_checker.found_spans {
-                let diag_span = self.ctx.to_span(span);
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::granular_visitor_hooks",
-                        Severity::Warning,
-                        format!(
-                            "Manual iteration over {description} in '{fn_name}'. Implement the specialized '{hook_name}' visitor hook instead to preserve recursive traversal and attribute scoping."
-                        ),
-                    )
-                    .with_span(diag_span)
-                    .with_suggested_fix(format!(
-                        "Remove the loop and implement 'fn {hook_name}(&mut self, ...)'."
-                    )),
-                );
-            }
-        }
-    }
-
-    fn inspect_non_visitor_body(
-        &mut self,
-        fn_name: &str,
-        sig: &syn::Signature,
-        block: &syn::Block,
-    ) {
-        let mut loop_checker = NonVisitorAstLoopChecker::new(sig);
+        let mut loop_checker = AstChildLoopChecker::new(sig, in_visitor_file_hook);
         loop_checker.visit_block(block);
 
         for (span, hook_name, description) in loop_checker.found_violations {
@@ -175,12 +128,12 @@ impl AstHookScanner<'_> {
                     "purist::granular_visitor_hooks",
                     Severity::Warning,
                     format!(
-                        "Manual iteration over {description} in '{fn_name}'. Implement a syn::visit::Visit visitor with the specialized '{hook_name}' hook instead of manual AST traversal."
+                        "Manual iteration over {description} in '{fn_name}'. Implement and delegate to the specialized '{hook_name}' visitor hook instead to preserve recursive traversal and attribute scoping."
                     ),
                 )
                 .with_span(diag_span)
                 .with_suggested_fix(format!(
-                    "Implement a visitor and use 'fn {hook_name}(&mut self, ...)'."
+                    "Implement the specialized 'fn {hook_name}(...)' visitor hook instead of manual iteration."
                 )),
             );
         }
@@ -194,66 +147,36 @@ fn is_visit_impl(item_impl: &ItemImpl) -> bool {
     })
 }
 
-/// Checks whether a function name matches a standard container visitor hook.
-fn is_visitor_container_hook(name: &str) -> bool {
-    matches!(
-        name,
-        "visit_item_struct" | "visit_item_enum" | "visit_expr_match" | "visit_file"
-    )
-}
-
-/// AST inspector looking for loops or iterator pipelines over a specific child collection member.
-struct ChildCollectionLoopChecker<'a> {
-    target_field: &'a str,
-    found_spans: Vec<proc_macro2::Span>,
-}
-
-impl<'ast> Visit<'ast> for ChildCollectionLoopChecker<'_> {
-    fn visit_expr_for_loop(&mut self, for_loop: &'ast ExprForLoop) {
-        if !has_suppression_attribute(&for_loop.attrs, "granular_visitor_hooks")
-            && expr_references_field(&for_loop.expr, self.target_field)
-        {
-            self.found_spans.push(for_loop.span());
-        }
-        visit::visit_expr_for_loop(self, for_loop);
-    }
-
-    fn visit_expr_method_call(&mut self, method_call: &'ast ExprMethodCall) {
-        let method_name = method_call.method.to_string();
-        if method_name == "for_each"
-            && !has_suppression_attribute(&method_call.attrs, "granular_visitor_hooks")
-            && expr_references_field(&method_call.receiver, self.target_field)
-        {
-            self.found_spans.push(method_call.span());
-        }
-        visit::visit_expr_method_call(self, method_call);
-    }
-}
-
-/// AST inspector looking for manual loops over AST child collections in non-visitor code.
-struct NonVisitorAstLoopChecker {
+/// AST inspector looking for manual loops over child AST collections.
+struct AstChildLoopChecker {
     struct_bindings: HashSet<String>,
     enum_bindings: HashSet<String>,
     match_bindings: HashSet<String>,
+    file_bindings: HashSet<String>,
+    in_visitor_file_hook: bool,
     found_violations: Vec<(proc_macro2::Span, &'static str, &'static str)>,
 }
 
-impl NonVisitorAstLoopChecker {
-    fn new(sig: &syn::Signature) -> Self {
+impl AstChildLoopChecker {
+    fn new(sig: &syn::Signature, in_visitor_file_hook: bool) -> Self {
         let mut struct_bindings = HashSet::new();
         let mut enum_bindings = HashSet::new();
         let mut match_bindings = HashSet::new();
+        let mut file_bindings = HashSet::new();
         collect_ast_param_bindings(
             sig,
             &mut struct_bindings,
             &mut enum_bindings,
             &mut match_bindings,
+            &mut file_bindings,
         );
 
         Self {
             struct_bindings,
             enum_bindings,
             match_bindings,
+            file_bindings,
+            in_visitor_file_hook,
             found_violations: Vec::new(),
         }
     }
@@ -273,13 +196,20 @@ impl NonVisitorAstLoopChecker {
                     self.found_violations
                         .push((span, "visit_arm", "match arms"));
                 }
+                "items"
+                    if self.in_visitor_file_hook
+                        && is_ast_file_receiver(&receiver, &self.file_bindings) =>
+                {
+                    self.found_violations
+                        .push((span, "visit_item", "file items"));
+                }
                 _ => {}
             }
         }
     }
 }
 
-impl<'ast> Visit<'ast> for NonVisitorAstLoopChecker {
+impl<'ast> Visit<'ast> for AstChildLoopChecker {
     fn visit_pat_tuple_struct(&mut self, pat: &'ast PatTupleStruct) {
         if path_ends_with_ident(&pat.path, "Struct") && path_segment_contains(&pat.path, "Item") {
             for elem in &pat.elems {
@@ -331,6 +261,7 @@ fn collect_ast_param_bindings(
     struct_bindings: &mut HashSet<String>,
     enum_bindings: &mut HashSet<String>,
     match_bindings: &mut HashSet<String>,
+    file_bindings: &mut HashSet<String>,
 ) {
     for input in &sig.inputs {
         if let FnArg::Typed(pat_type) = input
@@ -343,6 +274,8 @@ fn collect_ast_param_bindings(
                 enum_bindings.insert(ident_str);
             } else if type_matches_ast_ident(&pat_type.ty, "ExprMatch") {
                 match_bindings.insert(ident_str);
+            } else if type_matches_ast_ident(&pat_type.ty, "File") {
+                file_bindings.insert(ident_str);
             }
         }
     }
@@ -389,6 +322,14 @@ fn is_ast_match_receiver(receiver: &str, ast_bindings: &HashSet<String>) -> bool
         || (receiver.ends_with("match") && receiver != "mismatch")
 }
 
+/// Checks whether a receiver refers to a file AST node.
+fn is_ast_file_receiver(receiver: &str, ast_bindings: &HashSet<String>) -> bool {
+    ast_bindings.contains(receiver)
+        || receiver == "file"
+        || receiver.ends_with("_file")
+        || receiver.ends_with("file")
+}
+
 /// Extracts the receiver ident and accessed field name if of the form `receiver.field`.
 fn extract_field_access(expr: &Expr) -> Option<(String, String)> {
     match expr {
@@ -429,29 +370,6 @@ fn extract_root_ident(expr: &Expr) -> Option<String> {
         Expr::Reference(ref_expr) => extract_root_ident(&ref_expr.expr),
         Expr::Paren(paren_expr) => extract_root_ident(&paren_expr.expr),
         _ => None,
-    }
-}
-
-/// Checks whether an expression accesses the named target field (e.g. `expr.fields` or `&expr.fields`).
-fn expr_references_field(expr: &Expr, target_field: &str) -> bool {
-    match expr {
-        Expr::Field(field_expr) => {
-            if let syn::Member::Named(ident) = &field_expr.member {
-                ident == target_field
-            } else {
-                false
-            }
-        }
-        Expr::Reference(ref_expr) => expr_references_field(&ref_expr.expr, target_field),
-        Expr::MethodCall(call) => {
-            let name = call.method.to_string();
-            if name == "iter" || name == "into_iter" {
-                expr_references_field(&call.receiver, target_field)
-            } else {
-                false
-            }
-        }
-        _ => false,
     }
 }
 
@@ -537,6 +455,57 @@ impl<'ast> Visit<'ast> for MatchVisitor {
         let diags = GranularVisitorHooksRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn for_loop_over_file_items_in_visit_file_is_flagged() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+use syn::visit::Visit;
+
+struct FileVisitor;
+
+impl<'ast> Visit<'ast> for FileVisitor {
+    fn visit_file(&mut self, file: &'ast syn::File) {
+        for item in &file.items {
+            println!("item");
+        }
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = GranularVisitorHooksRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(
+            &diag.message,
+            contains_substring("Manual iteration over file items in 'visit_file'")
+        );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn for_loop_over_file_items_in_root_checker_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+struct RootChecker;
+
+impl RootChecker {
+    fn check_file(&self, file: &syn::File) {
+        for item in &file.items {
+            println!("top-level item");
+        }
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = GranularVisitorHooksRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
         Ok(())
     }
 
