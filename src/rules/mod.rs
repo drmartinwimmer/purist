@@ -26,6 +26,7 @@ pub mod no_unsafe_in_tests;
 pub mod no_wildcard_imports;
 pub mod option_bool_mapping;
 pub mod path_resolution;
+pub mod prefer_scoped_closures;
 pub mod raii_temp_directories;
 pub mod single_match_to_let_else;
 pub mod test_matcher_borrow;
@@ -59,6 +60,7 @@ pub use no_unsafe_in_tests::NoUnsafeInTestsRule;
 pub use no_wildcard_imports::NoWildcardImportsRule;
 pub use option_bool_mapping::OptionBoolMappingRule;
 pub use path_resolution::PathResolutionRule;
+pub use prefer_scoped_closures::PreferScopedClosuresRule;
 pub use raii_temp_directories::RaiiTempDirectoriesRule;
 pub use single_match_to_let_else::SingleMatchToLetElseRule;
 pub use test_matcher_borrow::TestMatcherBorrowRule;
@@ -102,5 +104,6 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MaxNestingDepthRule),
         Box::new(NoHasTraitPrefixRule),
         Box::new(GranularVisitorHooksRule),
+        Box::new(PreferScopedClosuresRule),
     ]
 }
