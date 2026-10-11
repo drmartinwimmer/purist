@@ -167,6 +167,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::no_println_in_libraries`: Libraries must use structured returns, diagnostic collectors, or logging facades rather than raw `println!`.
   - `purist::no_double_negation`: Prohibits negative boolean naming (such as `with_skip_*`, `is_skip_*`, `skip: bool`) to prevent double negations.
   - `purist::no_has_trait_prefix`: Forbids `Has...` trait prefixes in favor of `With...` for scoped capabilities or descriptive nouns/adjectives.
+  - `purist::descriptive_checker_names`: Enforces structured `check_<subject>_<condition>` naming for validation/lint helpers.
   - `purist::clippy_suppression_hygiene`: Every `#[allow(...)]` or `#[expect(...)]` attribute requires a documented `reason`.
 - **Idiomatic Patterns**:
   - `purist::single_match_to_let_else`: Recommends `let ... = ... else { ... };` over single-variant `match` with early exits.

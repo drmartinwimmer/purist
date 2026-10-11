@@ -240,21 +240,21 @@ impl<'ast> Visit<'ast> for DispatchVisitor<'_> {
 
     fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
         if !self.test_scope.is_in_test() {
-            self.check_if(expr_if);
+            self.check_expr_if_bifurcated_dispatch(expr_if);
         }
         visit::visit_expr_if(self, expr_if);
     }
 
     fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
         if !self.test_scope.is_in_test() {
-            self.check_match(expr_match);
+            self.check_expr_match_bifurcated_dispatch(expr_match);
         }
         visit::visit_expr_match(self, expr_match);
     }
 }
 
 impl DispatchVisitor<'_> {
-    fn check_if(&mut self, expr_if: &syn::ExprIf) {
+    fn check_expr_if_bifurcated_dispatch(&mut self, expr_if: &syn::ExprIf) {
         let Some((_, else_expr)) = &expr_if.else_branch else {
             return;
         };
@@ -267,7 +267,7 @@ impl DispatchVisitor<'_> {
         }
     }
 
-    fn check_match(&mut self, expr_match: &syn::ExprMatch) {
+    fn check_expr_match_bifurcated_dispatch(&mut self, expr_match: &syn::ExprMatch) {
         let mut collector = MatchArmDispatchCollector::default();
         collector.visit_expr_match(expr_match);
 
