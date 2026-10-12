@@ -2,8 +2,8 @@
 //!
 //! # What This Rule Does
 //! Flags direct invocations of `std::env::var`, `var_os`, `set_var`, or `remove_var` outside of
-//! dedicated configuration, CLI, or settings modules (such as files named `config.rs`, `cli.rs`,
-//! `settings.rs`, or modules located in paths matching `*config*`, `*cli*`, or `*env*`).
+//! dedicated configuration, CLI, settings, or tool modules (such as files named `config.rs`, `cli.rs`,
+//! `settings.rs`, `tool.rs`, or modules located in paths matching `*config*`, `*cli*`, `*settings*`, `*env*`, or `*tool*`).
 //!
 //! # Why This Rule Exists
 //! Reading or writing process environment variables throughout business logic creates hidden,
@@ -49,7 +49,7 @@ use crate::engine::{LintContext, Rule};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule flagging raw `std::env::var` / `set_var` calls outside dedicated config or CLI modules.
+/// Rule flagging raw `std::env::var` / `set_var` calls outside dedicated config, CLI, or tool modules.
 pub struct NoEnvAccessOutsideConfigRule;
 
 impl Rule for NoEnvAccessOutsideConfigRule {
@@ -73,7 +73,7 @@ impl Rule for NoEnvAccessOutsideConfigRule {
     }
 }
 
-/// Returns true if the file path is a recognized configuration or CLI module.
+/// Returns true if the file path is a recognized configuration, CLI, or tool module.
 fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
     if ctx.is_test_file() {
         return true;
@@ -84,6 +84,7 @@ fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
         || path_str.contains("cli")
         || path_str.contains("settings")
         || path_str.contains("env")
+        || path_str.contains("tool")
 }
 
 /// Visitor inspecting function call expressions for `std::env` access while tracking test scopes.
@@ -151,11 +152,11 @@ impl EnvAccessVisitor<'_> {
                 "purist::no_env_access_outside_config",
                 Severity::Warning,
                 format!(
-                    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI modules. Parse environment parameters in a dedicated configuration layer."
+                    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI/tool modules. Parse environment parameters in a dedicated configuration layer."
                 ),
             )
             .with_span(span)
-            .with_suggested_fix("Parse environment variables in a centralized 'config.rs' or 'cli.rs' module and pass explicit parameters."),
+            .with_suggested_fix("Parse environment variables in a centralized 'config.rs', 'cli.rs', or 'tool' module and pass explicit parameters."),
         );
     }
 }
@@ -192,6 +193,36 @@ pub fn load() {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/config.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoEnvAccessOutsideConfigRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn env_var_in_tools_file_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub fn probe_system() {
+    let _ = std::env::var("HERDR_AGENT");
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tools/herdr.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoEnvAccessOutsideConfigRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn env_var_in_tool_file_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub fn probe_system() {
+    let _ = std::env::var("CUSTOM_TOOL_ENV");
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tool/scanner.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoEnvAccessOutsideConfigRule.check_file(&ctx, &ast);
 
