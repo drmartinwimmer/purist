@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.7.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.6.1...purist-v0.7.0) (2026-10-12)
+
+
+### Features
+
+* **no_env_access_outside_config:** allow env access in tools modules ([f527131](https://github.com/drmartinwimmer/purist/commit/f527131dbc0448978f7e0ca7dc5b9d97787b4cef))
+* **no_env_access_outside_config:** allow env access in tools modules ([da35bb4](https://github.com/drmartinwimmer/purist/commit/da35bb400c9130ddbc728447c6e68862ed64ecc0))
+* **rules:** extend purist::granular_visitor_hooks to catch non-visitor AST iteration ([ed57c71](https://github.com/drmartinwimmer/purist/commit/ed57c71870729204f45310be053c4f9ccc0716a8))
+* **rules:** extend purist::granular_visitor_hooks to catch non-visitor AST iteration ([d274749](https://github.com/drmartinwimmer/purist/commit/d2747495fbcf88cf84be35153ef0420982ef8e10))
+* **rules:** implement purist::descriptive_checker_names rule ([9edd0e0](https://github.com/drmartinwimmer/purist/commit/9edd0e0c64d30ca785cbeb1b7c730cac340c01c0))
+* **rules:** implement purist::descriptive_checker_names rule ([48a19f3](https://github.com/drmartinwimmer/purist/commit/48a19f36829dca962654feb96bb7196ef53f8f4c))
+* **rules:** implement purist::granular_visitor_hooks rule ([f76da96](https://github.com/drmartinwimmer/purist/commit/f76da96acde0a1dbd3b42a8d1da171cc623aa709))
+* **rules:** implement purist::granular_visitor_hooks rule ([27137d8](https://github.com/drmartinwimmer/purist/commit/27137d8cd548a32c11725367dd3f885b2988b8d1))
+* **rules:** implement purist::no_bifurcated_trait_dispatch rule ([aafded2](https://github.com/drmartinwimmer/purist/commit/aafded27916383a90bf95c657ea49d2c10ac643e))
+* **rules:** implement purist::no_bifurcated_trait_dispatch rule ([0753225](https://github.com/drmartinwimmer/purist/commit/0753225898c2ef2568b50ad6bf7874977aa64eda))
+* **rules:** implement purist::no_has_trait_prefix rule ([b3dbf8b](https://github.com/drmartinwimmer/purist/commit/b3dbf8b3e165eee9f85c4d3ed6b4e6fb1da89587))
+* **rules:** implement purist::prefer_scoped_closures rule ([21a8055](https://github.com/drmartinwimmer/purist/commit/21a80559329958f54508d92d2de1347babe828d3))
+* **rules:** implement purist::prefer_scoped_closures rule ([67f179d](https://github.com/drmartinwimmer/purist/commit/67f179d2e9c4e40e6548f12d98e6318d34dd0575))
+
+
+### Bug Fixes
+
+* **ci:** fix workspace package publishing verification and release synchronization ([3c0a376](https://github.com/drmartinwimmer/purist/commit/3c0a376bc6d9129cd33bbd84fb7402d340e568aa))
+* **ci:** fix workspace packaging verification and release publishing ([7cc8089](https://github.com/drmartinwimmer/purist/commit/7cc808937fc0eb60d20485126b2ae88734a071ee))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.6.1 to 0.6.2
+
 ## [0.6.1](https://github.com/drmartinwimmer/purist/compare/purist-v0.6.0...purist-v0.6.1) (2026-10-10)
 
 
