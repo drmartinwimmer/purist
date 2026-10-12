@@ -2,18 +2,24 @@
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "plugins": [
     {
-      "type": "cargo-workspace",
-      "updateAllPackages": true
+      "type": "cargo-workspace"
+    },
+    {
+      "type": "linked-versions",
+      "groupName": "purist-workspace",
+      "components": ["purist", "purist-derive"]
     }
   ],
   "packages": {
     ".": {
       "release-type": "rust",
-      "package-name": "purist"
+      "package-name": "purist",
+      "component": "purist"
     },
     "crates/purist-derive": {
       "release-type": "rust",
-      "package-name": "purist-derive"
+      "package-name": "purist-derive",
+      "component": "purist-derive"
     }
   }
 }
