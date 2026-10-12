@@ -55,16 +55,7 @@ jobs:
       - name: Verify package & metadata
         run: |
           cargo metadata --format-version 1 --no-deps > /dev/null
-          for pkg in purist-derive purist; do
-            output=$(cargo publish --dry-run -p "$pkg" 2>&1) || {
-              if echo "$output" | grep -q "no matching package named"; then
-                echo "Skipping crates.io registry check for $pkg: depends on unreleased workspace member."
-              else
-                echo "$output"
-                exit 1
-              fi
-            }
-          done
+          cargo publish --dry-run --workspace
 
   test:
     name: Unit & Integration Tests

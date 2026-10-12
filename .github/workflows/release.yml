@@ -43,8 +43,8 @@ jobs:
           cargo check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet Cargo.lock Cargo.toml; then
-            git add Cargo.lock Cargo.toml
+          if ! git diff --quiet Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml; then
+            git add Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml
             git commit -m "chore: sync Cargo.lock"
             git push
           fi
