@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.7.0...purist-v0.8.0) (2026-10-13)
+
+
+### Features
+
+* **release:** synchronize workspace crates in lockstep via linked-versions ([1abba40](https://github.com/drmartinwimmer/purist/commit/1abba408709962003bfae9f0abdc5286838ac470))
+* **release:** synchronize workspace crates in lockstep via linked-versions ([d2c5313](https://github.com/drmartinwimmer/purist/commit/d2c5313bce6cd82ddfba375835d5933a7905b32c))
+* **rules:** implement purist::no_primitive_flag_clutter rule ([e30456d](https://github.com/drmartinwimmer/purist/commit/e30456d9bfb310a467dc67961aeab0da440cf4cb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.6.2 to 0.8.0
+
 ## [0.7.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.6.1...purist-v0.7.0) (2026-10-12)
 
 
