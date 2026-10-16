@@ -153,6 +153,7 @@ Purist enforces strict best practices across multiple areas of code quality:
 
 - **Encapsulation & Boundaries**:
   - `purist::clap_struct_encapsulation`: CLI command structs should keep fields private and expose a `run(self)` execution method.
+  - `purist::command_struct_naming`: Clap CLI command structs must follow the `<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand` naming convention.
   - `purist::cli_run_consumes_self`: CLI execution methods consume `self` by value to avoid redundant cloning.
   - `purist::centralized_command_execution`: External command invocations must be centralized via dedicated runners.
   - `purist::no_inline_mods`: Modules should be placed in dedicated files, not inlined in root source files.

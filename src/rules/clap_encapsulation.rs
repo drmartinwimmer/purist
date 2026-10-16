@@ -3,7 +3,7 @@
 //! # What This Rule Does
 //! Enforces encapsulation standards on CLI command structs that derive Clap traits (`clap::Args`, `clap::Parser`):
 //! 1. Command argument fields must remain private (unless marked with `#[command(flatten)]` or `#[arg(flatten)]`).
-//! 2. Command structs (names ending in `Command` or `Args`, but not shared options/flags) must define an associated `run` or `execute` method.
+//! 2. Command structs (`<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand`, but not shared options/flags) must define an associated `run` or `execute` method.
 //!
 //! # Why This Rule Exists
 //! Exposing raw CLI arguments as public struct fields encourages external modules to reach into command
@@ -274,6 +274,28 @@ impl RunCommand {
         let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn args_and_subcommand_structs_without_run_are_flagged()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(clap::Args)]
+pub struct ConfigInitArgs {
+    global: bool,
+}
+
+#[derive(clap::Args)]
+pub struct WorkspaceSubcommand {
+    force: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/commands/workspace.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(2));
         Ok(())
     }
 }

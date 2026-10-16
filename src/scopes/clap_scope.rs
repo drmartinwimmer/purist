@@ -220,12 +220,18 @@ pub fn is_flattened_field(field: &Field) -> bool {
     })
 }
 
-/// Returns true if the struct name suggests a CLI command.
+fn has_subject_suffix(name: &str, suffix: &str) -> bool {
+    name.strip_suffix(suffix)
+        .is_some_and(|prefix| !prefix.is_empty())
+}
+
+/// Returns true if the struct name follows the `<Subject>Command`, `<Subject>Args`,
+/// `<Subject>Subcommand`, or `<Subject>Subcommands` naming convention.
 pub fn is_command_struct_name(name: &str) -> bool {
-    name.ends_with("Command")
-        || name.ends_with("Args")
-        || name.ends_with("Subcommand")
-        || name.ends_with("Subcommands")
+    has_subject_suffix(name, "Command")
+        || has_subject_suffix(name, "Args")
+        || has_subject_suffix(name, "Subcommand")
+        || has_subject_suffix(name, "Subcommands")
 }
 
 /// Returns true if the type name matches CLI top-level or command conventions.
@@ -233,7 +239,7 @@ pub fn is_cli_or_command_struct_name(name: &str) -> bool {
     name == "Cli"
         || name == "App"
         || name == "Commands"
-        || name.ends_with("Cli")
+        || has_subject_suffix(name, "Cli")
         || is_command_struct_name(name)
 }
 
