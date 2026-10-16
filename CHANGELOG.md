@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.8.0...purist-v0.9.0) (2026-10-16)
+
+
+### Features
+
+* **rules:** implement purist::no_interior_mutability_in_visitors rule ([f5f2732](https://github.com/drmartinwimmer/purist/commit/f5f2732d5eec033cd2a52746ab49704794122357))
+* **rules:** implement purist::no_interior_mutability_in_visitors rule ([ff3108d](https://github.com/drmartinwimmer/purist/commit/ff3108d875726a4531e832961a996c20f69475f5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.8.0 to 0.9.0
+
 ## [0.8.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.7.0...purist-v0.8.0) (2026-10-13)
 
 
