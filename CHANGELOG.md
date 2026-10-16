@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.9.0...purist-v0.10.0) (2026-10-16)
+
+
+### Features
+
+* **rules:** enforce &lt;Subject&gt;Command, &lt;Subject&gt;Args, and &lt;Subject&gt;Subcommand naming for Clap command structs ([d1349a2](https://github.com/drmartinwimmer/purist/commit/d1349a2b376858787fdfdae64937c29e000b78c2))
+* **rules:** enforce &lt;Subject&gt;Config naming for configuration structs while permitting non-config Serde models ([60c4070](https://github.com/drmartinwimmer/purist/commit/60c4070ec742faa99576c8d36aa7340e6c0669d5))
+* **rules:** implement purist::command_struct_naming and enforce prefixed Clap command suffixes ([e7f86d9](https://github.com/drmartinwimmer/purist/commit/e7f86d9e40c8660eac6e5c6603ad7f7c0f6727a2))
+* **rules:** implement purist::config_struct_naming rule ([6e1db80](https://github.com/drmartinwimmer/purist/commit/6e1db80f46a8fb6c58f808861922cd504377b4c3))
+
+
+### Bug Fixes
+
+* **free_functions:** permit unit structs for API grouping and namespacing ([192e171](https://github.com/drmartinwimmer/purist/commit/192e171c5834623d7d3c7ac0bbbf447a7e9693de))
+* **free_functions:** permit unit structs for API grouping and namespacing ([67ade12](https://github.com/drmartinwimmer/purist/commit/67ade129527a3345584902b95deaaacf48736d64))
+* **test_matcher_borrow:** exempt .as_slice() from test_matcher_borrow_simplification ([3265d0d](https://github.com/drmartinwimmer/purist/commit/3265d0d6ad7e11fa2cb1d5dcbe0f61a76a1049b2))
+* **test_matcher_borrow:** exempt .as_slice() from test_matcher_borrow_simplification ([5cd6b0c](https://github.com/drmartinwimmer/purist/commit/5cd6b0c9fb7a4caf5138f48b40c0a13f6ed0c21f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.9.0 to 0.10.0
+
 ## [0.9.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.8.0...purist-v0.9.0) (2026-10-16)
 
 
