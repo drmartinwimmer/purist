@@ -1,19 +1,24 @@
 //! Rule: `purist::free_functions`
 //!
 //! # What This Rule Does
-//! Detects stateless dummy structs (unit structs or structs with zero fields) that are used solely
-//! as namespaces for associated functions and implement no traits.
+//! Detects stateless empty braced (`struct Foo {}`) or empty tuple (`struct Foo()`) structs that
+//! are used solely as namespaces for associated functions and implement no traits.
+//!
+//! Idiomatic unit structs (`struct Foo;`) are permitted so they can be used intentionally for
+//! API grouping, discoverable namespaces (e.g. `ConfigInitializer::init_project_config()`), and
+//! factory methods without triggering false positives.
 //!
 //! # Why This Rule Exists
-//! In Rust, modules are first-class language constructs designed for namespacing and privacy boundaries.
-//! Creating empty structs with only associated functions (and no instance methods taking `&self` or `self`,
-//! and no trait implementations) is an unidiomatic pattern carried over from languages like Java or C#
-//! where all functions must belong to a class. In Rust, functions that do not operate on state should
-//! be idiomatic module-level free functions (`pub fn parse(...)`).
+//! In Rust, modules are first-class language constructs designed for namespacing and privacy boundaries,
+//! and unit structs (`struct Foo;`) are the idiomatic zero-sized marker construct when type-level grouping
+//! is desired. Creating empty braced structs (`struct Foo {}`) or empty tuple structs (`struct Foo()`)
+//! with only associated functions (and no instance methods taking `&self` or `self`, and no trait
+//! implementations) is an unidiomatic pattern carried over from languages like Java or C# where all
+//! functions must belong to a class block.
 //!
 //! # Non-Compliant Example
 //! ```rust,ignore
-//! pub struct StringParser; // Stateless dummy struct used as a namespace
+//! pub struct StringParser {} // Empty braced struct used as a Java-style static class
 //!
 //! impl StringParser {
 //!     pub fn parse_int(s: &str) -> Result<i32, ParseIntError> {
@@ -24,9 +29,18 @@
 //!
 //! # Compliant Example
 //! ```rust,ignore
-//! // In parser.rs module:
+//! // Option 1: Idiomatic module-level free function in parser.rs:
 //! pub fn parse_int(s: &str) -> Result<i32, ParseIntError> {
 //!     s.parse()
+//! }
+//!
+//! // Option 2: Idiomatic unit struct for intentional API grouping / factory methods:
+//! pub struct ConfigInitializer;
+//!
+//! impl ConfigInitializer {
+//!     pub fn init_project_config() -> Result<(), ConfigError> {
+//!         Ok(())
+//!     }
 //! }
 //! ```
 
@@ -36,7 +50,7 @@ use crate::engine::{LintContext, Rule};
 use std::collections::{HashMap, HashSet};
 use syn::Fields;
 
-/// Rule detecting stateless dummy structs used solely as static namespaces.
+/// Rule detecting stateless empty braced/tuple structs used solely as static namespaces.
 pub struct FreeFunctionsRule;
 
 impl Rule for FreeFunctionsRule {
@@ -45,7 +59,7 @@ impl Rule for FreeFunctionsRule {
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
-        // 1. Identify all unit or empty structs in the file
+        // 1. Identify all non-unit empty structs (braced `{}` or tuple `()`) in the file
         let empty_structs = collect_empty_structs(file);
         if empty_structs.is_empty() {
             return Vec::new();
@@ -59,20 +73,21 @@ impl Rule for FreeFunctionsRule {
     }
 }
 
-/// Stores implementation metrics for unit/empty structs.
+/// Stores implementation metrics for empty structs.
 struct StructImplAnalysis {
     implemented_traits: HashSet<String>,
     structs_with_instance_methods: HashSet<String>,
     structs_with_static_functions: HashMap<String, usize>,
 }
 
-/// Identifies all empty or unit structs defined in the file.
+/// Identifies all empty braced (`struct Foo {}`) or empty tuple (`struct Foo()`) structs defined in the file.
+/// Unit structs (`struct Foo;`, `Fields::Unit`) are intentionally permitted for API grouping and namespacing.
 fn collect_empty_structs(file: &syn::File) -> HashMap<String, proc_macro2::Span> {
     let mut empty_structs = HashMap::new();
     for item in &file.items {
         if let syn::Item::Struct(item_struct) = item {
             let is_empty = match &item_struct.fields {
-                Fields::Unit => true,
+                Fields::Unit => false,
                 Fields::Named(f) => f.named.is_empty(),
                 Fields::Unnamed(f) => f.unnamed.is_empty(),
             };
@@ -134,7 +149,7 @@ fn analyze_struct_implementations(
     }
 }
 
-/// Produces diagnostics for structs that act strictly as function namespaces.
+/// Produces diagnostics for empty braced/tuple structs that act strictly as function namespaces.
 fn build_free_function_diagnostics(
     ctx: &LintContext<'_>,
     rule_name: &'static str,
@@ -160,12 +175,12 @@ fn build_free_function_diagnostics(
                     rule_name,
                     Severity::Warning,
                     format!(
-                        "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module."
+                        "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module or a unit struct ('struct {struct_name};')."
                     ),
                 )
                 .with_span(ctx.to_span(span))
                 .with_suggested_fix(format!(
-                    "Remove struct '{struct_name}' and export its functions as top-level free functions."
+                    "Remove struct '{struct_name}' and export its functions as top-level free functions, or convert it to a unit struct 'struct {struct_name};'."
                 )),
             );
         }
@@ -182,9 +197,9 @@ mod tests {
     use std::path::Path;
 
     #[googletest::test]
-    fn dummy_namespace_struct_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn empty_braced_namespace_struct_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
-pub struct Parser;
+pub struct Parser {}
 
 impl Parser {
     pub fn parse(input: &str) -> usize {
@@ -207,9 +222,49 @@ impl Parser {
     }
 
     #[googletest::test]
+    fn empty_tuple_namespace_struct_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct Parser();
+
+impl Parser {
+    pub fn parse(input: &str) -> usize {
+        input.len()
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/parser.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = FreeFunctionsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("purist::free_functions"));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn unit_struct_namespace_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct ConfigInitializer;
+
+impl ConfigInitializer {
+    pub fn init_project_config() -> usize {
+        42
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/config.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = FreeFunctionsRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
     fn struct_with_receiver_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
-pub struct Service;
+pub struct Service {}
 
 impl Service {
     pub fn start(&self) {}
@@ -226,7 +281,7 @@ impl Service {
     #[googletest::test]
     fn struct_implementing_trait_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
-pub struct Visitor;
+pub struct Visitor {}
 
 pub trait Visit {
     fn visit(&self);
@@ -237,7 +292,7 @@ impl Visit for Visitor {
 }
 
 impl Visitor {
-    pub fn create() -> Self { Visitor }
+    pub fn create() -> Self { Visitor {} }
 }
 "#;
         let ctx = LintContext::new(Path::new("src/visitor.rs"), source);

@@ -157,7 +157,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::cli_run_consumes_self`: CLI execution methods consume `self` by value to avoid redundant cloning.
   - `purist::centralized_command_execution`: External command invocations must be centralized via dedicated runners.
   - `purist::no_inline_mods`: Modules should be placed in dedicated files, not inlined in root source files.
-  - `purist::free_functions`: Functions should not be namespaced in dummy empty structs.
+  - `purist::free_functions`: Functions should not be namespaced in empty braced or tuple structs (`struct Foo {}`, `struct Foo()`); unit structs (`struct Foo;`) are permitted.
   - `purist::no_trivial_getters_setters`: Flags trivial getter/setter combos where exposing or accessing the field directly would suffice (YAGNI).
   - `purist::granular_visitor_hooks`: Enforces specialized leaf visitor hooks over manual iteration over child AST collections.
   - `purist::no_bifurcated_trait_dispatch`: Forbids conditional branches from instantiating alternate sibling types to dispatch the same trait method.
@@ -188,7 +188,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::no_test_prefix`: Forbids redundant `test_` prefixes in test function names.
   - `purist::no_unsafe_in_tests`: Forbids raw `unsafe` blocks and functions in test suites without explicit suppression.
   - `purist::raii_temp_directories`: Requires RAII temporary directory guards over manual `fs::remove_dir_all`.
-  - `purist::test_matcher_borrow_simplification`: Disallows redundant `.as_str()` / `.as_slice()` in GoogleTest assertions.
+  - `purist::test_matcher_borrow_simplification`: Disallows redundant `.as_str()` conversions in GoogleTest assertions.
   - `purist::googletest_conventions`: Enforces idiomatic GoogleTest conventions (`#[googletest::test]`, `assert_that!`, `?` over `.expect()`, and direct expressive matchers).
 
 ## License
