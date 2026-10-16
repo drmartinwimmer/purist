@@ -161,6 +161,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::granular_visitor_hooks`: Enforces specialized leaf visitor hooks over manual iteration over child AST collections.
   - `purist::no_bifurcated_trait_dispatch`: Forbids conditional branches from instantiating alternate sibling types to dispatch the same trait method.
   - `purist::no_primitive_flag_clutter`: Forbids multiple loose boolean flags / flag trackers in favor of domain scopes or state machines.
+  - `purist::no_interior_mutability_in_visitors`: Forbids interior mutability (`RefCell`, `Mutex`, etc.) in single-threaded AST visitor structs.
 - **Hygiene & Readability**:
   - `purist::use_declarations_over_qualified_paths`: Disallows long inline qualified paths (`crate::a::b::C`) in favor of clear `use` imports.
   - `purist::no_wildcard_imports`: Wildcard imports (`use foo::*`) are prohibited outside test contexts and preludes.
