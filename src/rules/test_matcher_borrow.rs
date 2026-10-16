@@ -1,25 +1,28 @@
 //! # Rule: purist::test_matcher_borrow_simplification
 //!
 //! ## What This Rule Does
-//! Flags redundant `.as_str()` or `.as_slice()` conversion calls inside GoogleTest assertions
+//! Flags redundant `.as_str()` conversion calls inside GoogleTest assertions
 //! (`assert_that!` and `expect_that!`).
 //!
 //! ## Why This Rule Exists
-//! GoogleTest Rust matchers (such as `eq(...)`, `contains_substring(...)`, `elements_are!...`)
-//! operate seamlessly on borrowed references. Calling `.as_str()` or `.as_slice()` adds unnecessary
-//! visual clutter and noise to test assertions. The expression can simply be borrowed directly
+//! GoogleTest Rust string matchers (such as `eq(...)`, `contains_substring(...)`, `starts_with(...)`)
+//! operate seamlessly on borrowed `&String` references. Calling `.as_str()` adds unnecessary
+//! visual clutter and noise to test assertions when the expression can simply be borrowed directly
 //! with `&<expr>`.
+//!
+//! Note: `.as_slice()` is intentionally permitted because slice matchers (such as
+//! `contains_subslice(...)` or `eq(&[...])`) require `&[T]`, which `&Vec<T>` does not satisfy
+//! without an unidiomatic deref-borrow (`&*vec`).
 //!
 //! ## Non-Compliant Example
 //! ```rust,ignore
 //! assert_that!(result.as_str(), eq("success"));
-//! expect_that!(items.as_slice(), elements_are![eq(&1), eq(&2)]);
 //! ```
 //!
 //! ## Compliant Example
 //! ```rust,ignore
 //! assert_that!(&result, eq("success"));
-//! expect_that!(&items, elements_are![eq(&1), eq(&2)]);
+//! expect_that!(args.as_slice(), contains_subslice(&["--settings", &local_str]));
 //! ```
 
 use crate::checkers::check_macro_matches;
@@ -31,7 +34,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-/// Rule flagging redundant `.as_str()` or `.as_slice()` conversions inside GoogleTest assertions.
+/// Rule flagging redundant `.as_str()` conversions inside GoogleTest assertions.
 pub struct TestMatcherBorrowRule;
 
 impl Rule for TestMatcherBorrowRule {
@@ -87,7 +90,7 @@ fn collect_macro_diagnostics(
     }
 }
 
-/// Visitor that traverses an expression inside an assertion looking for `.as_str()` or `.as_slice()`.
+/// Visitor that traverses an expression inside an assertion looking for redundant `.as_str()` calls.
 struct BorrowMethodVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
@@ -109,13 +112,13 @@ impl<'ast> Visit<'ast> for BorrowMethodVisitor<'_> {
     }
 }
 
-/// Emits a diagnostic if the method call is a redundant `.as_str()` or `.as_slice()`.
+/// Emits a diagnostic if the method call is a redundant `.as_str()`.
 fn check_method_call_redundant_borrow(
     ctx: &LintContext<'_>,
     call: &syn::ExprMethodCall,
 ) -> Option<Diagnostic> {
     let method_name = call.method.to_string();
-    if method_name == "as_str" || method_name == "as_slice" {
+    if method_name == "as_str" {
         let span = ctx.to_span(call.span());
         Some(
             Diagnostic::new(
@@ -161,10 +164,11 @@ fn sample_test() {
     }
 
     #[googletest::test]
-    fn as_slice_in_matcher_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+    fn as_slice_in_matcher_is_permitted() -> Result<(), Box<dyn std::error::Error>> {
         let source = r#"
 #[test]
 fn sample_test() {
+    expect_that!(args.as_slice(), contains_subslice(&["--settings", &local_str]));
     expect_that!(actual, eq(expected.as_slice()));
 }
 "#;
@@ -172,10 +176,7 @@ fn sample_test() {
         let ast = syn::parse_file(source)?;
         let diags = TestMatcherBorrowRule.check_file(&ctx, &ast);
 
-        assert_that!(diags.len(), eq(1));
-        let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::test_matcher_borrow_simplification"));
-        assert_that!(&diag.message, contains_substring("Redundant '.as_slice()'"));
+        assert_that!(diags.is_empty(), is_true());
         Ok(())
     }
 
