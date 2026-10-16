@@ -4,6 +4,7 @@ pub mod cli_run_consumes_self;
 pub mod clippy_suppress;
 pub mod command_struct_naming;
 pub mod common;
+pub mod config_struct_naming;
 pub mod descriptive_checker_names;
 pub mod error_types;
 pub mod exit_code_hygiene;
@@ -43,6 +44,7 @@ pub use clap_encapsulation::ClapEncapsulationRule;
 pub use cli_run_consumes_self::CliRunConsumesSelfRule;
 pub use clippy_suppress::ClippySuppressRule;
 pub use command_struct_naming::CommandStructNamingRule;
+pub use config_struct_naming::ConfigStructNamingRule;
 pub use descriptive_checker_names::DescriptiveCheckerNamesRule;
 pub use error_types::ErrorTypesRule;
 pub use exit_code_hygiene::ExitCodeHygieneRule;
@@ -87,6 +89,7 @@ pub fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(PathResolutionRule),
         Box::new(ErrorTypesRule),
         Box::new(ClippySuppressRule),
+        Box::new(ConfigStructNamingRule),
         Box::new(TestPatternsRule),
         Box::new(NoRedundantConversionsRule),
         Box::new(UseDeclarationsRule),
