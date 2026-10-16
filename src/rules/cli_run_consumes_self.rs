@@ -2,8 +2,8 @@
 //!
 //! # What This Rule Does
 //! Enforces that CLI execution methods (such as `run`, `run_with_format`, or `execute`) defined on
-//! command structs (structs whose names end in `Command` or `Cli`, or named `Cli` or `Commands`)
-//! consume `self` by value rather than borrowing `&self`.
+//! command structs (`<Subject>Command`, `<Subject>Args`, `<Subject>Subcommand`, `<Subject>Cli`, or
+//! top-level `Cli`, `App`, `Commands`) consume `self` by value rather than borrowing `&self`.
 //!
 //! # Why This Rule Exists
 //! CLI execution methods represent the terminal action of a command invocation. Taking `self` by value:
@@ -215,6 +215,30 @@ impl ProcessRunner {
         let diags = CliRunConsumesSelfRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn args_and_subcommand_run_taking_borrow_are_flagged() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+pub struct ConfigInitArgs;
+
+impl ConfigInitArgs {
+    pub fn run(&self) {}
+}
+
+pub struct WorkspaceSubcommand;
+
+impl WorkspaceSubcommand {
+    pub fn execute(&self) {}
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/commands/workspace.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = CliRunConsumesSelfRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(2));
         Ok(())
     }
 }

@@ -35,6 +35,7 @@ pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
         "no_unsafe_in_tests" => Some("no_unsafe_in_tests"),
         "centralized_command_execution" => Some("centralized_command_execution"),
         "clap_struct_encapsulation" => Some("clap_struct_encapsulation"),
+        "command_struct_naming" => Some("command_struct_naming"),
         "exit_code_hygiene" => Some("exit_code_hygiene"),
         "idiomatic_option_bool_mapping" => Some("idiomatic_option_bool_mapping"),
         "no_wildcard_imports" => Some("no_wildcard_imports"),
