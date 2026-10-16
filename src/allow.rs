@@ -36,6 +36,7 @@ pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
         "centralized_command_execution" => Some("centralized_command_execution"),
         "clap_struct_encapsulation" => Some("clap_struct_encapsulation"),
         "command_struct_naming" => Some("command_struct_naming"),
+        "config_struct_naming" => Some("config_struct_naming"),
         "exit_code_hygiene" => Some("exit_code_hygiene"),
         "idiomatic_option_bool_mapping" => Some("idiomatic_option_bool_mapping"),
         "no_wildcard_imports" => Some("no_wildcard_imports"),
