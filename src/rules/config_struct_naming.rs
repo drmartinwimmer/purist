@@ -69,8 +69,8 @@ impl Rule for ConfigStructNamingRule {
         }
 
         let in_config_file = is_config_module_path(ctx.file_path());
-        let mut loader_collector = ConfigLoaderCollector::default();
-        loader_collector.visit_file(file);
+        let in_tool_file = is_tool_module_path(ctx.file_path());
+        let loader_structs = ConfigLoaderCollector::collect_for_file(file, in_tool_file);
 
         let mut visitor = ConfigStructNamingVisitor {
             ctx,
@@ -78,7 +78,7 @@ impl Rule for ConfigStructNamingRule {
             test_scope: TestScope::new(ctx.is_test_file()),
             in_config_file,
             config_mod_depth: 0,
-            loader_structs: loader_collector.loader_structs,
+            loader_structs,
         };
 
         visitor.visit_file(file);
@@ -124,12 +124,62 @@ fn is_config_module_path(path: &Path) -> bool {
         || stem.ends_with("_settings")
 }
 
-/// First-pass collector identifying structs whose `impl` blocks define configuration loader
-/// methods (e.g. `from_env`, `load_config`) or read environment variables via `std::env::var`.
+/// Returns true if the file path corresponds to a dedicated tool or command-adapter module,
+/// where structs represent external tool wrappers or sessions rather than configuration models.
+fn is_tool_module_path(path: &Path) -> bool {
+    let components: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+
+    if components.iter().any(|c| c == "rules") {
+        return false;
+    }
+
+    if components
+        .iter()
+        .any(|c| matches!(c.as_str(), "tool" | "tools"))
+    {
+        return true;
+    }
+
+    let Some(stem) = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+    else {
+        return false;
+    };
+
+    matches!(stem.as_str(), "tool" | "tools")
+        || stem.starts_with("tool_")
+        || stem.ends_with("_tool")
+        || stem.ends_with("_tools")
+}
+
+/// First-pass collector identifying passive configuration structs whose `impl` blocks define
+/// configuration loader methods (e.g. `from_env`, `load_config`) or read environment variables
+/// via `std::env::var`, while excluding active behavioral/service structs.
 #[derive(Default, WithTypeScope)]
 struct ConfigLoaderCollector {
     type_scope: TypeScope,
     loader_structs: HashSet<String>,
+    behavioral_structs: HashSet<String>,
+}
+
+impl ConfigLoaderCollector {
+    /// Collects struct names that act as configuration loaders in non-tool files.
+    fn collect_for_file(file: &syn::File, in_tool_file: bool) -> HashSet<String> {
+        if in_tool_file {
+            return HashSet::new();
+        }
+        let mut collector = Self::default();
+        collector.visit_file(file);
+        collector
+            .loader_structs
+            .into_iter()
+            .filter(|name| !collector.behavioral_structs.contains(name))
+            .collect()
+    }
 }
 
 impl<'ast> Visit<'ast> for ConfigLoaderCollector {
@@ -150,6 +200,8 @@ impl<'ast> Visit<'ast> for ConfigLoaderCollector {
             let fn_name = impl_fn.sig.ident.to_string();
             if is_config_loader_fn_name(&fn_name) {
                 self.loader_structs.insert(struct_name.to_string());
+            } else if impl_fn.sig.receiver().is_some() && !is_config_like_struct_name(struct_name) {
+                self.behavioral_structs.insert(struct_name.to_string());
             }
         }
         visit::visit_impl_item_fn(self, impl_fn);
@@ -172,12 +224,21 @@ fn is_config_loader_fn_name(name: &str) -> bool {
         name,
         "from_env"
             | "load_config"
-            | "from_config"
             | "from_config_file"
             | "from_manifest"
             | "from_manifest_content"
             | "from_manifest_file"
     )
+}
+
+/// Returns true if a struct name uses a configuration, settings, or options/parameters suffix.
+fn is_config_like_struct_name(name: &str) -> bool {
+    is_explicit_config_synonym_name(name)
+        || matches!(name, "Options" | "Parameters" | "Params")
+        || name.ends_with("Options")
+        || name.ends_with("Parameters")
+        || name.ends_with("Params")
+        || name.ends_with("Env")
 }
 
 /// Visitor that inspects struct definitions and enforces `<Subject>Config` naming for configuration structs.
@@ -536,6 +597,71 @@ pub struct LegacySettings {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/config.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn tool_session_struct_reading_env_or_defining_from_env_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct Herdr {
+    session: String,
+    tab_id: Option<String>,
+}
+
+impl Herdr {
+    pub fn from_env() -> Self {
+        let session = std::env::var("HERDR_SESSION").unwrap_or_default();
+        let tab_id = std::env::var("HERDR_TAB_ID").ok();
+        Self { session, tab_id }
+    }
+
+    pub fn from_config(session: String) -> Self {
+        Self { session, tab_id: None }
+    }
+
+    pub fn is_inside_herdr() -> bool {
+        std::env::var("HERDR_AGENT").is_ok()
+    }
+
+    pub fn create_tab(&self, name: &str) -> Result<(), String> {
+        let _ = (&self.session, &self.tab_id, name);
+        Ok(())
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tools/herdr.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn behavioral_service_struct_with_from_env_outside_config_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub struct SessionClient {
+    endpoint: String,
+}
+
+impl SessionClient {
+    pub fn from_env() -> Self {
+        let endpoint = std::env::var("SESSION_ENDPOINT").unwrap_or_default();
+        Self { endpoint }
+    }
+
+    pub fn execute(&self, command: &str) -> String {
+        format!("{}:{}", self.endpoint, command)
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/session.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
 
