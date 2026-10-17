@@ -41,6 +41,7 @@ use super::common::{
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use std::collections::HashSet;
+use std::path::Path;
 use syn::visit::{self, Visit};
 use syn::{Item, ItemImpl, ItemStruct, Type};
 
@@ -115,7 +116,11 @@ impl StructFlagVisitor<'_> {
                 .with_span(span)
                 .with_suggested_fix("Consolidate loose flags into a domain scope with 'With...' traits and derive macros."),
             );
-        } else if !is_visitor && flag_count >= 4 {
+        } else if !is_visitor
+            && flag_count >= 4
+            && !is_serde_wire_struct(item_struct)
+            && !is_tool_module_path(self.ctx.file_path())
+        {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
                 Diagnostic::new(
@@ -174,11 +179,47 @@ fn is_cli_clap_struct(item_struct: &ItemStruct) -> bool {
     derives_any(&item_struct.attrs, &["Parser", "Args", "Subcommand"])
 }
 
+/// Returns true if a struct derives `Serialize` or `Deserialize` (external wire/serialization DTO).
+fn is_serde_wire_struct(item_struct: &ItemStruct) -> bool {
+    derives_any(&item_struct.attrs, &["Serialize", "Deserialize"])
+}
+
+/// Returns true if the file path is inside a dedicated tool adapter module (`tool` / `tools`),
+/// where non-visitor structs often represent external CLI porcelain output schemas.
+fn is_tool_module_path(path: &Path) -> bool {
+    let components: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+
+    if components.iter().any(|c| c == "rules") {
+        return false;
+    }
+
+    if components
+        .iter()
+        .any(|c| matches!(c.as_str(), "tool" | "tools"))
+    {
+        return true;
+    }
+
+    let Some(stem) = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+    else {
+        return false;
+    };
+
+    matches!(stem.as_str(), "tool" | "tools")
+        || stem.starts_with("tool_")
+        || stem.ends_with("_tool")
+        || stem.ends_with("_tools")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
-    use std::path::Path;
 
     #[googletest::test]
     fn visitor_with_multiple_boolean_flags_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
@@ -276,6 +317,44 @@ struct LegacyFlags {
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrimitiveFlagClutterRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn tool_porcelain_struct_with_four_booleans_is_exempt() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+pub struct GitWorktreeEntry {
+    pub bare: bool,
+    pub detached: bool,
+    pub locked: bool,
+    pub prunable: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/tools/git.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrimitiveFlagClutterRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn serde_wire_dto_with_four_booleans_is_exempt() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(serde::Deserialize)]
+pub struct FeatureFlagsPayload {
+    pub dark_mode: bool,
+    pub beta_api: bool,
+    pub telemetry: bool,
+    pub experimental_cache: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/api.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoPrimitiveFlagClutterRule.check_file(&ctx, &ast);
 
