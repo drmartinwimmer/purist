@@ -61,6 +61,13 @@ pub struct PuristLintsConfig {
     pub max_nesting_depth: RuleLevel,
     pub lib_facade_hygiene: RuleLevel,
     pub no_negative_bool: RuleLevel,
+    pub no_has_trait_prefix: RuleLevel,
+    pub granular_visitor_hooks: RuleLevel,
+    pub no_bifurcated_trait_dispatch: RuleLevel,
+    pub no_primitive_flag_clutter: RuleLevel,
+    pub no_interior_mutability_in_visitors: RuleLevel,
+    pub prefer_scoped_closures: RuleLevel,
+    pub descriptive_checker_names: RuleLevel,
 }
 
 impl PuristLintsConfig {
@@ -104,6 +111,13 @@ impl PuristLintsConfig {
             "max_nesting_depth" => Some(self.max_nesting_depth),
             "lib_facade_hygiene" => Some(self.lib_facade_hygiene),
             "no_negative_bool" => Some(self.no_negative_bool),
+            "no_has_trait_prefix" => Some(self.no_has_trait_prefix),
+            "granular_visitor_hooks" => Some(self.granular_visitor_hooks),
+            "no_bifurcated_trait_dispatch" => Some(self.no_bifurcated_trait_dispatch),
+            "no_primitive_flag_clutter" => Some(self.no_primitive_flag_clutter),
+            "no_interior_mutability_in_visitors" => Some(self.no_interior_mutability_in_visitors),
+            "prefer_scoped_closures" => Some(self.prefer_scoped_closures),
+            "descriptive_checker_names" => Some(self.descriptive_checker_names),
             _ => None,
         }
     }
@@ -148,6 +162,13 @@ impl PuristLintsConfig {
             "max_nesting_depth" => self.max_nesting_depth = level,
             "lib_facade_hygiene" => self.lib_facade_hygiene = level,
             "no_negative_bool" => self.no_negative_bool = level,
+            "no_has_trait_prefix" => self.no_has_trait_prefix = level,
+            "granular_visitor_hooks" => self.granular_visitor_hooks = level,
+            "no_bifurcated_trait_dispatch" => self.no_bifurcated_trait_dispatch = level,
+            "no_primitive_flag_clutter" => self.no_primitive_flag_clutter = level,
+            "no_interior_mutability_in_visitors" => self.no_interior_mutability_in_visitors = level,
+            "prefer_scoped_closures" => self.prefer_scoped_closures = level,
+            "descriptive_checker_names" => self.descriptive_checker_names = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())
@@ -489,6 +510,7 @@ fn has_lints_workspace_true_doc(doc: &DocumentMut) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::default_rules;
     use googletest::prelude::*;
 
     #[googletest::test]
@@ -551,21 +573,13 @@ centralized_command_execution = "allow"
 
     #[googletest::test]
     fn purist_lints_config_defaults_all_rules_to_warn() {
-        let config = PuristLintsConfig::default();
-        assert_that!(config.no_inline_mods, eq(RuleLevel::Warn));
-        assert_that!(config.free_functions, eq(RuleLevel::Warn));
-        assert_that!(config.path_resolution, eq(RuleLevel::Warn));
-        assert_that!(config.error_types, eq(RuleLevel::Warn));
-        assert_that!(config.cli_run_consumes_self, eq(RuleLevel::Warn));
-        assert_that!(config.no_wildcard_imports, eq(RuleLevel::Warn));
-        assert_that!(config.no_println_in_libraries, eq(RuleLevel::Warn));
-        assert_that!(config.no_double_negation, eq(RuleLevel::Warn));
-        assert_that!(config.googletest_conventions, eq(RuleLevel::Warn));
-        assert_that!(config.max_file_lines, eq(RuleLevel::Warn));
-        assert_that!(config.no_trivial_getters_setters, eq(RuleLevel::Warn));
-        assert_that!(config.max_nesting_depth, eq(RuleLevel::Warn));
-        assert_that!(config.lib_facade_hygiene, eq(RuleLevel::Warn));
-        assert_that!(config.no_negative_bool, eq(RuleLevel::Warn));
+        let mut config = PuristLintsConfig::default();
+        for rule in default_rules() {
+            let name = rule.name();
+            assert_that!(config.get(name), eq(Some(RuleLevel::Warn)));
+            assert_that!(config.set(name, RuleLevel::Allow), eq(Ok(())));
+            assert_that!(config.get(name), eq(Some(RuleLevel::Allow)));
+        }
     }
 
     #[googletest::test]
