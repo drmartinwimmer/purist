@@ -55,6 +55,13 @@ pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
         "max_nesting_depth" => Some("max_nesting_depth"),
         "lib_facade_hygiene" => Some("lib_facade_hygiene"),
         "no_negative_bool" => Some("no_negative_bool"),
+        "no_has_trait_prefix" => Some("no_has_trait_prefix"),
+        "granular_visitor_hooks" => Some("granular_visitor_hooks"),
+        "no_bifurcated_trait_dispatch" => Some("no_bifurcated_trait_dispatch"),
+        "no_primitive_flag_clutter" => Some("no_primitive_flag_clutter"),
+        "no_interior_mutability_in_visitors" => Some("no_interior_mutability_in_visitors"),
+        "prefer_scoped_closures" => Some("prefer_scoped_closures"),
+        "descriptive_checker_names" => Some("descriptive_checker_names"),
         _ => None,
     }
 }
@@ -280,6 +287,7 @@ pub fn allow_project(target_path: &Path, report: &DiagnosticReport) -> Result<us
 mod tests {
     use super::*;
     use crate::diagnostics::{Diagnostic, Severity, Span};
+    use crate::rules::default_rules;
     use googletest::prelude::*;
 
     struct TempDirGuard(PathBuf);
@@ -292,6 +300,12 @@ mod tests {
 
     #[googletest::test]
     fn canonical_rule_name_maps_canonical_rule_names_succeeds() {
+        for rule in default_rules() {
+            let name = rule.name();
+            let stripped = name.strip_prefix("purist::").unwrap_or(name);
+            assert_that!(canonical_rule_name(name), eq(Some(stripped)));
+            assert_that!(canonical_rule_name(stripped), eq(Some(stripped)));
+        }
         assert_that!(
             canonical_rule_name("purist::no_wildcard_imports"),
             eq(Some("no_wildcard_imports"))
