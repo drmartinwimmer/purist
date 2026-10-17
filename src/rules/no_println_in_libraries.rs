@@ -52,7 +52,7 @@ impl Rule for NoPrintlnInLibrariesRule {
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
-        if is_exempt_entrypoint_or_example(ctx) {
+        if is_exempt_entrypoint_or_cli_module(ctx) {
             return Vec::new();
         }
 
@@ -68,10 +68,42 @@ impl Rule for NoPrintlnInLibrariesRule {
     }
 }
 
-/// Returns true if the file is an entrypoint binary or example where standard output printing is expected.
-fn is_exempt_entrypoint_or_example(ctx: &LintContext<'_>) -> bool {
-    let path_str = ctx.file_path().to_string_lossy();
-    path_str.ends_with("main.rs") || path_str.contains("/bin/") || path_str.contains("/examples/")
+/// Returns true if the file is an entrypoint binary, example, or dedicated CLI/commands module
+/// where standard output and standard error printing is expected.
+fn is_exempt_entrypoint_or_cli_module(ctx: &LintContext<'_>) -> bool {
+    let path = ctx.file_path();
+    let path_str = path.to_string_lossy();
+    if path_str.ends_with("main.rs")
+        || path_str.contains("/bin/")
+        || path_str.contains("/examples/")
+    {
+        return true;
+    }
+
+    let components: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+
+    if components.iter().any(|c| c == "rules") {
+        return false;
+    }
+
+    if components
+        .iter()
+        .any(|c| matches!(c.as_str(), "cli" | "commands"))
+    {
+        return true;
+    }
+
+    let Some(stem) = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+    else {
+        return false;
+    };
+
+    stem == "cli" || stem.ends_with("_cli")
 }
 
 /// Returns true if an impl block represents a CLI command or command runner.
@@ -149,7 +181,10 @@ impl<'ast> Visit<'ast> for PrintlnVisitor<'_> {
 impl PrintlnVisitor<'_> {
     /// Checks whether a macro invocation is `println!` or `eprintln!` in an unexempt library scope.
     fn check_macro_println_in_library(&mut self, mac: &syn::Macro) {
-        if self.test_scope.is_in_test() || self.clap_scope.is_in_command_runner() {
+        if self.test_scope.is_in_test()
+            || self.clap_scope.is_in_cli_impl()
+            || self.clap_scope.is_in_command_runner()
+        {
             return;
         }
 
@@ -265,6 +300,55 @@ impl Cli {
 }
 "#;
         let ctx = LintContext::new(Path::new("crates/code-review/src/lib.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn println_in_cli_module_helper_function_is_permitted() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+use std::path::Path;
+
+fn warn_already_exists(kind: &str, path: &Path) {
+    eprintln!(
+        "Warning: {kind} configuration already exists: {}. No files written.",
+        path.display()
+    );
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn println_in_cli_struct_helper_method_is_permitted() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+pub struct ConfigInitArgs {
+    pub force: bool,
+}
+
+impl ConfigInitArgs {
+    fn warn_already_exists(&self, kind: &str) {
+        if !self.force {
+            eprintln!("Warning: {kind} configuration already exists.");
+        }
+    }
+
+    pub fn run(self) {
+        self.warn_already_exists("project");
+    }
+}
+"#;
+        let ctx = LintContext::new(Path::new("crates/app/src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
         let diags = NoPrintlnInLibrariesRule.check_file(&ctx, &ast);
 
