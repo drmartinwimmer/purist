@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.1](https://github.com/drmartinwimmer/purist/compare/purist-v0.10.0...purist-v0.10.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **config_struct_naming:** avoid flagging tool and behavioral structs as config ([f7f9a3c](https://github.com/drmartinwimmer/purist/commit/f7f9a3c55572d0c553fe27be72fe090018992b11))
+* **config_struct_naming:** avoid flagging tool and behavioral structs as config ([2081797](https://github.com/drmartinwimmer/purist/commit/2081797fa6261c642eaca5fe3e636d894fa5867d))
+* **no_primitive_flag_clutter:** register missing rules in Cargo.toml config and exempt tool/serde DTOs ([c1837e7](https://github.com/drmartinwimmer/purist/commit/c1837e70f44e6aa5bae0be57d13f7d7aaa83c074))
+* **no_primitive_flag_clutter:** register missing rules in Cargo.toml config and exempt tool/serde DTOs ([91aec36](https://github.com/drmartinwimmer/purist/commit/91aec3652ea5002d5baa34576ea4f465056e5c79))
+* **no_println_in_libraries:** allow println! in CLI modules and CLI impl helpers ([fb072be](https://github.com/drmartinwimmer/purist/commit/fb072be18fe8d34dfc564bb9eae9bc45316fcf0f))
+* **no_println_in_libraries:** allow println! in CLI modules and CLI impl helpers ([7864762](https://github.com/drmartinwimmer/purist/commit/7864762804bd05597425eb402af5bc980a314769))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.10.0 to 0.10.1
+
 ## [0.10.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.9.0...purist-v0.10.0) (2026-10-16)
 
 
