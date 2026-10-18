@@ -37,15 +37,25 @@ jobs:
         if: ${{ steps.release.outputs.pr }}
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Ensure Cargo.lock is updated
+      - name: Install api-manifest and Prettier for PR sync
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          cargo install api-manifest --locked
+          npm install -g prettier
+
+      - name: Ensure Cargo.lock and API.md are updated
         if: ${{ steps.release.outputs.pr }}
         run: |
           cargo check
+          if [ -f API.md ]; then
+            api-manifest dump
+            prettier --write API.md
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml; then
-            git add Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml
-            git commit -m "chore: sync Cargo.lock"
+          if ! git diff --quiet Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml API.md; then
+            git add Cargo.lock Cargo.toml crates/purist-derive/Cargo.toml API.md
+            git commit -m "chore: sync Cargo.lock and API.md"
             git push
           fi
 
