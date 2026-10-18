@@ -2,8 +2,9 @@
 //!
 //! # What This Rule Does
 //! Flags direct invocations of `std::env::var`, `var_os`, `set_var`, or `remove_var` outside of
-//! dedicated configuration, CLI, settings, or tool modules (such as files named `config.rs`, `cli.rs`,
-//! `settings.rs`, `tool.rs`, or modules located in paths matching `*config*`, `*cli*`, `*settings*`, `*env*`, or `*tool*`).
+//! dedicated configuration, CLI, settings, manifest, metadata, or tool modules (such as files named
+//! `config.rs`, `cli.rs`, `settings.rs`, `manifest.rs`, `metadata.rs`, `tool.rs`, or modules located in
+//! paths matching `*config*`, `*cli*`, `*settings*`, `*manifest*`, `*metadata*`, `*env*`, or `*tool*`).
 //!
 //! # Why This Rule Exists
 //! Reading or writing process environment variables throughout business logic creates hidden,
@@ -73,7 +74,7 @@ impl Rule for NoEnvAccessOutsideConfigRule {
     }
 }
 
-/// Returns true if the file path is a recognized configuration, CLI, or tool module.
+/// Returns true if the file path is a recognized configuration, CLI, manifest, metadata, or tool module.
 fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
     if ctx.is_test_file() {
         return true;
@@ -83,6 +84,8 @@ fn is_exempt_config_path(ctx: &LintContext<'_>) -> bool {
     path_str.contains("config")
         || path_str.contains("cli")
         || path_str.contains("settings")
+        || path_str.contains("manifest")
+        || path_str.contains("metadata")
         || path_str.contains("env")
         || path_str.contains("tool")
 }
@@ -156,7 +159,7 @@ impl EnvAccessVisitor<'_> {
                 ),
             )
             .with_span(span)
-            .with_suggested_fix("Parse environment variables in a centralized 'config.rs', 'cli.rs', or 'tool' module and pass explicit parameters."),
+            .with_suggested_fix("Parse environment variables in a centralized 'config.rs', 'manifest.rs', 'metadata.rs', 'cli.rs', or 'tool' module and pass explicit parameters."),
         );
     }
 }
@@ -197,6 +200,23 @@ pub fn load() {
         let diags = NoEnvAccessOutsideConfigRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn env_var_in_manifest_and_metadata_files_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+pub fn load() {
+    let _ = std::env::var("MANIFEST_DIR");
+}
+"#;
+        for path in [Path::new("src/manifest.rs"), Path::new("src/metadata.rs")] {
+            let ctx = LintContext::new(path, source);
+            let ast = syn::parse_file(source)?;
+            let diags = NoEnvAccessOutsideConfigRule.check_file(&ctx, &ast);
+            assert_that!(diags.is_empty(), is_true());
+        }
         Ok(())
     }
 
