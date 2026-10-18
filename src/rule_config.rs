@@ -2,20 +2,24 @@
 
 /// Configuration options specific to `max_file_lines`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MaxFileLinesConfig {
-    pub max_production_lines: Option<usize>,
-    pub max_total_lines: Option<usize>,
+pub(crate) struct MaxFileLinesConfig {
+    pub(crate) max_production_lines: Option<usize>,
+    pub(crate) max_total_lines: Option<usize>,
 }
 
 /// Configuration options specific to `max_nesting_depth`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MaxNestingDepthConfig {
-    pub max_depth: Option<usize>,
+pub(crate) struct MaxNestingDepthConfig {
+    pub(crate) max_depth: Option<usize>,
 }
 
 impl MaxFileLinesConfig {
     /// Parses configuration from a `[package.metadata.purist]` or sub-table.
-    pub fn parse_from_metadata(&mut self, table: &toml_edit::Table, warnings: &mut Vec<String>) {
+    pub(crate) fn parse_from_metadata(
+        &mut self,
+        table: &toml_edit::Table,
+        warnings: &mut Vec<String>,
+    ) {
         if let Some(item) = table.get("max_production_lines")
             && let Some(u) = parse_usize_item("max_production_lines", item, warnings)
         {
@@ -39,7 +43,11 @@ impl MaxFileLinesConfig {
     }
 
     /// Parses options from a rule configuration table.
-    pub fn parse_from_rule_table(&mut self, table: &toml_edit::Table, warnings: &mut Vec<String>) {
+    pub(crate) fn parse_from_rule_table(
+        &mut self,
+        table: &toml_edit::Table,
+        warnings: &mut Vec<String>,
+    ) {
         if let Some(item) = table.get("max_production_lines")
             && let Some(u) = parse_usize_item("max_production_lines", item, warnings)
         {
@@ -53,7 +61,7 @@ impl MaxFileLinesConfig {
     }
 
     /// Parses options from an inline table.
-    pub fn parse_from_inline_table(
+    pub(crate) fn parse_from_inline_table(
         &mut self,
         table: &toml_edit::InlineTable,
         warnings: &mut Vec<String>,
@@ -93,14 +101,18 @@ impl MaxFileLinesConfig {
 
 /// Configuration options specific to `lib_facade_hygiene`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LibFacadeHygieneConfig {
-    pub max_production_lines: Option<usize>,
-    pub max_fn_lines: Option<usize>,
+pub(crate) struct LibFacadeHygieneConfig {
+    pub(crate) max_production_lines: Option<usize>,
+    pub(crate) max_fn_lines: Option<usize>,
 }
 
 impl LibFacadeHygieneConfig {
     /// Parses configuration from a `[package.metadata.purist]` or sub-table.
-    pub fn parse_from_metadata(&mut self, table: &toml_edit::Table, warnings: &mut Vec<String>) {
+    pub(crate) fn parse_from_metadata(
+        &mut self,
+        table: &toml_edit::Table,
+        warnings: &mut Vec<String>,
+    ) {
         if let Some(item) = table.get("max_lib_production_lines")
             && let Some(u) = parse_usize_item("max_lib_production_lines", item, warnings)
         {
@@ -124,7 +136,11 @@ impl LibFacadeHygieneConfig {
     }
 
     /// Parses options from a rule configuration table.
-    pub fn parse_from_rule_table(&mut self, table: &toml_edit::Table, warnings: &mut Vec<String>) {
+    pub(crate) fn parse_from_rule_table(
+        &mut self,
+        table: &toml_edit::Table,
+        warnings: &mut Vec<String>,
+    ) {
         if let Some(item) = table.get("max_production_lines")
             && let Some(u) = parse_usize_item("max_production_lines", item, warnings)
         {
@@ -138,7 +154,7 @@ impl LibFacadeHygieneConfig {
     }
 
     /// Parses options from an inline table.
-    pub fn parse_from_inline_table(
+    pub(crate) fn parse_from_inline_table(
         &mut self,
         table: &toml_edit::InlineTable,
         warnings: &mut Vec<String>,
@@ -176,7 +192,7 @@ impl LibFacadeHygieneConfig {
     }
 }
 
-pub fn parse_usize_item(
+fn parse_usize_item(
     key: &str,
     item: &toml_edit::Item,
     warnings: &mut Vec<String>,

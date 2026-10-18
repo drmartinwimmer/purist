@@ -63,7 +63,7 @@ use std::path::Path;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming for configuration structs while permitting non-config Serde models.
-pub struct ConfigStructNamingRule;
+pub(crate) struct ConfigStructNamingRule;
 
 impl Rule for ConfigStructNamingRule {
     fn name(&self) -> &'static str {

@@ -51,7 +51,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing that CLI command execution methods consume `self` by value rather than `&self`.
-pub struct CliRunConsumesSelfRule;
+pub(crate) struct CliRunConsumesSelfRule;
 
 impl Rule for CliRunConsumesSelfRule {
     fn name(&self) -> &'static str {

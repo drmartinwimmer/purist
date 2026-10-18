@@ -40,7 +40,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `unsafe` blocks and functions in test suites.
-pub struct NoUnsafeInTestsRule;
+pub(crate) struct NoUnsafeInTestsRule;
 
 impl Rule for NoUnsafeInTestsRule {
     fn name(&self) -> &'static str {

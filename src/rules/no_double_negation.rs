@@ -66,7 +66,7 @@ use syn::visit::{self, Visit};
 use syn::{FnArg, Pat, ReturnType};
 
 /// Rule forbidding negative boolean identifiers and double negation patterns.
-pub struct NoDoubleNegationRule;
+pub(crate) struct NoDoubleNegationRule;
 
 impl Rule for NoDoubleNegationRule {
     fn name(&self) -> &'static str {

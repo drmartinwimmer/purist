@@ -39,7 +39,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging manual `fs::remove_dir_all` in test contexts in favor of RAII cleanup.
-pub struct RaiiTempDirectoriesRule;
+pub(crate) struct RaiiTempDirectoriesRule;
 
 impl Rule for RaiiTempDirectoriesRule {
     fn name(&self) -> &'static str {

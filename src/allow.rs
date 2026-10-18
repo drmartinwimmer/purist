@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, value};
 
 /// Returns the canonical rule name if `rule_name` is a known purist lint rule.
-pub fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
+pub(crate) fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
     let stripped = rule_name
         .strip_prefix("purist::")
         .or_else(|| rule_name.strip_prefix("opinionated::"))
@@ -163,7 +163,7 @@ fn ensure_table_mut_path_3<'a>(
 /// Disables the specified purist lint rules in the given `Cargo.toml` manifest file.
 ///
 /// Returns the number of rules that were newly added or modified to `"allow"`.
-pub fn disable_rules_in_manifest(
+pub(crate) fn disable_rules_in_manifest(
     manifest_path: &Path,
     rules: &[&str],
 ) -> Result<usize, PuristError> {
@@ -241,7 +241,10 @@ pub fn disable_rules_in_manifest(
 /// Disables purist lint rules that triggered in `report` across relevant `Cargo.toml` files.
 ///
 /// Returns the total number of rules disabled.
-pub fn allow_project(target_path: &Path, report: &DiagnosticReport) -> Result<usize, PuristError> {
+pub(crate) fn allow_project(
+    target_path: &Path,
+    report: &DiagnosticReport,
+) -> Result<usize, PuristError> {
     let target_manifest = find_cargo_toml(target_path)
         .ok_or_else(|| PuristError::ManifestNotFound(target_path.to_path_buf()))?;
 

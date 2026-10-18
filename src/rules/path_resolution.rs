@@ -30,7 +30,7 @@ use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
-pub struct PathResolutionRule;
+pub(crate) struct PathResolutionRule;
 
 impl Rule for PathResolutionRule {
     fn name(&self) -> &'static str {

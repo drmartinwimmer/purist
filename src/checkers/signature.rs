@@ -1,13 +1,10 @@
 //! Parameterized checkers for function signatures and return types.
 
-use syn::{
-    FnArg, GenericArgument, PathArguments, ReceiverKind as SynReceiverKind, ReturnType, Signature,
-    Type,
-};
+use syn::{FnArg, ReceiverKind as SynReceiverKind, ReturnType, Signature, Type};
 
 /// Represents how a method receives its `self` parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceiverKind {
+pub(crate) enum ReceiverKind {
     /// Consumes self by value: `self` or `mut self`.
     Value,
     /// Borrows self immutably: `&self`.
@@ -19,7 +16,7 @@ pub enum ReceiverKind {
 }
 
 /// Checks the receiver type of a function signature.
-pub fn check_fn_receiver(sig: &Signature) -> ReceiverKind {
+pub(crate) fn check_fn_receiver(sig: &Signature) -> ReceiverKind {
     let Some(first_arg) = sig.inputs.first() else {
         return ReceiverKind::None;
     };
@@ -68,32 +65,9 @@ pub fn check_fn_receiver(sig: &Signature) -> ReceiverKind {
 }
 
 /// Extracts the return type from a function signature, if non-unit.
-pub fn extract_fn_return_type(sig: &Signature) -> Option<&Type> {
+pub(crate) fn extract_fn_return_type(sig: &Signature) -> Option<&Type> {
     match &sig.output {
         ReturnType::Type(_, ty) => Some(ty.as_ref()),
         ReturnType::Default => None,
-    }
-}
-
-/// If a type is `Result<T, E>`, extracts the error type `E`.
-pub fn extract_result_error_type(ty: &Type) -> Option<&Type> {
-    let Type::Path(type_path) = ty else {
-        return None;
-    };
-
-    let last_segment = type_path.path.segments.last()?;
-    if last_segment.ident != "Result" {
-        return None;
-    }
-
-    let PathArguments::AngleBracketed(args) = &last_segment.arguments else {
-        return None;
-    };
-
-    // If Result<T, E>, the error type is the second generic argument
-    let second_arg = args.args.iter().nth(1)?;
-    match second_arg {
-        GenericArgument::Type(error_ty) => Some(error_ty),
-        _ => None,
     }
 }

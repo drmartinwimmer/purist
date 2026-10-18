@@ -57,7 +57,7 @@ use std::collections::{HashMap, HashSet};
 use syn::visit::{self, Visit};
 
 /// Rule detecting trivial getter/setter combos where direct field access suffices.
-pub struct NoTrivialGettersSettersRule;
+pub(crate) struct NoTrivialGettersSettersRule;
 
 impl Rule for NoTrivialGettersSettersRule {
     fn name(&self) -> &'static str {

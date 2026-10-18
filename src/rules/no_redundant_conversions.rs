@@ -36,7 +36,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule detecting redundant serialization roundtrips (e.g. `to_string` followed by `from_str`).
-pub struct NoRedundantConversionsRule;
+pub(crate) struct NoRedundantConversionsRule;
 
 impl Rule for NoRedundantConversionsRule {
     fn name(&self) -> &'static str {

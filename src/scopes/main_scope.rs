@@ -4,46 +4,34 @@ use super::guard::run_with_scope;
 
 /// Tracks whether AST traversal is currently inside `fn main()` in `main.rs`.
 #[derive(Debug, Clone, Default)]
-pub struct MainScope {
+pub(crate) struct MainScope {
     stack: Vec<bool>,
 }
 
 impl MainScope {
     /// Creates a new main function scope tracker.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Returns true if currently traversing inside `fn main()`.
-    pub fn is_in_main(&self) -> bool {
+    pub(crate) fn is_in_main(&self) -> bool {
         self.stack.last().copied().unwrap_or(false)
     }
 
     /// Pushes a main function entrypoint flag onto the stack.
-    pub fn push_main(&mut self, is_main: bool) {
+    pub(crate) fn push_main(&mut self, is_main: bool) {
         self.stack.push(is_main);
     }
 
     /// Pops the active main function scope from the stack.
-    pub fn pop(&mut self) -> Option<bool> {
+    pub(crate) fn pop(&mut self) -> Option<bool> {
         self.stack.pop()
-    }
-
-    /// Executes a closure within this main function scope, popping on exit.
-    pub fn with_main_fn<R>(&mut self, is_main: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |t| t.push_main(is_main),
-            |t| {
-                t.pop();
-            },
-            f,
-        )
     }
 }
 
 /// Trait for visitor types that hold a [`MainScope`], providing scoped closure methods.
-pub trait WithMainScope {
+pub(crate) trait WithMainScope {
     /// Returns a mutable reference to the underlying main function scope.
     fn main_scope_mut(&mut self) -> &mut MainScope;
 

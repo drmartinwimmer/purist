@@ -57,7 +57,7 @@ use syn::{
 };
 
 /// Rule enforcing granular visitor hooks over manual child collection iteration.
-pub struct GranularVisitorHooksRule;
+pub(crate) struct GranularVisitorHooksRule;
 
 impl Rule for GranularVisitorHooksRule {
     fn name(&self) -> &'static str {

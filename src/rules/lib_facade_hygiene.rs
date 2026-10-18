@@ -40,7 +40,7 @@ pub const DEFAULT_MAX_LIB_PRODUCTION_LINES: usize = 200;
 pub const DEFAULT_MAX_LIB_FN_LINES: usize = 20;
 
 /// Rule enforcing concise, modular library root files (`lib.rs`).
-pub struct LibFacadeHygieneRule;
+pub(crate) struct LibFacadeHygieneRule;
 
 impl Rule for LibFacadeHygieneRule {
     fn name(&self) -> &'static str {

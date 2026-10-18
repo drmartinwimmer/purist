@@ -35,7 +35,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging redundant `.as_str()` conversions inside GoogleTest assertions.
-pub struct TestMatcherBorrowRule;
+pub(crate) struct TestMatcherBorrowRule;
 
 impl Rule for TestMatcherBorrowRule {
     fn name(&self) -> &'static str {

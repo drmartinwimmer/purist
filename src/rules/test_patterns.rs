@@ -42,7 +42,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing test conventions: naming (<verb>_<desc>_<outcome>), googletest assertions, and ? over unwrap.
-pub struct TestPatternsRule;
+pub(crate) struct TestPatternsRule;
 
 impl Rule for TestPatternsRule {
     fn name(&self) -> &'static str {

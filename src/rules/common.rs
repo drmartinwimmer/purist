@@ -10,7 +10,7 @@ use syn::spanned::Spanned;
 use syn::{Attribute, File, Ident, Item, ItemImpl, Macro, Path, Type};
 
 /// Checks whether an attribute matches `#[cfg(test)]`.
-pub fn is_cfg_test_attr(attr: &Attribute) -> bool {
+pub(crate) fn is_cfg_test_attr(attr: &Attribute) -> bool {
     if !attr.path().is_ident("cfg") {
         return false;
     }
@@ -25,22 +25,22 @@ pub fn is_cfg_test_attr(attr: &Attribute) -> bool {
 }
 
 /// Checks whether an attribute list includes `#[cfg(test)]`.
-pub fn has_cfg_test_attr(attrs: &[Attribute]) -> bool {
+pub(crate) fn has_cfg_test_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(is_cfg_test_attr)
 }
 
 /// Checks whether an attribute matches bare `#[test]`.
-pub fn is_bare_test_attr(attr: &Attribute) -> bool {
+pub(crate) fn is_bare_test_attr(attr: &Attribute) -> bool {
     attr.path().is_ident("test")
 }
 
 /// Checks whether an attribute list contains bare `#[test]`.
-pub fn has_bare_test_attr(attrs: &[Attribute]) -> bool {
+pub(crate) fn has_bare_test_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(is_bare_test_attr)
 }
 
 /// Checks whether an attribute matches framework test macros such as `#[googletest::test]`, `#[rstest]`, etc.
-pub fn is_framework_test_attr(attr: &Attribute) -> bool {
+pub(crate) fn is_framework_test_attr(attr: &Attribute) -> bool {
     if attr.path().is_ident("rstest") {
         return true;
     }
@@ -49,22 +49,22 @@ pub fn is_framework_test_attr(attr: &Attribute) -> bool {
 }
 
 /// Checks whether an attribute list contains any framework test attribute (`#[googletest::test]`, `#[rstest]`, etc.).
-pub fn has_framework_test_attr(attrs: &[Attribute]) -> bool {
+pub(crate) fn has_framework_test_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(is_framework_test_attr)
 }
 
 /// Checks whether an attribute matches `#[test]` or any framework test attribute ending in `::test`.
-pub fn is_test_attr(attr: &Attribute) -> bool {
+pub(crate) fn is_test_attr(attr: &Attribute) -> bool {
     is_bare_test_attr(attr) || is_framework_test_attr(attr)
 }
 
 /// Checks whether an attribute list contains `#[test]` or any framework test attribute.
-pub fn has_test_attr(attrs: &[Attribute]) -> bool {
+pub(crate) fn has_test_attr(attrs: &[Attribute]) -> bool {
     attrs.iter().any(is_test_attr)
 }
 
 /// Checks whether an attribute list derives any of the specified trait names.
-pub fn derives_any(attrs: &[Attribute], traits: &[&str]) -> bool {
+pub(crate) fn derives_any(attrs: &[Attribute], traits: &[&str]) -> bool {
     attrs.iter().any(|attr| {
         if !attr.path().is_ident("derive") {
             return false;
@@ -90,12 +90,12 @@ pub fn derives_any(attrs: &[Attribute], traits: &[&str]) -> bool {
 }
 
 /// Checks whether an attribute list derives the specified trait name.
-pub fn derives_trait(attrs: &[Attribute], trait_name: &str) -> bool {
+pub(crate) fn derives_trait(attrs: &[Attribute], trait_name: &str) -> bool {
     derives_any(attrs, &[trait_name])
 }
 
 /// Checks whether an attribute list contains an `#[allow(...)]` or `#[expect(...)]` suppression for `rule_name`.
-pub fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
+pub(crate) fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
     let short_name = rule_name.strip_prefix("purist::").unwrap_or(rule_name);
     attrs.iter().any(|attr| {
         if !attr.path().is_ident("expect") && !attr.path().is_ident("allow") {
@@ -119,10 +119,10 @@ pub fn has_suppression_attribute(attrs: &[Attribute], rule_name: &str) -> bool {
     })
 }
 
-pub use crate::scopes::{TestScope, TestScopeState, WithTestScope};
+pub(crate) use crate::scopes::{TestScope, WithTestScope};
 
 /// Checks whether a type is `bool` or `Option<bool>`.
-pub fn is_bool_type(ty: &Type) -> bool {
+pub(crate) fn is_bool_type(ty: &Type) -> bool {
     match ty {
         Type::Path(type_path) => {
             if path_ends_with_ident(&type_path.path, "bool") {
@@ -142,17 +142,18 @@ pub fn is_bool_type(ty: &Type) -> bool {
 }
 
 /// Returns the identifier of the last segment in a path.
-pub fn path_last_ident(path: &Path) -> Option<&Ident> {
+pub(crate) fn path_last_ident(path: &Path) -> Option<&Ident> {
     path.segments.last().map(|s| &s.ident)
 }
 
 /// Checks whether the final segment of a path matches `expected`.
-pub fn path_ends_with_ident(path: &Path, expected: &str) -> bool {
+pub(crate) fn path_ends_with_ident(path: &Path, expected: &str) -> bool {
     path.segments.last().is_some_and(|s| s.ident == expected)
 }
 
 /// Checks whether the suffix of path segments matches the given sequence of segment identifiers.
-pub fn path_ends_with_segments(path: &Path, expected: &[&str]) -> bool {
+#[cfg(test)]
+pub(crate) fn path_ends_with_segments(path: &Path, expected: &[&str]) -> bool {
     if path.segments.len() < expected.len() {
         return false;
     }
@@ -165,12 +166,12 @@ pub fn path_ends_with_segments(path: &Path, expected: &[&str]) -> bool {
 }
 
 /// Returns the macro name identifier from its invocation path.
-pub fn macro_name(mac: &Macro) -> Option<&Ident> {
+pub(crate) fn macro_name(mac: &Macro) -> Option<&Ident> {
     path_last_ident(&mac.path)
 }
 
 /// Extracts the type identifier if the given type is a simple unqualified path.
-pub fn extract_type_ident(ty: &Type) -> Option<&Ident> {
+pub(crate) fn extract_type_ident(ty: &Type) -> Option<&Ident> {
     if let Type::Path(type_path) = ty
         && type_path.qself.is_none()
     {
@@ -180,7 +181,7 @@ pub fn extract_type_ident(ty: &Type) -> Option<&Ident> {
 }
 
 /// Checks whether an implementation block implements the `Drop` trait.
-pub fn is_drop_trait_impl(item_impl: &ItemImpl) -> bool {
+pub(crate) fn is_drop_trait_impl(item_impl: &ItemImpl) -> bool {
     item_impl
         .trait_
         .as_ref()
@@ -188,7 +189,7 @@ pub fn is_drop_trait_impl(item_impl: &ItemImpl) -> bool {
 }
 
 /// Returns true if an item AST node is decorated with test attributes (`#[test]`, `#[cfg(test)]`, etc.).
-pub fn is_test_ast_item(item: &Item) -> bool {
+pub(crate) fn is_test_ast_item(item: &Item) -> bool {
     let attrs = match item {
         Item::Mod(m) => &m.attrs,
         Item::Fn(f) => &f.attrs,
@@ -205,7 +206,7 @@ pub fn is_test_ast_item(item: &Item) -> bool {
 }
 
 /// Finds the 1-based start and end line ranges of test items and modules in an AST file.
-pub fn find_test_line_spans(file: &File) -> Vec<(usize, usize)> {
+pub(crate) fn find_test_line_spans(file: &File) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     for item in &file.items {
         if is_test_ast_item(item) {
@@ -217,7 +218,7 @@ pub fn find_test_line_spans(file: &File) -> Vec<(usize, usize)> {
 }
 
 /// Counts lines of production code in source text, excluding all `#[cfg(test)]` modules and items.
-pub fn count_production_lines(file: &File, source: &str) -> usize {
+pub(crate) fn count_production_lines(file: &File, source: &str) -> usize {
     let test_spans = find_test_line_spans(file);
     if test_spans.is_empty() {
         return source.lines().count();

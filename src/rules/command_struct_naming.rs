@@ -59,7 +59,7 @@ use std::collections::HashSet;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing `<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand` naming for Clap command structs.
-pub struct CommandStructNamingRule;
+pub(crate) struct CommandStructNamingRule;
 
 impl Rule for CommandStructNamingRule {
     fn name(&self) -> &'static str {

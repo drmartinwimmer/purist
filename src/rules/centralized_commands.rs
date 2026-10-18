@@ -40,7 +40,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging raw `Command::new` invocations outside dedicated command/tool modules.
-pub struct CentralizedCommandsRule;
+pub(crate) struct CentralizedCommandsRule;
 
 impl Rule for CentralizedCommandsRule {
     fn name(&self) -> &'static str {

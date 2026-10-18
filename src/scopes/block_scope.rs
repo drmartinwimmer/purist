@@ -7,38 +7,40 @@ use std::hash::Hash;
 
 /// Lexical block scope tracking symbol or variable mappings across nested AST blocks using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
-pub struct BlockScope<K, V> {
+pub(crate) struct BlockScope<K, V> {
     stack: Vec<HashMap<K, V>>,
 }
 
 impl<K: Eq + Hash, V> BlockScope<K, V> {
     /// Creates a new empty block scope.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { stack: Vec::new() }
     }
 
     /// Returns the current nesting depth of block scopes.
-    pub fn depth(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn depth(&self) -> usize {
         self.stack.len()
     }
 
     /// Returns true if no block scopes are currently pushed.
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.stack.is_empty()
     }
 
     /// Pushes a new block scope with variable bindings onto the stack.
-    pub fn push(&mut self, bindings: HashMap<K, V>) {
+    pub(crate) fn push(&mut self, bindings: HashMap<K, V>) {
         self.stack.push(bindings);
     }
 
     /// Pops the innermost block scope from the stack.
-    pub fn pop(&mut self) -> Option<HashMap<K, V>> {
+    pub(crate) fn pop(&mut self) -> Option<HashMap<K, V>> {
         self.stack.pop()
     }
 
     /// Looks up a key, searching from the innermost block scope outward.
-    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    pub(crate) fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -52,7 +54,8 @@ impl<K: Eq + Hash, V> BlockScope<K, V> {
     }
 
     /// Returns true if any active block scope contains the key.
-    pub fn contains<Q>(&self, key: &Q) -> bool
+    #[cfg(test)]
+    pub(crate) fn contains<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
@@ -61,7 +64,12 @@ impl<K: Eq + Hash, V> BlockScope<K, V> {
     }
 
     /// Executes a closure within an entered block scope, ensuring it is popped on exit.
-    pub fn with_block<R>(&mut self, bindings: HashMap<K, V>, f: impl FnOnce(&mut Self) -> R) -> R {
+    #[cfg(test)]
+    pub(crate) fn with_block<R>(
+        &mut self,
+        bindings: HashMap<K, V>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         run_with_scope(
             self,
             |s| s.push(bindings),
@@ -74,7 +82,7 @@ impl<K: Eq + Hash, V> BlockScope<K, V> {
 }
 
 /// Trait for visitor types that hold a [`BlockScope`], providing scoped closure methods.
-pub trait WithBlockScope<K, V> {
+pub(crate) trait WithBlockScope<K, V> {
     /// Returns a mutable reference to the underlying block scope.
     fn block_scope_mut(&mut self) -> &mut BlockScope<K, V>;
 

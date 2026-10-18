@@ -32,7 +32,7 @@ use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `Has...` prefixes on trait definitions.
-pub struct NoHasTraitPrefixRule;
+pub(crate) struct NoHasTraitPrefixRule;
 
 impl Rule for NoHasTraitPrefixRule {
     fn name(&self) -> &'static str {

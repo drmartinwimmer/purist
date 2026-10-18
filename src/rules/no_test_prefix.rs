@@ -32,7 +32,7 @@ use crate::engine::{LintContext, Rule};
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `test_` or `test` prefixes in test function names.
-pub struct NoTestPrefixRule;
+pub(crate) struct NoTestPrefixRule;
 
 impl Rule for NoTestPrefixRule {
     fn name(&self) -> &'static str {

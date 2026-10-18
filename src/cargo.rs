@@ -28,50 +28,50 @@ impl RuleLevel {
 
 /// Strongly-typed struct holding configuration levels for all known purist lint rules.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PuristLintsConfig {
-    pub no_inline_mods: RuleLevel,
-    pub free_functions: RuleLevel,
-    pub path_resolution: RuleLevel,
-    pub error_types: RuleLevel,
-    pub clippy_suppression_hygiene: RuleLevel,
-    pub test_patterns: RuleLevel,
-    pub no_redundant_conversions: RuleLevel,
-    pub use_declarations_over_qualified_paths: RuleLevel,
-    pub no_redundant_wrappers: RuleLevel,
-    pub no_boxed_dyn_error: RuleLevel,
-    pub test_matcher_borrow_simplification: RuleLevel,
-    pub no_test_prefix: RuleLevel,
-    pub no_unsafe_in_tests: RuleLevel,
-    pub centralized_command_execution: RuleLevel,
-    pub clap_struct_encapsulation: RuleLevel,
-    pub command_struct_naming: RuleLevel,
-    pub config_struct_naming: RuleLevel,
-    pub exit_code_hygiene: RuleLevel,
-    pub idiomatic_option_bool_mapping: RuleLevel,
-    pub no_wildcard_imports: RuleLevel,
-    pub no_env_access_outside_config: RuleLevel,
-    pub single_match_to_let_else: RuleLevel,
-    pub raii_temp_directories: RuleLevel,
-    pub no_println_in_libraries: RuleLevel,
-    pub cli_run_consumes_self: RuleLevel,
-    pub no_double_negation: RuleLevel,
-    pub googletest_conventions: RuleLevel,
-    pub max_file_lines: RuleLevel,
-    pub no_trivial_getters_setters: RuleLevel,
-    pub max_nesting_depth: RuleLevel,
-    pub lib_facade_hygiene: RuleLevel,
-    pub no_negative_bool: RuleLevel,
-    pub no_has_trait_prefix: RuleLevel,
-    pub granular_visitor_hooks: RuleLevel,
-    pub no_bifurcated_trait_dispatch: RuleLevel,
-    pub no_primitive_flag_clutter: RuleLevel,
-    pub no_interior_mutability_in_visitors: RuleLevel,
-    pub prefer_scoped_closures: RuleLevel,
-    pub descriptive_checker_names: RuleLevel,
+pub(crate) struct PuristLintsConfig {
+    pub(crate) no_inline_mods: RuleLevel,
+    pub(crate) free_functions: RuleLevel,
+    pub(crate) path_resolution: RuleLevel,
+    pub(crate) error_types: RuleLevel,
+    pub(crate) clippy_suppression_hygiene: RuleLevel,
+    pub(crate) test_patterns: RuleLevel,
+    pub(crate) no_redundant_conversions: RuleLevel,
+    pub(crate) use_declarations_over_qualified_paths: RuleLevel,
+    pub(crate) no_redundant_wrappers: RuleLevel,
+    pub(crate) no_boxed_dyn_error: RuleLevel,
+    pub(crate) test_matcher_borrow_simplification: RuleLevel,
+    pub(crate) no_test_prefix: RuleLevel,
+    pub(crate) no_unsafe_in_tests: RuleLevel,
+    pub(crate) centralized_command_execution: RuleLevel,
+    pub(crate) clap_struct_encapsulation: RuleLevel,
+    pub(crate) command_struct_naming: RuleLevel,
+    pub(crate) config_struct_naming: RuleLevel,
+    pub(crate) exit_code_hygiene: RuleLevel,
+    pub(crate) idiomatic_option_bool_mapping: RuleLevel,
+    pub(crate) no_wildcard_imports: RuleLevel,
+    pub(crate) no_env_access_outside_config: RuleLevel,
+    pub(crate) single_match_to_let_else: RuleLevel,
+    pub(crate) raii_temp_directories: RuleLevel,
+    pub(crate) no_println_in_libraries: RuleLevel,
+    pub(crate) cli_run_consumes_self: RuleLevel,
+    pub(crate) no_double_negation: RuleLevel,
+    pub(crate) googletest_conventions: RuleLevel,
+    pub(crate) max_file_lines: RuleLevel,
+    pub(crate) no_trivial_getters_setters: RuleLevel,
+    pub(crate) max_nesting_depth: RuleLevel,
+    pub(crate) lib_facade_hygiene: RuleLevel,
+    pub(crate) no_negative_bool: RuleLevel,
+    pub(crate) no_has_trait_prefix: RuleLevel,
+    pub(crate) granular_visitor_hooks: RuleLevel,
+    pub(crate) no_bifurcated_trait_dispatch: RuleLevel,
+    pub(crate) no_primitive_flag_clutter: RuleLevel,
+    pub(crate) no_interior_mutability_in_visitors: RuleLevel,
+    pub(crate) prefer_scoped_closures: RuleLevel,
+    pub(crate) descriptive_checker_names: RuleLevel,
 }
 
 impl PuristLintsConfig {
-    pub fn get(&self, rule_name: &str) -> Option<RuleLevel> {
+    pub(crate) fn get(&self, rule_name: &str) -> Option<RuleLevel> {
         let stripped = rule_name
             .strip_prefix("purist::")
             .or_else(|| rule_name.strip_prefix("opinionated::"))
@@ -122,7 +122,11 @@ impl PuristLintsConfig {
         }
     }
 
-    pub fn set(&mut self, rule_name: &str, level: RuleLevel) -> Result<(), UnrecognizedRule> {
+    pub(crate) fn set(
+        &mut self,
+        rule_name: &str,
+        level: RuleLevel,
+    ) -> Result<(), UnrecognizedRule> {
         let stripped = rule_name
             .strip_prefix("purist::")
             .or_else(|| rule_name.strip_prefix("opinionated::"))
@@ -176,20 +180,22 @@ impl PuristLintsConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnrecognizedRule;
+pub(crate) struct UnrecognizedRule;
 
-pub use crate::rule_config::{LibFacadeHygieneConfig, MaxFileLinesConfig, MaxNestingDepthConfig};
+pub(crate) use crate::rule_config::{
+    LibFacadeHygieneConfig, MaxFileLinesConfig, MaxNestingDepthConfig,
+};
 
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
-    pub rules: PuristLintsConfig,
-    pub unrecognized: Vec<String>,
-    pub deprecated: Vec<String>,
-    pub invalid_values: Vec<String>,
-    pub max_file_lines: MaxFileLinesConfig,
-    pub max_nesting_depth: MaxNestingDepthConfig,
-    pub lib_facade_hygiene: LibFacadeHygieneConfig,
+    pub(crate) rules: PuristLintsConfig,
+    pub(crate) unrecognized: Vec<String>,
+    pub(crate) deprecated: Vec<String>,
+    pub(crate) invalid_values: Vec<String>,
+    pub(crate) max_file_lines: MaxFileLinesConfig,
+    pub(crate) max_nesting_depth: MaxNestingDepthConfig,
+    pub(crate) lib_facade_hygiene: LibFacadeHygieneConfig,
 }
 
 impl LintConfig {
@@ -248,7 +254,7 @@ impl LintConfig {
     }
 
     /// Parses lint configuration from a parsed `Cargo.toml` document.
-    pub fn from_document(doc: &DocumentMut) -> Self {
+    pub(crate) fn from_document(doc: &DocumentMut) -> Self {
         let mut config = Self::empty();
 
         // 1. Check [lints.purist] or [workspace.lints.purist] (with [lints.opinionated] fallback)
@@ -303,7 +309,7 @@ impl LintConfig {
     }
 
     /// Inherits configuration settings from a workspace root `LintConfig`.
-    pub fn inherit_from_workspace(&mut self, ws_config: &Self) {
+    pub(crate) fn inherit_from_workspace(&mut self, ws_config: &Self) {
         self.rules = ws_config.rules.clone();
         if self.max_file_lines.max_production_lines.is_none() {
             self.max_file_lines.max_production_lines =
@@ -330,7 +336,7 @@ impl LintConfig {
     }
 
     /// Parses metadata settings from `[package.metadata.purist]` or `[workspace.metadata.purist]`.
-    pub fn parse_metadata_purist(&mut self, table: &toml_edit::Table) {
+    pub(crate) fn parse_metadata_purist(&mut self, table: &toml_edit::Table) {
         self.max_file_lines
             .parse_from_metadata(table, &mut self.invalid_values);
         self.lib_facade_hygiene
@@ -346,7 +352,7 @@ impl LintConfig {
     }
 
     /// Parses purist lint rules from a `[lints.purist]` table.
-    pub fn parse_rules_table(&mut self, table: &toml_edit::Table) {
+    pub(crate) fn parse_rules_table(&mut self, table: &toml_edit::Table) {
         for (key, item) in table.iter() {
             if let Some(val_str) = item.as_str() {
                 if let Some(level) = RuleLevel::parse(val_str) {
@@ -407,12 +413,9 @@ impl LintConfig {
     }
 }
 
-pub use crate::discovery::discover_rust_files;
-
 /// Represents a parsed Cargo manifest (`Cargo.toml`) and its associated lint configuration.
 #[derive(Debug, Clone)]
-pub struct CargoManifest {
-    path: PathBuf,
+pub(crate) struct CargoManifest {
     doc: DocumentMut,
     lint_config: LintConfig,
 }
@@ -422,7 +425,7 @@ impl CargoManifest {
     ///
     /// If passed a directory, looks for `Cargo.toml` inside it.
     /// Inherits workspace configurations if `[lints] workspace = true`.
-    pub fn load(manifest_or_project_dir: &Path) -> Result<Self, PuristError> {
+    pub(crate) fn load(manifest_or_project_dir: &Path) -> Result<Self, PuristError> {
         let manifest_path = if manifest_or_project_dir.is_file()
             && manifest_or_project_dir
                 .file_name()
@@ -449,7 +452,7 @@ impl CargoManifest {
     }
 
     /// Parses a manifest from its string content at a specified path.
-    pub fn from_content(manifest_path: PathBuf, content: &str) -> Result<Self, PuristError> {
+    pub(crate) fn from_content(manifest_path: PathBuf, content: &str) -> Result<Self, PuristError> {
         let doc: DocumentMut = content
             .parse()
             .map_err(|e| PuristError::ManifestParse(format!("{e}")))?;
@@ -464,30 +467,22 @@ impl CargoManifest {
             lint_config.inherit_from_workspace(ws_manifest.lint_config());
         }
 
-        Ok(Self {
-            path: manifest_path,
-            doc,
-            lint_config,
-        })
+        Ok(Self { doc, lint_config })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn document(&self) -> &DocumentMut {
+    pub(crate) fn document(&self) -> &DocumentMut {
         &self.doc
     }
 
-    pub fn lint_config(&self) -> &LintConfig {
+    pub(crate) fn lint_config(&self) -> &LintConfig {
         &self.lint_config
     }
 
-    pub fn into_lint_config(self) -> LintConfig {
+    pub(crate) fn into_lint_config(self) -> LintConfig {
         self.lint_config
     }
 
-    pub fn has_lints_workspace_true(&self) -> bool {
+    pub(crate) fn has_lints_workspace_true(&self) -> bool {
         has_lints_workspace_true_doc(&self.doc)
     }
 }
