@@ -1,19 +1,20 @@
 //! Rule: `purist::config_struct_naming`
 //!
 //! # What This Rule Does
-//! Enforces that structs representing application or module configuration follow the
-//! `<Subject>Config` naming convention (e.g. `UserConfig`, `ProjectConfig`, `DatabaseConfig`),
+//! Enforces that structs representing application or module configuration, manifests, or metadata
+//! follow the `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming convention
+//! (e.g. `UserConfig`, `ProjectConfig`, `CargoManifest`, `PackageMetadata`),
 //! while ensuring non-configuration structs that derive `serde::Serialize` or `serde::Deserialize`
 //! (such as runtime state containers, cache entries, session tokens, or API payloads) are not flagged.
 //!
 //! # Why This Rule Exists
 //! Configuration models are foundational boundary types across a workspace. Naming them
 //! inconsistently (`*Settings`, `*Options`, `*Parameters`, `Configuration`, `Profile`, or bare
-//! `Config`) obscures which types represent configuration and degrades discoverability.
+//! `Config`, `Manifest`, `Metadata`) obscures which types represent configuration and degrades discoverability.
 //! At the same time, because `Serialize` and `Deserialize` are derived ubiquitously on DTOs,
 //! persistence records, and protocol messages, this rule scopes enforcement to configuration
-//! modules (`config.rs`, `settings.rs`, `*config*`), configuration attributes/loaders, and
-//! explicit configuration-synonym suffixes (`*Settings`, `*Configuration`).
+//! modules (`config.rs`, `settings.rs`, `manifest.rs`, `metadata.rs`, `*config*`, `*manifest*`, `*metadata*`),
+//! configuration attributes/loaders, and explicit configuration-synonym suffixes (`*Settings`, `*Configuration`).
 //!
 //! # Non-Compliant Example
 //! ```rust,ignore
@@ -37,6 +38,12 @@
 //!     pub url: String,
 //! }
 //!
+//! // In src/manifest.rs:
+//! #[derive(serde::Deserialize)]
+//! pub struct PackageManifest {
+//!     pub name: String,
+//! }
+//!
 //! // In src/api/models.rs (non-config context):
 //! #[derive(serde::Serialize, serde::Deserialize)]
 //! pub struct UserSession { // Permitted: non-config Serde model outside config context
@@ -55,7 +62,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use syn::visit::{self, Visit};
 
-/// Rule enforcing `<Subject>Config` naming for configuration structs while permitting non-config Serde models.
+/// Rule enforcing `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming for configuration structs while permitting non-config Serde models.
 pub struct ConfigStructNamingRule;
 
 impl Rule for ConfigStructNamingRule {
@@ -86,7 +93,7 @@ impl Rule for ConfigStructNamingRule {
     }
 }
 
-/// Returns true if the file path corresponds to a dedicated configuration or settings module,
+/// Returns true if the file path corresponds to a dedicated configuration, settings, manifest, or metadata module,
 /// excluding linter rule implementation files under `rules/`.
 fn is_config_module_path(path: &Path) -> bool {
     let components: Vec<String> = path
@@ -101,7 +108,13 @@ fn is_config_module_path(path: &Path) -> bool {
     if components.iter().any(|c| {
         matches!(
             c.as_str(),
-            "config" | "configs" | "configuration" | "settings"
+            "config"
+                | "configs"
+                | "configuration"
+                | "settings"
+                | "manifest"
+                | "manifests"
+                | "metadata"
         )
     }) {
         return true;
@@ -116,12 +129,17 @@ fn is_config_module_path(path: &Path) -> bool {
 
     matches!(
         stem.as_str(),
-        "config" | "configs" | "configuration" | "settings"
+        "config" | "configs" | "configuration" | "settings" | "manifest" | "manifests" | "metadata"
     ) || stem.starts_with("config_")
         || stem.ends_with("_config")
         || stem.ends_with("_configs")
         || stem.starts_with("settings_")
         || stem.ends_with("_settings")
+        || stem.starts_with("manifest_")
+        || stem.ends_with("_manifest")
+        || stem.ends_with("_manifests")
+        || stem.starts_with("metadata_")
+        || stem.ends_with("_metadata")
 }
 
 /// Returns true if the file path corresponds to a dedicated tool or command-adapter module,
@@ -228,10 +246,12 @@ fn is_config_loader_fn_name(name: &str) -> bool {
             | "from_manifest"
             | "from_manifest_content"
             | "from_manifest_file"
+            | "from_metadata"
+            | "from_metadata_file"
     )
 }
 
-/// Returns true if a struct name uses a configuration, settings, or options/parameters suffix.
+/// Returns true if a struct name uses a configuration, settings, manifest, metadata, or options/parameters suffix.
 fn is_config_like_struct_name(name: &str) -> bool {
     is_explicit_config_synonym_name(name)
         || matches!(name, "Options" | "Parameters" | "Params")
@@ -241,7 +261,8 @@ fn is_config_like_struct_name(name: &str) -> bool {
         || name.ends_with("Env")
 }
 
-/// Visitor that inspects struct definitions and enforces `<Subject>Config` naming for configuration structs.
+/// Visitor that inspects struct definitions and enforces `<Subject>Config`, `<Subject>Manifest`,
+/// or `<Subject>Metadata` naming for configuration structs.
 #[derive(WithTestScope)]
 struct ConfigStructNamingVisitor<'a> {
     ctx: &'a LintContext<'a>,
@@ -257,9 +278,17 @@ impl<'ast> Visit<'ast> for ConfigStructNamingVisitor<'_> {
         let mod_name = item_mod.ident.to_string().to_ascii_lowercase();
         let is_config_mod = matches!(
             mod_name.as_str(),
-            "config" | "configs" | "configuration" | "settings"
+            "config"
+                | "configs"
+                | "configuration"
+                | "settings"
+                | "manifest"
+                | "manifests"
+                | "metadata"
         ) || mod_name.ends_with("_config")
-            || mod_name.ends_with("_settings");
+            || mod_name.ends_with("_settings")
+            || mod_name.ends_with("_manifest")
+            || mod_name.ends_with("_metadata");
 
         if is_config_mod {
             self.config_mod_depth += 1;
@@ -326,7 +355,7 @@ impl ConfigStructNamingVisitor<'_> {
                 "purist::config_struct_naming",
                 Severity::Warning,
                 format!(
-                    "Configuration struct '{struct_name}' does not follow the '<Subject>Config' naming convention. Rename it to '{suggested_name}'."
+                    "Configuration struct '{struct_name}' does not follow the '<Subject>Config', '<Subject>Manifest', or '<Subject>Metadata' naming convention. Rename it to '{suggested_name}'."
                 ),
             )
             .with_span(span)
@@ -337,10 +366,13 @@ impl ConfigStructNamingVisitor<'_> {
     }
 }
 
-/// Checks whether a struct name satisfies `<Subject>Config` (with a non-empty `<Subject>` prefix).
+/// Checks whether a struct name satisfies `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata`
+/// (with a non-empty `<Subject>` prefix).
 fn is_valid_config_struct_name(name: &str) -> bool {
-    name.strip_suffix("Config")
-        .is_some_and(|prefix| !prefix.is_empty())
+    ["Config", "Manifest", "Metadata"].iter().any(|suffix| {
+        name.strip_suffix(suffix)
+            .is_some_and(|prefix| !prefix.is_empty())
+    })
 }
 
 /// Checks whether a struct has explicit configuration framework attributes (`#[config(...)]`, `#[envconfig(...)]`, `#[confique(...)]`).
@@ -352,12 +384,12 @@ fn has_configuration_attribute(attrs: &[syn::Attribute]) -> bool {
     }) || derives_any(attrs, &["Envconfig", "Confique", "Config"])
 }
 
-/// Returns true if the struct name uses an unambiguous configuration-synonym suffix (`*Settings`, `*Configuration`, `Configuration`, `Settings`).
+/// Returns true if the struct name uses an unambiguous configuration-synonym suffix (`*Settings`, `*Configuration`, `Configuration`, `Settings`, or bare `Config`, `Manifest`, `Metadata`).
 fn is_explicit_config_synonym_name(name: &str) -> bool {
-    name == "Configuration"
-        || name == "Settings"
-        || name == "Config"
-        || name.ends_with("Settings")
+    matches!(
+        name,
+        "Configuration" | "Settings" | "Config" | "Manifest" | "Metadata"
+    ) || name.ends_with("Settings")
         || name.ends_with("Configuration")
         || name.ends_with("ConfigOptions")
         || name.ends_with("ConfigParameters")
@@ -375,7 +407,6 @@ fn is_exempt_infrastructure_struct(name: &str) -> bool {
         "Loader",
         "Context",
         "Scope",
-        "Manifest",
         "Summary",
         "Report",
         "Span",
@@ -384,7 +415,7 @@ fn is_exempt_infrastructure_struct(name: &str) -> bool {
     EXEMPT_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 
-/// Produces a suggested `<Subject>Config` replacement identifier for a non-compliant config struct name.
+/// Produces a suggested `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` replacement identifier for a non-compliant config struct name.
 fn suggest_config_struct_name(name: &str) -> String {
     for suffix in &[
         "Configuration",
@@ -401,6 +432,14 @@ fn suggest_config_struct_name(name: &str) -> String {
         {
             return format!("{prefix}Config");
         }
+    }
+
+    if name == "Manifest" {
+        return "AppManifest".to_string();
+    }
+
+    if name == "Metadata" {
+        return "AppMetadata".to_string();
     }
 
     if matches!(
@@ -666,6 +705,82 @@ impl SessionClient {
         let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn subject_manifest_and_metadata_structs_in_config_modules_are_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(serde::Deserialize)]
+pub struct PackageManifest {
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct WorkspaceMetadata {
+    pub members: Vec<String>,
+}
+"#;
+        for path in [
+            Path::new("src/config.rs"),
+            Path::new("src/manifest.rs"),
+            Path::new("src/metadata.rs"),
+        ] {
+            let ctx = LintContext::new(path, source);
+            let ast = syn::parse_file(source)?;
+            let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
+            assert_that!(diags.is_empty(), is_true());
+        }
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn bare_manifest_and_metadata_or_unprefixed_structs_in_manifest_and_metadata_modules_are_flagged()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let manifest_source = r#"
+#[derive(serde::Deserialize)]
+pub struct Manifest {
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct Dependencies {
+    pub items: Vec<String>,
+}
+"#;
+        let manifest_ctx = LintContext::new(Path::new("src/manifest.rs"), manifest_source);
+        let manifest_ast = syn::parse_file(manifest_source)?;
+        let manifest_diags = ConfigStructNamingRule.check_file(&manifest_ctx, &manifest_ast);
+
+        assert_that!(manifest_diags.len(), eq(2));
+        let m0 = manifest_diags.first().ok_or("expected m0")?;
+        let m1 = manifest_diags.get(1).ok_or("expected m1")?;
+        assert_that!(
+            &m0.message,
+            contains_substring("Rename it to 'AppManifest'")
+        );
+        assert_that!(
+            &m1.message,
+            contains_substring("Rename it to 'DependenciesConfig'")
+        );
+
+        let metadata_source = r#"
+#[derive(serde::Deserialize)]
+pub struct Metadata {
+    pub version: String,
+}
+"#;
+        let metadata_ctx = LintContext::new(Path::new("src/metadata.rs"), metadata_source);
+        let metadata_ast = syn::parse_file(metadata_source)?;
+        let metadata_diags = ConfigStructNamingRule.check_file(&metadata_ctx, &metadata_ast);
+
+        assert_that!(metadata_diags.len(), eq(1));
+        let md0 = metadata_diags.first().ok_or("expected md0")?;
+        assert_that!(
+            &md0.message,
+            contains_substring("Rename it to 'AppMetadata'")
+        );
         Ok(())
     }
 }
