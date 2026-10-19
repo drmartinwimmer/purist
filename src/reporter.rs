@@ -50,7 +50,7 @@ fn auto_detect_color() -> bool {
 }
 
 /// Renders a diagnostic report with explicit control over ANSI colorization.
-pub fn render_report_with_options(
+pub(crate) fn render_report_with_options(
     report: &DiagnosticReport,
     format: OutputFormat,
     writer: &mut dyn io::Write,

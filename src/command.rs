@@ -82,13 +82,15 @@ impl PuristCommand {
     }
 
     /// Sets the fix flag.
-    pub fn with_fix(mut self, fix: bool) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_fix(mut self, fix: bool) -> Self {
         self.fix = fix;
         self
     }
 
     /// Sets the allow flag.
-    pub fn with_allow(mut self, allow: bool) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_allow(mut self, allow: bool) -> Self {
         self.allow = allow;
         self
     }
@@ -114,12 +116,13 @@ impl PuristCommand {
     }
 
     /// Returns whether allowing triggered rules in Cargo.toml is requested.
-    pub fn is_allow(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_allow(&self) -> bool {
         self.allow
     }
 
     /// Executes the purist rules against the target path and returns the report.
-    pub fn execute(self) -> Result<DiagnosticReport, PuristError> {
+    pub(crate) fn execute(self) -> Result<DiagnosticReport, PuristError> {
         let (project_dir, file_to_check) = if let Some(file_path) = self.path {
             if !file_path.exists() {
                 return Err(PuristError::PathNotFound(file_path));
@@ -164,9 +167,9 @@ impl PuristCommand {
             discover_project_files_from_manifest(&project_dir, &manifest)?
         };
 
-        let engine = PuristEngine::new().with_config(manifest.into_lint_config());
+        let engine = PuristEngine::new();
         let report = engine
-            .check_files(&project_dir, &files)
+            .check_files_with_config(&project_dir, &files, manifest.lint_config())
             .map_err(PuristError::Io)?;
         Ok(report)
     }

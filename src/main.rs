@@ -36,7 +36,7 @@ mod tests {
     use super::*;
     use googletest::prelude::*;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     struct TempDirGuard(PathBuf);
 
@@ -117,9 +117,13 @@ edition = "2024"
         let file_path = temp_dir.join("main.rs");
         fs::write(&file_path, "mod helpers { pub fn foo() {} }\n")?;
 
-        let cli = Cli {
-            cmd: PuristCommand::new(Some(file_path), true).with_allow(true),
-        };
+        let cli = Cli::try_parse_from([
+            "purist",
+            "--path",
+            &file_path.to_string_lossy(),
+            "--quiet",
+            "--allow",
+        ])?;
         let code = cli.run();
         assert_that!(code, eq(ExitCode::SUCCESS));
         Ok(())
@@ -163,14 +167,20 @@ edition = "2024"
     #[googletest::test]
     fn parse_cli_without_arguments_defaults_to_none() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from(["purist"])?;
-        assert_that!(cli.cmd.path(), none());
+        assert_that!(cli.cmd, eq(&PuristCommand::default()));
         Ok(())
     }
 
     #[googletest::test]
     fn parse_cli_with_path_flag_succeeds() -> Result<(), Box<dyn std::error::Error>> {
         let cli = Cli::try_parse_from(["purist", "--path", "src/main.rs"])?;
-        assert_that!(cli.cmd.path(), eq(Some(Path::new("src/main.rs"))));
+        assert_that!(
+            cli.cmd,
+            eq(&PuristCommand::new(
+                Some(PathBuf::from("src/main.rs")),
+                false
+            ))
+        );
         Ok(())
     }
 
