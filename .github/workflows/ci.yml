@@ -31,6 +31,9 @@ jobs:
         with:
           tool: cargo-audit,taplo-cli
 
+      - name: Install api-manifest
+        run: cargo install api-manifest --locked
+
       - name: Install Prettier
         run: npm install -g prettier
 
@@ -42,6 +45,9 @@ jobs:
 
       - name: Run purist AST linter
         run: cargo run
+
+      - name: Check API manifest
+        run: api-manifest check
 
       - name: Check TOML formatting (Taplo)
         run: taplo fmt --check

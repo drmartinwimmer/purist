@@ -21,6 +21,7 @@ Before submitting changes or opening pull requests, review agents must ensure th
 - **Rust formatting**: `cargo fmt --check`
 - **Rust compiler & Clippy lints**: `cargo clippy --all-targets --all-features -- -D warnings`
 - **Purist AST linter**: `cargo run`
+- **API manifest check**: `api-manifest check`
 - **Dependency security audit**: `cargo audit`
 - **TOML formatting**: `taplo fmt --check`
 - **Markdown & JSON formatting**: `prettier --check "**/*.{md,json}"` (or `mdformat`)
@@ -43,6 +44,7 @@ Ensure zero violations (errors or warnings) are reported before submitting chang
   ```
 - **Rust Formatting**: Format Rust code with `cargo fmt --check` (or `cargo fmt` to apply).
 - **Clippy**: Ensure zero Clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`).
+- **API Manifest**: Keep `API.md` synchronized with the public library and CLI API (`api-manifest check`, or `api-manifest dump && prettier --write API.md` to regenerate).
 - **TOML Formatting**: Ensure all `.toml` files are formatted using Taplo (`taplo fmt --check` or `taplo fmt`).
 - **Markdown & JSON Formatting**: Ensure all `.md` and `.json` files match Prettier style (`prettier --check "**/*.{md,json}"`).
 - **Dependency Audit**: Ensure no known security advisories exist (`cargo audit`).
