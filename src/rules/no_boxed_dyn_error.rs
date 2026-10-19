@@ -41,7 +41,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule banning `Box<dyn std::error::Error>` in production code return types.
-pub struct NoBoxedDynErrorRule;
+pub(crate) struct NoBoxedDynErrorRule;
 
 impl Rule for NoBoxedDynErrorRule {
     fn name(&self) -> &'static str {

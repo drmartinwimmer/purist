@@ -26,7 +26,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging wildcard `*` imports outside test contexts and preludes.
-pub struct NoWildcardImportsRule;
+pub(crate) struct NoWildcardImportsRule;
 
 impl Rule for NoWildcardImportsRule {
     fn name(&self) -> &'static str {

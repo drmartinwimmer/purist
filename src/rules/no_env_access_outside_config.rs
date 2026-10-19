@@ -51,7 +51,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging raw `std::env::var` / `set_var` calls outside dedicated config, CLI, or tool modules.
-pub struct NoEnvAccessOutsideConfigRule;
+pub(crate) struct NoEnvAccessOutsideConfigRule;
 
 impl Rule for NoEnvAccessOutsideConfigRule {
     fn name(&self) -> &'static str {

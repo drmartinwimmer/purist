@@ -36,7 +36,7 @@ pub const DEFAULT_MAX_PRODUCTION_LINES: usize = 600;
 pub const DEFAULT_MAX_TOTAL_LINES: usize = 1000;
 
 /// Rule enforcing boundaries on source file line lengths.
-pub struct MaxFileLinesRule;
+pub(crate) struct MaxFileLinesRule;
 
 impl Rule for MaxFileLinesRule {
     fn name(&self) -> &'static str {

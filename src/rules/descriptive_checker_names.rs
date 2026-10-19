@@ -31,7 +31,7 @@ use syn::visit::{self, Visit};
 use syn::{ImplItemFn, ItemFn, ItemImpl};
 
 /// Rule enforcing descriptive `check_<subject>_<condition>` function names.
-pub struct DescriptiveCheckerNamesRule;
+pub(crate) struct DescriptiveCheckerNamesRule;
 
 impl Rule for DescriptiveCheckerNamesRule {
     fn name(&self) -> &'static str {

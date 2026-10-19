@@ -50,7 +50,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing GoogleTest suite conventions and discouraging legacy test patterns.
-pub struct GoogletestConventionsRule;
+pub(crate) struct GoogletestConventionsRule;
 
 impl Rule for GoogletestConventionsRule {
     fn name(&self) -> &'static str {

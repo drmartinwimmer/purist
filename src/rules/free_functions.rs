@@ -51,7 +51,7 @@ use std::collections::{HashMap, HashSet};
 use syn::Fields;
 
 /// Rule detecting stateless empty braced/tuple structs used solely as static namespaces.
-pub struct FreeFunctionsRule;
+pub(crate) struct FreeFunctionsRule;
 
 impl Rule for FreeFunctionsRule {
     fn name(&self) -> &'static str {

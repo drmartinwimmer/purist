@@ -50,7 +50,7 @@ const NEGATIVE_PREFIXES: &[&str] = &[
 const NEGATIVE_EXACT_WORDS: &[&str] = &["skip", "disable", "disabled", "disallow"];
 
 /// Rule enforcing affirmative/positive boolean naming across structs, enums, and bindings.
-pub struct NoNegativeBoolRule;
+pub(crate) struct NoNegativeBoolRule;
 
 impl Rule for NoNegativeBoolRule {
     fn name(&self) -> &'static str {

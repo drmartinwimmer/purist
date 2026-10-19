@@ -39,7 +39,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging unstructured string error types (`Result<T, String>` or `Result<T, &str>`) in production functions.
-pub struct ErrorTypesRule;
+pub(crate) struct ErrorTypesRule;
 
 impl Rule for ErrorTypesRule {
     fn name(&self) -> &'static str {

@@ -8,7 +8,7 @@ use toml_edit::DocumentMut;
 ///
 /// Discovery is strictly focused on targets defined by the manifest,
 /// including all workspace members and child crates, with no directory-crawling fallbacks.
-pub fn discover_project_files_from_manifest(
+pub(crate) fn discover_project_files_from_manifest(
     project_dir: &Path,
     manifest: &CargoManifest,
 ) -> Result<Vec<PathBuf>, PuristError> {
@@ -67,22 +67,9 @@ pub fn discover_project_files_from_manifest(
 /// Requires a `Cargo.toml` to be present in `project_dir`.
 /// Discovery is strictly focused on targets defined by the manifest,
 /// including all workspace members and child crates, with no directory-crawling fallbacks.
-pub fn discover_project_files(project_dir: &Path) -> Result<Vec<PathBuf>, PuristError> {
+pub(crate) fn discover_project_files(project_dir: &Path) -> Result<Vec<PathBuf>, PuristError> {
     let manifest = CargoManifest::load(project_dir)?;
     discover_project_files_from_manifest(project_dir, &manifest)
-}
-
-/// Backwards-compatible helper that discovers Rust files for a target path.
-///
-/// If `target` is a file, returns a singleton vector containing it.
-/// If `target` is a directory with a `Cargo.toml`, discovers all files in that project.
-/// Returns an empty vector if no `Cargo.toml` is found (no fallbacks).
-pub fn discover_rust_files(target: &Path) -> Vec<PathBuf> {
-    if target.is_file() {
-        return vec![target.to_path_buf()];
-    }
-
-    discover_project_files(target).unwrap_or_default()
 }
 
 fn collect_member_package_dirs(root: &Path, member_pattern: &str, dirs: &mut Vec<PathBuf>) {
@@ -192,7 +179,7 @@ fn crawl_target_folder(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-pub fn find_cargo_toml(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_cargo_toml(start: &Path) -> Option<PathBuf> {
     let mut current = if start.is_file() {
         start.parent()?.to_path_buf()
     } else {
@@ -213,7 +200,7 @@ pub fn find_cargo_toml(start: &Path) -> Option<PathBuf> {
 }
 
 /// Finds the enclosing workspace `Cargo.toml` if `start` is located within a workspace member.
-pub fn find_workspace_cargo_toml(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_workspace_cargo_toml(start: &Path) -> Option<PathBuf> {
     let mut current = if start.is_file() {
         start.parent()?.to_path_buf()
     } else {

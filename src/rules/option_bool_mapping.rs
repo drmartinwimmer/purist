@@ -30,7 +30,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging verbose `if let Some(...) = ... else { false }` or `{ None }` in favor of combinators.
-pub struct OptionBoolMappingRule;
+pub(crate) struct OptionBoolMappingRule;
 
 impl Rule for OptionBoolMappingRule {
     fn name(&self) -> &'static str {

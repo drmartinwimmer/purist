@@ -36,7 +36,7 @@ use syn::visit::{self, Visit};
 use syn::{Block, Expr, ExprMethodCall, ImplItemFn, ItemFn, Stmt};
 
 /// Rule enforcing scoped closures over manual paired lifecycle calls.
-pub struct PreferScopedClosuresRule;
+pub(crate) struct PreferScopedClosuresRule;
 
 impl Rule for PreferScopedClosuresRule {
     fn name(&self) -> &'static str {

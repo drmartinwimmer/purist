@@ -6,16 +6,16 @@ use syn::{Attribute, Field, ItemStruct};
 
 /// Information describing the currently active Clap struct scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClapStructInfo {
-    pub name: String,
-    pub is_command: bool,
-    pub derives_args: bool,
-    pub derives_parser: bool,
+pub(crate) struct ClapStructInfo {
+    pub(crate) name: String,
+    pub(crate) is_command: bool,
+    pub(crate) derives_args: bool,
+    pub(crate) derives_parser: bool,
 }
 
 /// Scope tracker that observes Clap CLI definitions during AST traversal using a stack (`Vec`).
 #[derive(Debug, Clone, Default)]
-pub struct ClapScope {
+pub(crate) struct ClapScope {
     stack: Vec<Option<ClapStructInfo>>,
     cli_impl_stack: Vec<bool>,
     command_runner_stack: Vec<bool>,
@@ -23,32 +23,33 @@ pub struct ClapScope {
 
 impl ClapScope {
     /// Creates a new Clap scope tracker.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Returns true if currently traversing within a Clap struct (`Args` or `Parser`).
-    pub fn is_in_clap_struct(&self) -> bool {
+    pub(crate) fn is_in_clap_struct(&self) -> bool {
         self.current_struct().is_some()
     }
 
     /// Returns information about the current Clap struct, if any.
-    pub fn current_struct(&self) -> Option<&ClapStructInfo> {
+    pub(crate) fn current_struct(&self) -> Option<&ClapStructInfo> {
         self.stack.iter().rev().find_map(|s| s.as_ref())
     }
 
     /// Returns the name of the current Clap struct, if any.
-    pub fn current_struct_name(&self) -> Option<&str> {
+    pub(crate) fn current_struct_name(&self) -> Option<&str> {
         self.current_struct().map(|s| s.name.as_str())
     }
 
     /// Returns true if the current Clap struct represents an executable command.
-    pub fn is_current_command(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_current_command(&self) -> bool {
         self.current_struct().is_some_and(|s| s.is_command)
     }
 
     /// Pushes a struct scope onto the stack.
-    pub fn push_struct(&mut self, item_struct: &ItemStruct) {
+    pub(crate) fn push_struct(&mut self, item_struct: &ItemStruct) {
         if derives_clap(&item_struct.attrs) {
             let name = item_struct.ident.to_string();
             let is_command = is_command_struct_name(&name);
@@ -66,83 +67,43 @@ impl ClapScope {
     }
 
     /// Pops the active struct scope from the stack.
-    pub fn pop(&mut self) -> Option<Option<ClapStructInfo>> {
+    pub(crate) fn pop(&mut self) -> Option<Option<ClapStructInfo>> {
         self.stack.pop()
     }
 
-    /// Executes a closure within an entered struct scope.
-    pub fn with_struct<R>(
-        &mut self,
-        item_struct: &ItemStruct,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        run_with_scope(
-            self,
-            |t| t.push_struct(item_struct),
-            |t| {
-                t.pop();
-            },
-            f,
-        )
-    }
-
     /// Returns true if currently traversing within a CLI implementation block.
-    pub fn is_in_cli_impl(&self) -> bool {
+    pub(crate) fn is_in_cli_impl(&self) -> bool {
         self.cli_impl_stack.last().copied().unwrap_or(false)
     }
 
     /// Returns true if currently traversing within a CLI command runner method (`run`, `execute`).
-    pub fn is_in_command_runner(&self) -> bool {
+    pub(crate) fn is_in_command_runner(&self) -> bool {
         self.command_runner_stack.last().copied().unwrap_or(false)
     }
 
     /// Pushes the CLI implementation block status onto the stack.
-    pub fn push_cli_impl(&mut self, is_cli: bool) {
+    pub(crate) fn push_cli_impl(&mut self, is_cli: bool) {
         self.cli_impl_stack.push(is_cli);
     }
 
     /// Pops the active CLI implementation block status from the stack.
-    pub fn pop_cli_impl(&mut self) -> Option<bool> {
+    pub(crate) fn pop_cli_impl(&mut self) -> Option<bool> {
         self.cli_impl_stack.pop()
     }
 
     /// Pushes the CLI command runner execution status onto the stack.
-    pub fn push_command_runner(&mut self, is_runner: bool) {
+    pub(crate) fn push_command_runner(&mut self, is_runner: bool) {
         self.command_runner_stack.push(is_runner);
     }
 
     /// Pops the active CLI command runner execution status from the stack.
-    pub fn pop_command_runner(&mut self) -> Option<bool> {
+    pub(crate) fn pop_command_runner(&mut self) -> Option<bool> {
         self.command_runner_stack.pop()
-    }
-
-    /// Executes a closure within a CLI implementation block scope.
-    pub fn with_cli_impl<R>(&mut self, is_cli: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |t| t.push_cli_impl(is_cli),
-            |t| {
-                t.pop_cli_impl();
-            },
-            f,
-        )
-    }
-
-    /// Executes a closure within a CLI command runner scope.
-    pub fn with_command_runner<R>(&mut self, is_runner: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |t| t.push_command_runner(is_runner),
-            |t| {
-                t.pop_command_runner();
-            },
-            f,
-        )
     }
 }
 
 /// Trait for visitor types that hold a [`ClapScope`], providing scoped closure methods.
-pub trait WithClapScope {
+pub(crate) trait WithClapScope {
     /// Returns a mutable reference to the underlying Clap scope.
     fn clap_scope_mut(&mut self) -> &mut ClapScope;
 
@@ -199,12 +160,12 @@ impl WithClapScope for ClapScope {
 }
 
 /// Checks whether an attribute list derives `Args` or `Parser`.
-pub fn derives_clap(attrs: &[Attribute]) -> bool {
+pub(crate) fn derives_clap(attrs: &[Attribute]) -> bool {
     derives_any(attrs, &["Args", "Parser"])
 }
 
 /// Checks whether a struct field is annotated with `#[command(flatten)]` or `#[arg(flatten)]`.
-pub fn is_flattened_field(field: &Field) -> bool {
+pub(crate) fn is_flattened_field(field: &Field) -> bool {
     field.attrs.iter().any(|attr| {
         if !attr.path().is_ident("command") && !attr.path().is_ident("arg") {
             return false;
@@ -227,7 +188,7 @@ fn has_subject_suffix(name: &str, suffix: &str) -> bool {
 
 /// Returns true if the struct name follows the `<Subject>Command`, `<Subject>Args`,
 /// `<Subject>Subcommand`, or `<Subject>Subcommands` naming convention.
-pub fn is_command_struct_name(name: &str) -> bool {
+pub(crate) fn is_command_struct_name(name: &str) -> bool {
     has_subject_suffix(name, "Command")
         || has_subject_suffix(name, "Args")
         || has_subject_suffix(name, "Subcommand")
@@ -235,7 +196,7 @@ pub fn is_command_struct_name(name: &str) -> bool {
 }
 
 /// Returns true if the type name matches CLI top-level or command conventions.
-pub fn is_cli_or_command_struct_name(name: &str) -> bool {
+pub(crate) fn is_cli_or_command_struct_name(name: &str) -> bool {
     name == "Cli"
         || name == "App"
         || name == "Commands"
@@ -244,6 +205,6 @@ pub fn is_cli_or_command_struct_name(name: &str) -> bool {
 }
 
 /// Returns true if the function name suggests a CLI command execution method.
-pub fn is_command_execution_fn_name(name: &str) -> bool {
+pub(crate) fn is_command_execution_fn_name(name: &str) -> bool {
     matches!(name, "run" | "execute" | "run_command" | "run_with_format")
 }

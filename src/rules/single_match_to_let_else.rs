@@ -33,7 +33,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule recommending `let ... = ... else { ... };` over single-variant `match` with early exit.
-pub struct SingleMatchToLetElseRule;
+pub(crate) struct SingleMatchToLetElseRule;
 
 impl Rule for SingleMatchToLetElseRule {
     fn name(&self) -> &'static str {

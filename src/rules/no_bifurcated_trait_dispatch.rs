@@ -46,7 +46,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule forbidding conditional branches from instantiating alternate sibling types to dispatch the same trait method.
-pub struct NoBifurcatedTraitDispatchRule;
+pub(crate) struct NoBifurcatedTraitDispatchRule;
 
 impl Rule for NoBifurcatedTraitDispatchRule {
     fn name(&self) -> &'static str {

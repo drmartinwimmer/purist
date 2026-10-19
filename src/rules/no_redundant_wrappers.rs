@@ -29,7 +29,7 @@ use syn::punctuated::Punctuated;
 use syn::token::Comma;
 
 /// Rule detecting trivial wrapper functions that merely forward arguments to an associated method.
-pub struct NoRedundantWrappersRule;
+pub(crate) struct NoRedundantWrappersRule;
 
 impl Rule for NoRedundantWrappersRule {
     fn name(&self) -> &'static str {

@@ -46,7 +46,7 @@ use syn::visit::{self, Visit};
 use syn::{Item, ItemImpl, ItemStruct, Type};
 
 /// Rule forbidding excessive loose boolean and flag tracking fields in structs.
-pub struct NoPrimitiveFlagClutterRule;
+pub(crate) struct NoPrimitiveFlagClutterRule;
 
 impl Rule for NoPrimitiveFlagClutterRule {
     fn name(&self) -> &'static str {

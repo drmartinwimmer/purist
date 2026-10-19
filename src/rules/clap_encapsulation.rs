@@ -46,7 +46,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing encapsulation for Clap CLI models (private fields and associated `run` method).
-pub struct ClapEncapsulationRule;
+pub(crate) struct ClapEncapsulationRule;
 
 impl Rule for ClapEncapsulationRule {
     fn name(&self) -> &'static str {

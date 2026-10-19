@@ -59,7 +59,7 @@ use syn::visit::{self, Visit};
 pub const DEFAULT_MAX_NESTING_DEPTH: usize = 4;
 
 /// Rule enforcing boundaries on control flow nesting depth.
-pub struct MaxNestingDepthRule;
+pub(crate) struct MaxNestingDepthRule;
 
 impl Rule for MaxNestingDepthRule {
     fn name(&self) -> &'static str {

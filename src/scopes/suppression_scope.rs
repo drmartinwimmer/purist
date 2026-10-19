@@ -4,47 +4,35 @@ use super::guard::run_with_scope;
 
 /// Tracks whether AST traversal is currently inside an `#[allow(...)]` or `#[expect(...)]` block.
 #[derive(Debug, Clone, Default)]
-pub struct SuppressionScope {
+pub(crate) struct SuppressionScope {
     stack: Vec<bool>,
 }
 
 impl SuppressionScope {
     /// Creates a new suppression scope tracker.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Returns true if currently traversing inside a suppressed region.
-    pub fn is_suppressed(&self) -> bool {
+    pub(crate) fn is_suppressed(&self) -> bool {
         self.stack.last().copied().unwrap_or(false)
     }
 
     /// Pushes a suppression flag onto the stack. If already suppressed, child scopes stay suppressed.
-    pub fn push_suppression(&mut self, suppressed: bool) {
+    pub(crate) fn push_suppression(&mut self, suppressed: bool) {
         let active = suppressed || self.is_suppressed();
         self.stack.push(active);
     }
 
     /// Pops the active suppression scope from the stack.
-    pub fn pop(&mut self) -> Option<bool> {
+    pub(crate) fn pop(&mut self) -> Option<bool> {
         self.stack.pop()
-    }
-
-    /// Executes a closure within this suppression scope, popping on exit.
-    pub fn with_suppression<R>(&mut self, suppressed: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-        run_with_scope(
-            self,
-            |t| t.push_suppression(suppressed),
-            |t| {
-                t.pop();
-            },
-            f,
-        )
     }
 }
 
 /// Trait for visitor types that hold a [`SuppressionScope`], providing scoped closure methods.
-pub trait WithSuppressionScope {
+pub(crate) trait WithSuppressionScope {
     /// Returns a mutable reference to the underlying suppression scope.
     fn suppression_scope_mut(&mut self) -> &mut SuppressionScope;
 

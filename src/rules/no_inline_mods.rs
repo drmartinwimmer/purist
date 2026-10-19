@@ -33,7 +33,7 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 
 /// Rule enforcing modular project organization by forbidding inline modules in entry point files.
-pub struct NoInlineModsRule;
+pub(crate) struct NoInlineModsRule;
 
 impl Rule for NoInlineModsRule {
     fn name(&self) -> &'static str {

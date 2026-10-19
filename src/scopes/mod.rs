@@ -13,30 +13,32 @@
 //! - [`WithTypeScope`]: Automatically implements [`WithTypeScope`].
 //! - [`WithDepthScope`]: Automatically implements [`WithDepthScope`].
 
-pub mod block_scope;
-pub mod clap_scope;
-pub mod depth_scope;
-pub mod guard;
-pub mod main_scope;
-pub mod suppression_scope;
-pub mod test_scope;
-pub mod type_scope;
+pub(crate) mod block_scope;
+pub(crate) mod clap_scope;
+pub(crate) mod depth_scope;
+pub(crate) mod guard;
+pub(crate) mod main_scope;
+pub(crate) mod suppression_scope;
+pub(crate) mod test_scope;
+pub(crate) mod type_scope;
 
-pub use block_scope::{BlockScope, WithBlockScope};
-pub use clap_scope::{
-    ClapScope, ClapStructInfo, WithClapScope, derives_clap, is_cli_or_command_struct_name,
+pub(crate) use block_scope::{BlockScope, WithBlockScope};
+pub(crate) use clap_scope::{
+    ClapScope, WithClapScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name, is_command_struct_name, is_flattened_field,
 };
-pub use depth_scope::{DepthScope, FlagScope, WithDepthScope};
-pub use guard::{ScopeGuard, run_with_block, run_with_exact_flag, run_with_flag, run_with_scope};
-pub use main_scope::{MainScope, WithMainScope};
-pub use purist_derive::{
+pub(crate) use depth_scope::{DepthScope, WithDepthScope};
+pub(crate) use main_scope::{MainScope, WithMainScope};
+pub(crate) use purist_derive::{
     WithBlockScope, WithClapScope, WithDepthScope, WithMainScope, WithSuppressionScope,
     WithTestScope, WithTypeScope,
 };
-pub use suppression_scope::{SuppressionScope, WithSuppressionScope};
-pub use test_scope::{TestScope, TestScopeState, WithTestScope};
-pub use type_scope::{ContainerKind, TypeScope, WithTypeScope};
+pub(crate) use suppression_scope::{SuppressionScope, WithSuppressionScope};
+pub(crate) use test_scope::{TestScope, WithTestScope};
+pub(crate) use type_scope::{TypeScope, WithTypeScope};
+
+#[cfg(test)]
+use depth_scope::FlagScope;
 
 #[cfg(test)]
 mod tests {

@@ -31,7 +31,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing suppression hygiene: requiring `reason = "…"` and a preceding explanatory comment.
-pub struct ClippySuppressRule;
+pub(crate) struct ClippySuppressRule;
 
 impl Rule for ClippySuppressRule {
     fn name(&self) -> &'static str {

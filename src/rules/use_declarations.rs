@@ -30,7 +30,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule detecting verbose qualified paths in code that should be imported via `use` statements.
-pub struct UseDeclarationsRule;
+pub(crate) struct UseDeclarationsRule;
 
 impl Rule for UseDeclarationsRule {
     fn name(&self) -> &'static str {

@@ -44,7 +44,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging `println!` / `eprintln!` in library modules.
-pub struct NoPrintlnInLibrariesRule;
+pub(crate) struct NoPrintlnInLibrariesRule;
 
 impl Rule for NoPrintlnInLibrariesRule {
     fn name(&self) -> &'static str {

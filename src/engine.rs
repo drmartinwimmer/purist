@@ -9,7 +9,7 @@ use syn::visit::{self, Visit};
 
 /// Context provided to lint rules during AST traversal.
 #[derive(Debug)]
-pub struct LintContext<'a> {
+pub(crate) struct LintContext<'a> {
     file_path: &'a Path,
     source: &'a str,
     lines: Vec<&'a str>,
@@ -18,7 +18,7 @@ pub struct LintContext<'a> {
 
 impl<'a> LintContext<'a> {
     /// Creates a new `LintContext` for the given file and source text.
-    pub fn new(file_path: &'a Path, source: &'a str) -> Self {
+    pub(crate) fn new(file_path: &'a Path, source: &'a str) -> Self {
         let lines = source.lines().collect();
         Self {
             file_path,
@@ -29,27 +29,27 @@ impl<'a> LintContext<'a> {
     }
 
     /// Sets the lint configuration for this context.
-    pub fn with_config(mut self, config: &'a LintConfig) -> Self {
+    pub(crate) fn with_config(mut self, config: &'a LintConfig) -> Self {
         self.config = Some(config);
         self
     }
 
     /// Returns the active lint configuration, if available.
-    pub fn config(&self) -> Option<&'a LintConfig> {
+    pub(crate) fn config(&self) -> Option<&'a LintConfig> {
         self.config
     }
     /// Returns the target file path.
-    pub fn file_path(&self) -> &'a Path {
+    pub(crate) fn file_path(&self) -> &'a Path {
         self.file_path
     }
 
     /// Returns the entire source code of the file.
-    pub fn source(&self) -> &'a str {
+    pub(crate) fn source(&self) -> &'a str {
         self.source
     }
 
     /// Returns true if the current file is `main.rs` or `lib.rs`.
-    pub fn is_main_or_lib(&self) -> bool {
+    pub(crate) fn is_main_or_lib(&self) -> bool {
         self.file_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -58,7 +58,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Returns true if the file is in a `tests/` directory or has a test suffix.
-    pub fn is_test_file(&self) -> bool {
+    pub(crate) fn is_test_file(&self) -> bool {
         self.file_path
             .components()
             .any(|c| c.as_os_str() == "tests")
@@ -71,7 +71,7 @@ impl<'a> LintContext<'a> {
     }
 
     /// Converts a `proc_macro2::Span` into a `crate::diagnostics::Span`.
-    pub fn to_span(&self, span: proc_macro2::Span) -> Span {
+    pub(crate) fn to_span(&self, span: proc_macro2::Span) -> Span {
         let start = span.start();
         let end = span.end();
         Span::new(
@@ -85,7 +85,7 @@ impl<'a> LintContext<'a> {
 
     /// Checks if the line immediately preceding `line_number` contains a comment (`// ...`).
     /// Line numbers are 1-indexed.
-    pub fn has_preceding_comment(&self, line_number: usize) -> bool {
+    pub(crate) fn has_preceding_comment(&self, line_number: usize) -> bool {
         if line_number <= 1 {
             return false;
         }
@@ -98,7 +98,8 @@ impl<'a> LintContext<'a> {
     }
 
     /// Returns the content of a specific line (1-indexed).
-    pub fn line_content(&self, line_number: usize) -> Option<&'a str> {
+    #[cfg(test)]
+    pub(crate) fn line_content(&self, line_number: usize) -> Option<&'a str> {
         if line_number == 0 {
             return None;
         }
@@ -107,7 +108,7 @@ impl<'a> LintContext<'a> {
 }
 
 /// Trait defining a purist static analysis rule.
-pub trait Rule: Send + Sync {
+pub(crate) trait Rule: Send + Sync {
     /// Returns the unique rule identifier (e.g. "purist::no_inline_mods").
     fn name(&self) -> &'static str;
 
@@ -117,10 +118,10 @@ pub trait Rule: Send + Sync {
 
 /// In-code suppression directive parsed from attributes.
 #[derive(Debug, Clone)]
-pub struct CodeSuppression {
-    pub rule: String,
-    pub start_line: usize,
-    pub end_line: usize,
+pub(crate) struct CodeSuppression {
+    pub(crate) rule: String,
+    pub(crate) start_line: usize,
+    pub(crate) end_line: usize,
 }
 
 /// Static analysis engine running registered purist rules over Rust source files.
@@ -137,7 +138,8 @@ impl Default for PuristEngine {
 
 impl PuristEngine {
     /// Creates a new engine instance with no rules registered.
-    pub fn empty() -> Self {
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
         Self {
             rules: Vec::new(),
             config: None,
@@ -159,19 +161,15 @@ impl PuristEngine {
     }
 
     /// Registers a custom or built-in rule.
-    pub fn with_rule(mut self, rule: Box<dyn Rule>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_rule(mut self, rule: Box<dyn Rule>) -> Self {
         self.rules.push(rule);
         self
     }
 
-    /// Registers multiple rules.
-    pub fn with_rules(mut self, rules: Vec<Box<dyn Rule>>) -> Self {
-        self.rules.extend(rules);
-        self
-    }
-
     /// Returns a slice of all registered rules.
-    pub fn rules(&self) -> &[Box<dyn Rule>] {
+    #[cfg(test)]
+    pub(crate) fn rules(&self) -> &[Box<dyn Rule>] {
         &self.rules
     }
 

@@ -34,7 +34,7 @@ use syn::visit::{self, Visit};
 use syn::{Item, ItemImpl, Type};
 
 /// Rule forbidding interior mutability fields in AST visitor structs.
-pub struct NoInteriorMutabilityInVisitorsRule;
+pub(crate) struct NoInteriorMutabilityInVisitorsRule;
 
 impl Rule for NoInteriorMutabilityInVisitorsRule {
     fn name(&self) -> &'static str {

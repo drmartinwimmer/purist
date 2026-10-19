@@ -55,7 +55,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing exit code hygiene: no raw integer exits, and no `process::exit` or `ExitCode` in libraries.
-pub struct ExitCodeHygieneRule;
+pub(crate) struct ExitCodeHygieneRule;
 
 impl Rule for ExitCodeHygieneRule {
     fn name(&self) -> &'static str {
