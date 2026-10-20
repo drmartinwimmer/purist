@@ -12,11 +12,10 @@ mod rule_config;
 mod rules;
 mod scopes;
 
-pub use cargo::{LintConfig, RuleLevel};
 pub use command::{PuristCommand, PuristError};
-pub use diagnostics::{Diagnostic, DiagnosticReport, ReportSummary, Severity, Span};
+pub use diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
 pub use engine::PuristEngine;
-pub use reporter::{OutputFormat, render_report, render_report_with_options};
+pub use reporter::{OutputFormat, render_report};
 
 #[cfg(test)]
 mod tests {

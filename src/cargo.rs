@@ -1,12 +1,12 @@
 use crate::PuristError;
-use crate::discovery::{find_cargo_toml, find_workspace_cargo_toml};
+use crate::discovery::find_workspace_cargo_toml;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 /// Severity configuration for a purist lint rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RuleLevel {
+pub(crate) enum RuleLevel {
     Allow,
     #[default]
     Warn,
@@ -15,7 +15,7 @@ pub enum RuleLevel {
 }
 
 impl RuleLevel {
-    pub fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "allow" | "off" | "disabled" => Some(RuleLevel::Allow),
             "warn" | "warning" => Some(RuleLevel::Warn),
@@ -188,7 +188,7 @@ pub(crate) use crate::rule_config::{
 
 /// Project-level lint configuration parsed from `Cargo.toml`.
 #[derive(Debug, Clone, Default)]
-pub struct LintConfig {
+pub(crate) struct LintConfig {
     pub(crate) rules: PuristLintsConfig,
     pub(crate) unrecognized: Vec<String>,
     pub(crate) deprecated: Vec<String>,
@@ -199,11 +199,11 @@ pub struct LintConfig {
 }
 
 impl LintConfig {
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self::default()
     }
 
-    pub fn set_rule(&mut self, rule: impl Into<String>, level: RuleLevel) {
+    pub(crate) fn set_rule(&mut self, rule: impl Into<String>, level: RuleLevel) {
         let name = rule.into();
         let stripped = name
             .strip_prefix("purist::")
@@ -215,11 +215,11 @@ impl LintConfig {
         }
     }
 
-    pub fn level_for(&self, rule_name: &str) -> Option<RuleLevel> {
+    pub(crate) fn level_for(&self, rule_name: &str) -> Option<RuleLevel> {
         self.rules.get(rule_name)
     }
 
-    pub fn warnings(&self) -> Vec<String> {
+    pub(crate) fn warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         for dep in &self.deprecated {
             warnings.push(dep.clone());
@@ -235,20 +235,9 @@ impl LintConfig {
         warnings
     }
 
-    /// Loads lint configuration from the nearest `Cargo.toml` at or above `path`,
-    /// inheriting workspace defaults if within a Cargo workspace.
-    pub fn discover_for_path(path: &Path) -> Self {
-        if let Some(cargo_toml) = find_cargo_toml(path) {
-            CargoManifest::load(&cargo_toml)
-                .map(CargoManifest::into_lint_config)
-                .unwrap_or_default()
-        } else {
-            Self::empty()
-        }
-    }
-
     /// Parses lint configuration from a `Cargo.toml` file content.
-    pub fn from_manifest_content(content: &str) -> Option<Self> {
+    #[cfg(test)]
+    pub(crate) fn from_manifest_content(content: &str) -> Option<Self> {
         let doc: DocumentMut = content.parse().ok()?;
         Some(Self::from_document(&doc))
     }
@@ -328,11 +317,6 @@ impl LintConfig {
         if self.lib_facade_hygiene.max_fn_lines.is_none() {
             self.lib_facade_hygiene.max_fn_lines = ws_config.lib_facade_hygiene.max_fn_lines;
         }
-    }
-
-    pub fn from_manifest_file(file: &Path) -> Option<Self> {
-        let content = fs::read_to_string(file).ok()?;
-        Self::from_manifest_content(&content)
     }
 
     /// Parses metadata settings from `[package.metadata.purist]` or `[workspace.metadata.purist]`.
@@ -476,10 +460,6 @@ impl CargoManifest {
 
     pub(crate) fn lint_config(&self) -> &LintConfig {
         &self.lint_config
-    }
-
-    pub(crate) fn into_lint_config(self) -> LintConfig {
-        self.lint_config
     }
 
     pub(crate) fn has_lints_workspace_true(&self) -> bool {

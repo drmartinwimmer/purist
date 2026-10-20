@@ -30,8 +30,8 @@ pub struct Span {
     pub start_col: usize,
     pub end_line: usize,
     pub end_col: usize,
-    pub start_byte: Option<usize>,
-    pub end_byte: Option<usize>,
+    pub(crate) start_byte: Option<usize>,
+    pub(crate) end_byte: Option<usize>,
 }
 
 impl Span {
@@ -99,20 +99,20 @@ impl Diagnostic {
 
 /// Summary metrics aggregated for a diagnostic report.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ReportSummary {
-    pub total_errors: usize,
-    pub total_warnings: usize,
-    pub total_info: usize,
-    pub total_hints: usize,
-    pub targets_scanned: usize,
-    pub duration_ms: u64,
+pub(crate) struct ReportSummary {
+    pub(crate) total_errors: usize,
+    pub(crate) total_warnings: usize,
+    pub(crate) total_info: usize,
+    pub(crate) total_hints: usize,
+    pub(crate) targets_scanned: usize,
+    pub(crate) duration_ms: u64,
 }
 
 /// An aggregated container of all diagnostics produced during a check run.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DiagnosticReport {
     pub diagnostics: Vec<Diagnostic>,
-    pub summary: ReportSummary,
+    pub(crate) summary: ReportSummary,
 }
 
 impl DiagnosticReport {
@@ -146,7 +146,8 @@ impl DiagnosticReport {
     }
 
     /// Sets additional execution metrics on the summary.
-    pub fn with_metrics(mut self, targets_scanned: usize, duration_ms: u64) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_metrics(mut self, targets_scanned: usize, duration_ms: u64) -> Self {
         self.summary.targets_scanned = targets_scanned;
         self.summary.duration_ms = duration_ms;
         self
@@ -168,12 +169,12 @@ impl DiagnosticReport {
     }
 
     /// Returns the total count of informational diagnostics.
-    pub fn info_count(&self) -> usize {
+    pub(crate) fn info_count(&self) -> usize {
         self.summary.total_info
     }
 
     /// Returns the total count of hint diagnostics.
-    pub fn hint_count(&self) -> usize {
+    pub(crate) fn hint_count(&self) -> usize {
         self.summary.total_hints
     }
 
@@ -183,7 +184,7 @@ impl DiagnosticReport {
     }
 
     /// Adds a diagnostic to the report and updates summary metrics.
-    pub fn add(&mut self, diag: Diagnostic) {
+    pub(crate) fn add(&mut self, diag: Diagnostic) {
         match diag.severity {
             Severity::Error => self.summary.total_errors += 1,
             Severity::Warning => self.summary.total_warnings += 1,

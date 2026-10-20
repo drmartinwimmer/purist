@@ -137,45 +137,12 @@ impl Default for PuristEngine {
 }
 
 impl PuristEngine {
-    /// Creates a new engine instance with no rules registered.
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
-        Self {
-            rules: Vec::new(),
-            config: None,
-        }
-    }
-
     /// Creates a new engine instance with default purist rules registered.
     pub fn new() -> Self {
         Self {
             rules: default_rules(),
             config: None,
         }
-    }
-
-    /// Sets the project-level lint configuration.
-    pub fn with_config(mut self, config: LintConfig) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /// Registers a custom or built-in rule.
-    #[cfg(test)]
-    pub(crate) fn with_rule(mut self, rule: Box<dyn Rule>) -> Self {
-        self.rules.push(rule);
-        self
-    }
-
-    /// Returns a slice of all registered rules.
-    #[cfg(test)]
-    pub(crate) fn rules(&self) -> &[Box<dyn Rule>] {
-        &self.rules
-    }
-
-    /// Analyzes a single in-memory source string without disk access.
-    pub fn check_source(&self, file_path: &Path, source: &str) -> DiagnosticReport {
-        self.check_source_internal(file_path, source, self.config.as_ref(), true)
     }
 
     fn check_source_internal(
@@ -264,7 +231,7 @@ impl PuristEngine {
 
     /// Analyzes a specific list of Rust files belonging to the project at `project_dir`
     /// using an explicitly provided `LintConfig`.
-    pub fn check_files_with_config(
+    pub(crate) fn check_files_with_config(
         &self,
         project_dir: &Path,
         files: &[PathBuf],
@@ -319,23 +286,6 @@ impl PuristEngine {
 
         report.summary.targets_scanned = targets_scanned;
         Ok(report)
-    }
-
-    /// Analyzes a specific list of Rust files belonging to the project at `project_dir`.
-    pub fn check_files(
-        &self,
-        project_dir: &Path,
-        files: &[PathBuf],
-    ) -> Result<DiagnosticReport, std::io::Error> {
-        if let Some(cfg) = &self.config {
-            self.check_files_with_config(project_dir, files, cfg)
-        } else {
-            let manifest = CargoManifest::load(project_dir).map_err(|e| match e {
-                crate::PuristError::Io(err) => err,
-                other => std::io::Error::other(other.to_string()),
-            })?;
-            self.check_files_with_config(project_dir, files, manifest.lint_config())
-        }
     }
 
     /// Analyzes all Rust files in the specified path (file or directory).
@@ -585,6 +535,38 @@ fn is_suppressed(diag: &Diagnostic, suppressions: &[CodeSuppression]) -> bool {
 mod tests {
     use super::*;
     use googletest::prelude::*;
+
+    impl PuristEngine {
+        /// Creates a new engine instance with no rules registered.
+        pub(crate) fn empty() -> Self {
+            Self {
+                rules: Vec::new(),
+                config: None,
+            }
+        }
+
+        /// Sets the project-level lint configuration.
+        pub(crate) fn with_config(mut self, config: LintConfig) -> Self {
+            self.config = Some(config);
+            self
+        }
+
+        /// Registers a custom or built-in rule.
+        pub(crate) fn with_rule(mut self, rule: Box<dyn Rule>) -> Self {
+            self.rules.push(rule);
+            self
+        }
+
+        /// Returns a slice of all registered rules.
+        pub(crate) fn rules(&self) -> &[Box<dyn Rule>] {
+            &self.rules
+        }
+
+        /// Analyzes a single in-memory source string without disk access.
+        pub(crate) fn check_source(&self, file_path: &Path, source: &str) -> DiagnosticReport {
+            self.check_source_internal(file_path, source, self.config.as_ref(), true)
+        }
+    }
 
     struct DummyRule(&'static str);
 
