@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.11.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.10.1...purist-v0.11.0) (2026-10-20)
+
+
+### Features
+
+* **rules:** support Manifest and Metadata config file and struct names ([09ba311](https://github.com/drmartinwimmer/purist/commit/09ba311cea0ff05290307e8c1f5db24cfd6e28b0))
+* **rules:** support Manifest and Metadata config file and struct names ([95e865b](https://github.com/drmartinwimmer/purist/commit/95e865b98a96d468ceab0efd52c004ce261676d2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.10.1 to 0.11.0
+
 ## [0.10.1](https://github.com/drmartinwimmer/purist/compare/purist-v0.10.0...purist-v0.10.1) (2026-10-17)
 
 
