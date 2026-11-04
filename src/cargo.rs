@@ -68,6 +68,7 @@ pub(crate) struct PuristLintsConfig {
     pub(crate) no_interior_mutability_in_visitors: RuleLevel,
     pub(crate) prefer_scoped_closures: RuleLevel,
     pub(crate) descriptive_checker_names: RuleLevel,
+    pub(crate) no_silent_wildcard_fallback: RuleLevel,
 }
 
 impl PuristLintsConfig {
@@ -118,6 +119,7 @@ impl PuristLintsConfig {
             "no_interior_mutability_in_visitors" => Some(self.no_interior_mutability_in_visitors),
             "prefer_scoped_closures" => Some(self.prefer_scoped_closures),
             "descriptive_checker_names" => Some(self.descriptive_checker_names),
+            "no_silent_wildcard_fallback" => Some(self.no_silent_wildcard_fallback),
             _ => None,
         }
     }
@@ -173,6 +175,7 @@ impl PuristLintsConfig {
             "no_interior_mutability_in_visitors" => self.no_interior_mutability_in_visitors = level,
             "prefer_scoped_closures" => self.prefer_scoped_closures = level,
             "descriptive_checker_names" => self.descriptive_checker_names = level,
+            "no_silent_wildcard_fallback" => self.no_silent_wildcard_fallback = level,
             _ => return Err(UnrecognizedRule),
         }
         Ok(())

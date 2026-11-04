@@ -26,6 +26,7 @@ pub(crate) mod no_primitive_flag_clutter;
 pub(crate) mod no_println_in_libraries;
 pub(crate) mod no_redundant_conversions;
 pub(crate) mod no_redundant_wrappers;
+pub(crate) mod no_silent_wildcard_fallback;
 pub(crate) mod no_test_prefix;
 pub(crate) mod no_trivial_getters_setters;
 pub(crate) mod no_unsafe_in_tests;
@@ -66,6 +67,7 @@ pub(crate) use no_primitive_flag_clutter::NoPrimitiveFlagClutterRule;
 pub(crate) use no_println_in_libraries::NoPrintlnInLibrariesRule;
 pub(crate) use no_redundant_conversions::NoRedundantConversionsRule;
 pub(crate) use no_redundant_wrappers::NoRedundantWrappersRule;
+pub(crate) use no_silent_wildcard_fallback::NoSilentWildcardFallbackRule;
 pub(crate) use no_test_prefix::NoTestPrefixRule;
 pub(crate) use no_trivial_getters_setters::NoTrivialGettersSettersRule;
 pub(crate) use no_unsafe_in_tests::NoUnsafeInTestsRule;
@@ -123,5 +125,6 @@ pub(crate) fn default_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoInteriorMutabilityInVisitorsRule),
         Box::new(PreferScopedClosuresRule),
         Box::new(DescriptiveCheckerNamesRule),
+        Box::new(NoSilentWildcardFallbackRule),
     ]
 }
