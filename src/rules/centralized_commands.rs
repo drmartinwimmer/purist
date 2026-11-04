@@ -20,11 +20,11 @@
 //!
 //! # Compliant Example
 //! ```rust,ignore
-//! // In src/tools/git.rs or src/commands/git.rs
-//! pub struct GitTool;
+//! // In src/tools/git.rs or src/commands/git.rs (with `mod tools;` or `pub(crate) mod tools;` in src/lib.rs)
+//! pub(crate) struct GitTool;
 //!
 //! impl GitTool {
-//!     pub fn fetch(&self) -> io::Result<()> {
+//!     pub(crate) fn fetch(&self) -> io::Result<()> {
 //!         let status = std::process::Command::new("git").arg("fetch").status()?;
 //!         // Structured error handling...
 //!         Ok(())
