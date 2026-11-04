@@ -184,6 +184,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::exit_code_hygiene`: Direct `std::process::exit(...)` is forbidden in library modules.
   - `purist::path_resolution`: Unanchored relative path literals are prohibited in filesystem calls.
   - `purist::no_env_access_outside_config`: Direct `std::env` reads are restricted to designated config modules.
+  - `purist::no_silent_wildcard_fallback`: Forbids wildcard or catch-all match arms on mutually exclusive `Option` tuples that silently return empty or default values instead of explicit errors.
 - **Testing Hygiene**:
   - `purist::test_patterns`: Standardizes test naming (`<verb>_<description>_<outcome>`), GoogleTest matchers, and error propagation (`?`) over `.unwrap()`.
   - `purist::no_test_prefix`: Forbids redundant `test_` prefixes in test function names.

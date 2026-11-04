@@ -62,6 +62,7 @@ pub(crate) fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
         "no_interior_mutability_in_visitors" => Some("no_interior_mutability_in_visitors"),
         "prefer_scoped_closures" => Some("prefer_scoped_closures"),
         "descriptive_checker_names" => Some("descriptive_checker_names"),
+        "no_silent_wildcard_fallback" => Some("no_silent_wildcard_fallback"),
         _ => None,
     }
 }
