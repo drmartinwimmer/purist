@@ -3,7 +3,7 @@
 //! # What This Rule Does
 //! Enforces encapsulation standards on CLI command structs that derive Clap traits (`clap::Args`, `clap::Parser`):
 //! 1. Command argument fields must remain private (unless marked with `#[command(flatten)]` or `#[arg(flatten)]`).
-//! 2. Command structs (`<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand`, but not shared options/flags) must define an associated `run` or `execute` method.
+//! 2. Top-level CLI parsers (`#[derive(clap::Parser)]`) and command structs (`<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand`, but not shared options/flags) must define an associated `run` or `execute` method.
 //!
 //! # Why This Rule Exists
 //! Exposing raw CLI arguments as public struct fields encourages external modules to reach into command
@@ -137,9 +137,12 @@ impl<'ast> Visit<'ast> for ClapEncapsulationVisitor<'_> {
 impl ClapEncapsulationVisitor<'_> {
     fn check_clap_struct_missing_run_method(&mut self, item_struct: &syn::ItemStruct) {
         let struct_name = item_struct.ident.to_string();
-        if is_command_struct_name(&struct_name)
-            && !self.struct_has_run_method.contains(&struct_name)
-        {
+        let derives_parser = self
+            .clap_scope
+            .current_struct()
+            .is_some_and(|s| s.derives_parser);
+        let requires_run_method = is_command_struct_name(&struct_name) || derives_parser;
+        if requires_run_method && !self.struct_has_run_method.contains(&struct_name) {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
                 Diagnostic::new(
@@ -150,7 +153,7 @@ impl ClapEncapsulationVisitor<'_> {
                     ),
                 )
                 .with_span(span)
-                .with_suggested_fix("Implement 'pub fn run(&self, ...)' for this command struct."),
+                .with_suggested_fix("Implement 'pub fn run(self, ...)' for this command struct."),
             );
         }
     }
@@ -296,6 +299,30 @@ pub struct WorkspaceSubcommand {
         let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(2));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn parser_struct_without_run_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(clap::Parser)]
+pub struct Cli {
+    verbose: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(1));
+        let diag = diags.first().ok_or("expected diagnostic")?;
+        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
+        assert_that!(
+            &diag.message,
+            contains_substring(
+                "Clap command struct 'Cli' lacks an associated 'run' or 'execute' method"
+            )
+        );
         Ok(())
     }
 }

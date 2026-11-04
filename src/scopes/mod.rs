@@ -26,6 +26,7 @@ pub(crate) use block_scope::{BlockScope, WithBlockScope};
 pub(crate) use clap_scope::{
     ClapScope, WithClapScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name, is_command_struct_name, is_flattened_field,
+    is_parser_struct_name,
 };
 pub(crate) use depth_scope::{DepthScope, WithDepthScope};
 pub(crate) use main_scope::{MainScope, WithMainScope};
