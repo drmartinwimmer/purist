@@ -179,7 +179,7 @@ Purist enforces strict best practices across multiple areas of code quality:
   - `purist::no_redundant_conversions`: Flags redundant sequential serialize/deserialize roundtrips.
   - `purist::prefer_scoped_closures`: Enforces scoped closures (`with_*`) over manual paired lifecycle calls (`push`/`pop`, `enter`/`exit`).
 - **Robustness & Error Handling**:
-  - `purist::error_types`: Functions must not return raw `String` or `&str` error types.
+  - `purist::error_types`: Enforces `<Subject>Error` naming and `#[derive(thiserror::Error)]` on error types, and forbids returning raw `String` or `&str` error types.
   - `purist::no_boxed_dyn_error`: Production code must use structured error types instead of `Box<dyn Error>`.
   - `purist::exit_code_hygiene`: Direct `std::process::exit(...)` is forbidden in library modules.
   - `purist::path_resolution`: Unanchored relative path literals are prohibited in filesystem calls.
