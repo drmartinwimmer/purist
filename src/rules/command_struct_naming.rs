@@ -1,20 +1,28 @@
 //! Rule: `purist::command_struct_naming`
 //!
 //! # What This Rule Does
-//! Enforces that Clap CLI command structs (structs deriving `clap::Args` or used as subcommand
-//! payloads in `#[derive(clap::Subcommand)]` enums) follow the `<Subject>Command`, `<Subject>Args`,
-//! or `<Subject>Subcommand` naming convention, while excluding reusable option bundles flattened via
-//! `#[command(flatten)]` or `#[arg(flatten)]`.
+//! Enforces that Clap CLI structs follow consistent naming conventions:
+//! - Top-level parser structs deriving `clap::Parser` must be named `Cli` or `<Subject>Cli`.
+//! - Command structs (structs deriving `clap::Args` or used as subcommand payloads in
+//!   `#[derive(clap::Subcommand)]` enums) must follow the `<Subject>Command`, `<Subject>Args`,
+//!   or `<Subject>Subcommand` naming convention, while excluding reusable option bundles flattened via
+//!   `#[command(flatten)]` or `#[arg(flatten)]`.
 //!
 //! # Why This Rule Exists
-//! In CLI applications built with Clap's derive API, consistent naming of executable command
-//! models makes the CLI architecture self-documenting and predictable. Unadorned names like bare
-//! `Subcommand` (without a `<Subject>` prefix) or arbitrary suffixes like `*Params`, `*Payload`,
-//! `*Options`, or generic nouns obscure which structs represent executable CLI commands versus
-//! reusable flattened argument groups.
+//! In CLI applications built with Clap's derive API, consistent naming of top-level parsers and
+//! executable command models makes the CLI architecture self-documenting and predictable. Calling a
+//! top-level `#[derive(clap::Parser)]` struct `Args` or `Options` instead of `Cli`, or using unadorned
+//! names like bare `Subcommand` (without a `<Subject>` prefix) or arbitrary suffixes like `*Params`,
+//! `*Payload`, or `*Options` on command structs, obscures which types represent top-level CLI entrypoints,
+//! executable commands, and reusable flattened argument groups.
 //!
 //! # Non-Compliant Example
 //! ```rust,ignore
+//! #[derive(clap::Parser)]
+//! pub struct Args { // Top-level Parser struct should be named 'Cli' or '<Subject>Cli'
+//!     file: PathBuf,
+//! }
+//!
 //! #[derive(clap::Args)]
 //! pub struct Subcommand { // Bare 'Subcommand' lacks a <Subject> prefix
 //!     force: bool,
@@ -28,6 +36,12 @@
 //!
 //! # Compliant Example
 //! ```rust,ignore
+//! #[derive(clap::Parser)]
+//! pub struct Cli {
+//!     #[command(subcommand)]
+//!     command: WorkspaceSubcommand,
+//! }
+//!
 //! #[derive(clap::Args)]
 //! pub struct WorkspaceSubcommand {
 //!     force: bool,
@@ -53,12 +67,12 @@ use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use crate::scopes::{
     TypeScope, WithTypeScope, is_command_execution_fn_name, is_command_struct_name,
-    is_flattened_field,
+    is_flattened_field, is_parser_struct_name,
 };
 use std::collections::HashSet;
 use syn::visit::{self, Visit};
 
-/// Rule enforcing `<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand` naming for Clap command structs.
+/// Rule enforcing `Cli` / `<Subject>Cli` naming for `clap::Parser` structs and `<Subject>Command`, `<Subject>Args`, or `<Subject>Subcommand` naming for Clap command structs.
 pub(crate) struct CommandStructNamingRule;
 
 impl Rule for CommandStructNamingRule {
@@ -179,6 +193,27 @@ impl<'ast> Visit<'ast> for CommandStructNamingVisitor<'_> {
 impl CommandStructNamingVisitor<'_> {
     fn check_clap_struct_command_naming(&mut self, item_struct: &syn::ItemStruct) {
         let struct_name = item_struct.ident.to_string();
+        let derives_parser = derives_trait(&item_struct.attrs, "Parser");
+        if derives_parser {
+            if !is_parser_struct_name(&struct_name) {
+                let span = self.ctx.to_span(item_struct.ident.span());
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        "purist::command_struct_naming",
+                        Severity::Warning,
+                        format!(
+                            "Clap parser struct '{struct_name}' does not follow the top-level CLI parser naming convention. Structs deriving 'clap::Parser' must be named 'Cli' or '<Subject>Cli'."
+                        ),
+                    )
+                    .with_span(span)
+                    .with_suggested_fix(
+                        "Rename the top-level parser struct to 'Cli' or '<Subject>Cli'.",
+                    ),
+                );
+            }
+            return;
+        }
+
         let derives_args = derives_trait(&item_struct.attrs, "Args");
         let is_subcommand_payload = self.subcommand_payload_types.contains(&struct_name);
 
@@ -382,6 +417,57 @@ pub struct LegacyParams {
         let diags = CommandStructNamingRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn parser_struct_named_cli_or_subject_cli_is_permitted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(clap::Parser)]
+pub struct Cli {
+    verbose: bool,
+}
+
+#[derive(clap::Parser)]
+pub struct WorkspaceCli {
+    quiet: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = CommandStructNamingRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.is_empty(), is_true());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn parser_struct_named_args_or_options_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(clap::Parser)]
+pub struct Args {
+    file: String,
+}
+
+#[derive(clap::Parser)]
+pub struct CliArgs {
+    verbose: bool,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = CommandStructNamingRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(2));
+        let first = diags.first().ok_or("expected first diagnostic")?;
+        assert_that!(&first.rule, eq("purist::command_struct_naming"));
+        assert_that!(
+            &first.message,
+            contains_substring(
+                "Clap parser struct 'Args' does not follow the top-level CLI parser naming convention"
+            )
+        );
         Ok(())
     }
 }

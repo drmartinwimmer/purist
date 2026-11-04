@@ -45,8 +45,10 @@ use crate::checkers::{ReceiverKind, check_fn_receiver};
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::engine::{LintContext, Rule};
 use crate::scopes::{
-    TypeScope, WithTypeScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
+    TypeScope, WithTypeScope, derives_clap, is_cli_or_command_struct_name,
+    is_command_execution_fn_name,
 };
+use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -63,16 +65,32 @@ impl Rule for CliRunConsumesSelfRule {
             return Vec::new();
         }
 
+        let clap_structs = collect_clap_struct_names(file);
+
         let mut visitor = CliRunVisitor {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
             type_scope: TypeScope::new(),
+            clap_structs,
         };
 
         visitor.visit_file(file);
         visitor.diagnostics
     }
+}
+
+/// Collects names of structs in `file` that derive `clap::Parser` or `clap::Args`.
+fn collect_clap_struct_names(file: &syn::File) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in &file.items {
+        if let syn::Item::Struct(item_struct) = item
+            && derives_clap(&item_struct.attrs)
+        {
+            names.insert(item_struct.ident.to_string());
+        }
+    }
+    names
 }
 
 #[derive(WithTestScope, WithTypeScope)]
@@ -81,6 +99,7 @@ struct CliRunVisitor<'a> {
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScope,
     type_scope: TypeScope,
+    clap_structs: HashSet<String>,
 }
 
 impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
@@ -104,7 +123,8 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
         self.with_test_fn(&impl_fn.attrs, |this| {
             if !this.test_scope.is_in_test()
                 && let Some(struct_name) = this.type_scope.current_impl_name()
-                && is_cli_or_command_struct_name(struct_name)
+                && (is_cli_or_command_struct_name(struct_name)
+                    || this.clap_structs.contains(struct_name))
                 && let Some(diag) = check_method_receiver_consumes_self(
                     this.ctx,
                     "purist::cli_run_consumes_self",
@@ -239,6 +259,27 @@ impl WorkspaceSubcommand {
         let diags = CliRunConsumesSelfRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(2));
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn clap_parser_struct_run_taking_borrow_is_flagged_regardless_of_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let source = r#"
+#[derive(clap::Parser)]
+pub struct Args {
+    file: String,
+}
+
+impl Args {
+    pub fn run(&self) {}
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/cli.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = CliRunConsumesSelfRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(1));
         Ok(())
     }
 }
