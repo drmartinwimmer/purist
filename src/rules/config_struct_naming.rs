@@ -3,7 +3,8 @@
 //! # What This Rule Does
 //! Enforces that structs representing application or module configuration, manifests, or metadata
 //! follow the `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming convention
-//! (e.g. `UserConfig`, `ProjectConfig`, `CargoManifest`, `PackageMetadata`),
+//! (e.g. `UserConfig`, `ProjectConfig`, `CargoManifest`, `PackageMetadata`) and use canonical
+//! configuration keys without `#[serde(alias = ...)]`,
 //! while ensuring non-configuration structs that derive `serde::Serialize` or `serde::Deserialize`
 //! (such as runtime state containers, cache entries, session tokens, or API payloads) are not flagged.
 //!
@@ -60,6 +61,8 @@ use crate::engine::{LintContext, Rule};
 use crate::scopes::{TypeScope, WithTypeScope, derives_clap};
 use std::collections::HashSet;
 use std::path::Path;
+use syn::spanned::Spanned;
+use syn::token::Paren;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming for configuration structs while permitting non-config Serde models.
@@ -83,6 +86,7 @@ impl Rule for ConfigStructNamingRule {
             ctx,
             diagnostics: Vec::new(),
             test_scope: TestScope::new(ctx.is_test_file()),
+            type_scope: TypeScope::new(),
             in_config_file,
             config_mod_depth: 0,
             loader_structs,
@@ -261,13 +265,14 @@ fn is_config_like_struct_name(name: &str) -> bool {
         || name.ends_with("Env")
 }
 
-/// Visitor that inspects struct definitions and enforces `<Subject>Config`, `<Subject>Manifest`,
-/// or `<Subject>Metadata` naming for configuration structs.
-#[derive(WithTestScope)]
+/// Visitor that inspects struct and enum definitions to enforce `<Subject>Config`, `<Subject>Manifest`,
+/// or `<Subject>Metadata` naming and canonical configuration keys without `#[serde(alias = ...)]`.
+#[derive(WithTestScope, WithTypeScope)]
 struct ConfigStructNamingVisitor<'a> {
     ctx: &'a LintContext<'a>,
     diagnostics: Vec<Diagnostic>,
     test_scope: TestScope,
+    type_scope: TypeScope,
     in_config_file: bool,
     config_mod_depth: usize,
     loader_structs: HashSet<String>,
@@ -306,29 +311,103 @@ impl<'ast> Visit<'ast> for ConfigStructNamingVisitor<'_> {
     fn visit_item_struct(&mut self, item_struct: &'ast syn::ItemStruct) {
         if !self.test_scope.is_in_test()
             && !has_suppression_attribute(&item_struct.attrs, "config_struct_naming")
+            && self.check_struct_config_naming(item_struct)
         {
-            self.check_struct_config_naming(item_struct);
+            self.with_type_struct(&item_struct.ident, |this| {
+                visit::visit_item_struct(this, item_struct);
+            });
+            return;
         }
 
         visit::visit_item_struct(self, item_struct);
     }
+
+    fn visit_item_enum(&mut self, item_enum: &'ast syn::ItemEnum) {
+        if !self.test_scope.is_in_test()
+            && !has_suppression_attribute(&item_enum.attrs, "config_struct_naming")
+            && self.check_enum_represents_config(item_enum)
+        {
+            self.with_type_enum(&item_enum.ident, |this| {
+                visit::visit_item_enum(this, item_enum);
+            });
+            return;
+        }
+
+        visit::visit_item_enum(self, item_enum);
+    }
+
+    fn visit_variant(&mut self, variant: &'ast syn::Variant) {
+        if let Some(enum_name) = self.type_scope.current_enum_name()
+            && !has_suppression_attribute(&variant.attrs, "config_struct_naming")
+        {
+            if let Some(attr) = find_serde_alias_attr(&variant.attrs) {
+                let variant_name = &variant.ident;
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        "purist::config_struct_naming",
+                        Severity::Warning,
+                        format!(
+                            "Configuration enum variant '{enum_name}::{variant_name}' uses '#[serde(alias = ...)]'. Avoid aliases in configuration types; pick one canonical key name."
+                        ),
+                    )
+                    .with_span(self.ctx.to_span(attr.span()))
+                    .with_suggested_fix(
+                        "Remove 'alias = ...' from '#[serde(...)]' and use a single canonical configuration key.",
+                    ),
+                );
+            }
+            self.with_type_variant(&variant.ident, |this| {
+                visit::visit_variant(this, variant);
+            });
+            return;
+        }
+
+        visit::visit_variant(self, variant);
+    }
+
+    fn visit_field(&mut self, field: &'ast syn::Field) {
+        if let Some(container_desc) = self.type_scope.container_description()
+            && !has_suppression_attribute(&field.attrs, "config_struct_naming")
+            && let Some(attr) = find_serde_alias_attr(&field.attrs)
+        {
+            let field_desc = field.ident.as_ref().map_or_else(
+                || container_desc.clone(),
+                |id| format!("'{id}' in {container_desc}"),
+            );
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "purist::config_struct_naming",
+                    Severity::Warning,
+                    format!(
+                        "Configuration field {field_desc} uses '#[serde(alias = ...)]'. Avoid aliases in configuration types; pick one canonical key name."
+                    ),
+                )
+                .with_span(self.ctx.to_span(attr.span()))
+                .with_suggested_fix(
+                    "Remove 'alias = ...' from '#[serde(...)]' and use a single canonical configuration key.",
+                ),
+            );
+        }
+
+        visit::visit_field(self, field);
+    }
 }
 
 impl ConfigStructNamingVisitor<'_> {
-    fn check_struct_config_naming(&mut self, item_struct: &syn::ItemStruct) {
+    fn check_struct_config_naming(&mut self, item_struct: &syn::ItemStruct) -> bool {
         if derives_clap(&item_struct.attrs) {
-            return;
+            return false;
         }
 
         let has_named_fields =
             matches!(&item_struct.fields, syn::Fields::Named(f) if !f.named.is_empty());
         if !has_named_fields {
-            return;
+            return false;
         }
 
         let struct_name = item_struct.ident.to_string();
         if is_exempt_infrastructure_struct(&struct_name) {
-            return;
+            return false;
         }
 
         let in_config_context = self.in_config_file || self.config_mod_depth > 0;
@@ -341,10 +420,15 @@ impl ConfigStructNamingVisitor<'_> {
         let represents_config = in_config_context
             || has_config_attrs
             || has_config_loader
-            || is_explicit_config_synonym;
+            || is_explicit_config_synonym
+            || is_valid_config_struct_name(&struct_name);
 
-        if !represents_config || is_valid_config_struct_name(&struct_name) {
-            return;
+        if !represents_config {
+            return false;
+        }
+
+        if is_valid_config_struct_name(&struct_name) {
+            return true;
         }
 
         let suggested_name = suggest_config_struct_name(&struct_name);
@@ -363,7 +447,45 @@ impl ConfigStructNamingVisitor<'_> {
                 "Rename configuration struct '{struct_name}' to '{suggested_name}'."
             )),
         );
+        true
     }
+
+    fn check_enum_represents_config(&self, item_enum: &syn::ItemEnum) -> bool {
+        let enum_name = item_enum.ident.to_string();
+        if is_exempt_infrastructure_struct(&enum_name) {
+            return false;
+        }
+
+        let in_config_context = self.in_config_file || self.config_mod_depth > 0;
+        in_config_context
+            || is_valid_config_struct_name(&enum_name)
+            || is_explicit_config_synonym_name(&enum_name)
+    }
+}
+
+/// Returns the first `#[serde(...)]` attribute containing an `alias` item, if any.
+fn find_serde_alias_attr(attrs: &[syn::Attribute]) -> Option<&syn::Attribute> {
+    attrs.iter().find(|attr| {
+        if !attr.path().is_ident("serde") {
+            return false;
+        }
+        let mut found_alias = false;
+        let _result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("alias") {
+                found_alias = true;
+            }
+            if meta.input.peek(syn::Token![=]) {
+                let _eq: syn::Token![=] = meta.input.parse()?;
+                let _val: syn::Expr = meta.input.parse()?;
+            } else if meta.input.peek(Paren) {
+                let content;
+                syn::parenthesized!(content in meta.input);
+                let _tokens: proc_macro2::TokenStream = content.parse()?;
+            }
+            Ok(())
+        });
+        found_alias
+    })
 }
 
 /// Checks whether a struct name satisfies `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata`
@@ -780,6 +902,47 @@ pub struct Metadata {
         assert_that!(
             &md0.message,
             contains_substring("Rename it to 'AppMetadata'")
+        );
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn serde_alias_in_config_struct_and_enum_is_flagged() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let source = r#"
+#[derive(serde::Deserialize)]
+pub struct AppConfig {
+    #[serde(alias = "server_url")]
+    pub url: String,
+    #[serde(rename = "max_retries", default)]
+    pub retries: u32,
+}
+
+#[derive(serde::Deserialize)]
+pub enum BackendConfig {
+    #[serde(rename = "openai_compatible", alias = "openai", alias = "ollama")]
+    OpenAiCompatible,
+    GeminiCli,
+}
+"#;
+        let ctx = LintContext::new(Path::new("src/config.rs"), source);
+        let ast = syn::parse_file(source)?;
+        let diags = ConfigStructNamingRule.check_file(&ctx, &ast);
+
+        assert_that!(diags.len(), eq(2));
+        let d0 = diags.first().ok_or("expected d0")?;
+        let d1 = diags.get(1).ok_or("expected d1")?;
+        assert_that!(
+            &d0.message,
+            contains_substring(
+                "Configuration field 'url' in struct 'AppConfig' uses '#[serde(alias = ...)]'"
+            )
+        );
+        assert_that!(
+            &d1.message,
+            contains_substring(
+                "Configuration enum variant 'BackendConfig::OpenAiCompatible' uses '#[serde(alias = ...)]'"
+            )
         );
         Ok(())
     }
