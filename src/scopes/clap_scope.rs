@@ -195,12 +195,16 @@ pub(crate) fn is_command_struct_name(name: &str) -> bool {
         || has_subject_suffix(name, "Subcommands")
 }
 
+/// Returns true if the struct name follows the `Cli` or `<Subject>Cli` naming convention for top-level `clap::Parser` structs.
+pub(crate) fn is_parser_struct_name(name: &str) -> bool {
+    name == "Cli" || has_subject_suffix(name, "Cli")
+}
+
 /// Returns true if the type name matches CLI top-level or command conventions.
 pub(crate) fn is_cli_or_command_struct_name(name: &str) -> bool {
-    name == "Cli"
+    is_parser_struct_name(name)
         || name == "App"
         || name == "Commands"
-        || has_subject_suffix(name, "Cli")
         || is_command_struct_name(name)
 }
 
