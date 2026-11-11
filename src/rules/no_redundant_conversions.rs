@@ -30,7 +30,7 @@
 use super::common::{TestScope, WithTestScope};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{BlockScope, WithBlockScope};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -149,8 +149,9 @@ fn check_redundant_conversion_call(
     for arg in &call.args {
         if let Some(inner_call_span) = find_nested_serializer_call(arg) {
             let span = ctx.to_span(inner_call_span);
-            findings
-                .push(RuleDiagnostic::RedundantNestedSerializationRoundtrip.into_diagnostic(span));
+            findings.push(
+                HygieneDiagnostic::RedundantNestedSerializationRoundtrip.into_diagnostic(span),
+            );
         }
     }
 
@@ -161,7 +162,7 @@ fn check_redundant_conversion_call(
         {
             let span = ctx.to_span(init_span);
             findings.push(
-                RuleDiagnostic::RedundantVariableSerializationRoundtrip { ident }
+                HygieneDiagnostic::RedundantVariableSerializationRoundtrip { ident }
                     .into_diagnostic(span),
             );
         }

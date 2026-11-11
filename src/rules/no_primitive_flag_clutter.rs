@@ -40,7 +40,7 @@ use super::common::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::HashSet;
 use std::path::Path;
 use syn::visit::{self, Visit};
@@ -107,7 +107,7 @@ impl StructFlagVisitor<'_> {
         if is_visitor && flag_count >= 2 {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
-                RuleDiagnostic::VisitorFlagClutter {
+                ArchitectureDiagnostic::VisitorFlagClutter {
                     struct_name,
                     flag_count,
                 }
@@ -120,7 +120,7 @@ impl StructFlagVisitor<'_> {
         {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
-                RuleDiagnostic::StructFlagClutter {
+                ArchitectureDiagnostic::StructFlagClutter {
                     struct_name,
                     flag_count,
                 }

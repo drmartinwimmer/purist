@@ -45,7 +45,7 @@ use super::common::{TestScope, WithTestScope, has_bare_test_attr, has_framework_
 use crate::checkers::check_macro_matches;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -129,7 +129,7 @@ impl GoogletestConventionsVisitor<'_> {
             let span = self.ctx.to_span(ident.span());
             let fn_name = ident.to_string();
             self.diagnostics
-                .push(RuleDiagnostic::StandardTestAttr { fn_name }.into_diagnostic(span));
+                .push(HygieneDiagnostic::StandardTestAttr { fn_name }.into_diagnostic(span));
         }
     }
 
@@ -148,11 +148,11 @@ impl GoogletestConventionsVisitor<'_> {
         if mac_name == "assert" {
             let span = self.ctx.to_span(mac.path.span());
             self.diagnostics
-                .push(RuleDiagnostic::StandardAssertMacro.into_diagnostic(span));
+                .push(HygieneDiagnostic::StandardAssertMacro.into_diagnostic(span));
         } else if mac_name == "assert_eq" || mac_name == "assert_ne" {
             let span = self.ctx.to_span(mac.path.span());
             self.diagnostics.push(
-                RuleDiagnostic::StandardAssertEqMacro {
+                HygieneDiagnostic::StandardAssertEqMacro {
                     mac_name: mac_name.to_string(),
                 }
                 .into_diagnostic(span),
@@ -166,7 +166,7 @@ impl GoogletestConventionsVisitor<'_> {
         if call.method == "expect" {
             let span = self.ctx.to_span(call.method.span());
             self.diagnostics
-                .push(RuleDiagnostic::ExpectInTest.into_diagnostic(span));
+                .push(HygieneDiagnostic::ExpectInTest.into_diagnostic(span));
         }
     }
 
@@ -192,12 +192,12 @@ impl GoogletestConventionsVisitor<'_> {
                     syn::BinOp::Eq(_) => {
                         let span = self.ctx.to_span(bin.span());
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatBinaryEq.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatBinaryEq.into_diagnostic(span));
                     }
                     syn::BinOp::Ne(_) => {
                         let span = self.ctx.to_span(bin.span());
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatBinaryNe.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatBinaryNe.into_diagnostic(span));
                     }
                     _ => {}
                 }
@@ -207,19 +207,19 @@ impl GoogletestConventionsVisitor<'_> {
                 match method_name.as_str() {
                     "is_ok" => {
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatIsOk.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatIsOk.into_diagnostic(span));
                     }
                     "is_err" => {
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatIsErr.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatIsErr.into_diagnostic(span));
                     }
                     "is_some" => {
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatIsSome.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatIsSome.into_diagnostic(span));
                     }
                     "is_none" => {
                         self.diagnostics
-                            .push(RuleDiagnostic::AssertThatIsNone.into_diagnostic(span));
+                            .push(HygieneDiagnostic::AssertThatIsNone.into_diagnostic(span));
                     }
                     _ => {}
                 }

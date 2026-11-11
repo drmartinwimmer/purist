@@ -47,7 +47,7 @@ use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -152,7 +152,7 @@ impl EnvAccessVisitor<'_> {
         let span = self.ctx.to_span(call.span());
 
         self.diagnostics
-            .push(RuleDiagnostic::DirectEnvAccess { func_name }.into_diagnostic(span));
+            .push(ArchitectureDiagnostic::DirectEnvAccess { func_name }.into_diagnostic(span));
     }
 }
 

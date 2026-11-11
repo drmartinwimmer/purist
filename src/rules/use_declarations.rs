@@ -25,7 +25,7 @@
 use super::common::path_last_ident;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -160,7 +160,7 @@ fn check_path_excessive_qualification(
     let target_ident = path_last_ident(path)?.to_string();
     let span = ctx.to_span(path.span());
     Some(
-        RuleDiagnostic::LongQualifiedPath {
+        HygieneDiagnostic::LongQualifiedPath {
             path_str,
             target_ident,
         }

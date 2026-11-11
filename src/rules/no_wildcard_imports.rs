@@ -22,7 +22,7 @@
 use super::common::{TestScope, WithTestScope};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -98,7 +98,7 @@ impl WildcardImportVisitor<'_> {
                     };
                     let span = self.ctx.to_span(g.span());
                     self.diagnostics
-                        .push(RuleDiagnostic::WildcardImport { path_str }.into_diagnostic(span));
+                        .push(HygieneDiagnostic::WildcardImport { path_str }.into_diagnostic(span));
                 }
             }
             syn::UseTree::Group(group) => {

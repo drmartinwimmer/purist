@@ -27,7 +27,7 @@
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 use syn::{ImplItemFn, ItemFn, ItemImpl};
 
@@ -110,7 +110,7 @@ impl CheckerNamingVisitor<'_> {
         if is_vague_checker_name(&name) {
             let span = self.ctx.to_span(ident.span());
             self.diagnostics
-                .push(RuleDiagnostic::VagueCheckerName { name }.into_diagnostic(span));
+                .push(HygieneDiagnostic::VagueCheckerName { name }.into_diagnostic(span));
         }
     }
 }

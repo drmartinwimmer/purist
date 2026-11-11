@@ -35,7 +35,7 @@
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{SuppressionScope, WithSuppressionScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -126,7 +126,7 @@ impl UnsafeTestVisitor<'_> {
         if matches!(sig.safety, syn::Safety::Unsafe(_)) {
             let span = self.ctx.to_span(sig.fn_token.span());
             self.diagnostics.push(
-                RuleDiagnostic::UnsafeFnInTest {
+                HygieneDiagnostic::UnsafeFnInTest {
                     fn_name: sig.ident.to_string(),
                 }
                 .into_diagnostic(span),
@@ -138,7 +138,7 @@ impl UnsafeTestVisitor<'_> {
     fn check_expr_unsafe_block_in_test(&mut self, expr_unsafe: &syn::ExprUnsafe) {
         let span = self.ctx.to_span(expr_unsafe.unsafe_token.span());
         self.diagnostics
-            .push(RuleDiagnostic::UnsafeBlockInTest.into_diagnostic(span));
+            .push(HygieneDiagnostic::UnsafeBlockInTest.into_diagnostic(span));
     }
 }
 

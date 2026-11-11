@@ -51,7 +51,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{DepthScope, TestScope, WithDepthScope, WithTestScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -105,7 +105,7 @@ impl<'a> NestingVisitor<'a> {
         if !self.test_scope.is_in_test() && self.depth_scope.get() == self.max_depth + 1 {
             let diag_span = self.ctx.to_span(span);
             self.diagnostics.push(
-                RuleDiagnostic::NestingDepthExceeded {
+                ArchitectureDiagnostic::NestingDepthExceeded {
                     depth: self.depth_scope.get(),
                     max_depth: self.max_depth,
                 }

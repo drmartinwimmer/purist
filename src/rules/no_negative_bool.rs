@@ -34,7 +34,7 @@
 use super::common::{TestScope, WithTestScope, is_bool_type};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::visit::{self, Visit};
 
@@ -152,7 +152,7 @@ impl NegativeBoolVisitor<'_> {
                 .container_description()
                 .unwrap_or_else(|| "type".to_string());
             self.diagnostics.push(
-                RuleDiagnostic::NegativeBooleanField {
+                HygieneDiagnostic::NegativeBooleanField {
                     field_name,
                     container_desc,
                     suggested,
@@ -193,7 +193,7 @@ impl NegativeBoolVisitor<'_> {
             let span = self.ctx.to_span(pat_ident.ident.span());
             let suggested = suggest_affirmative(&var_name, prefix);
             self.diagnostics.push(
-                RuleDiagnostic::NegativeBooleanVariable {
+                HygieneDiagnostic::NegativeBooleanVariable {
                     var_name,
                     suggested,
                 }

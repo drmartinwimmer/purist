@@ -48,7 +48,7 @@
 use super::common::{has_suppression_attribute, path_ends_with_ident};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -125,7 +125,7 @@ impl AstHookScanner<'_> {
         for (span, hook_name, description) in loop_checker.found_violations {
             let diag_span = self.ctx.to_span(span);
             self.diagnostics.push(
-                RuleDiagnostic::ManualAstIteration {
+                ArchitectureDiagnostic::ManualAstIteration {
                     description: description.to_string(),
                     fn_name: fn_name.clone(),
                     hook_name: hook_name.to_string(),

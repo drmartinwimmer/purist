@@ -29,7 +29,7 @@
 use super::common::{macro_name, path_ends_with_ident};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -103,7 +103,7 @@ fn check_expr_match_single_to_let_else(
 
         if can_convert {
             let span = ctx.to_span(expr_match.span());
-            return Some(RuleDiagnostic::SingleMatchToLetElse.into_diagnostic(span));
+            return Some(HygieneDiagnostic::SingleMatchToLetElse.into_diagnostic(span));
         }
     }
 

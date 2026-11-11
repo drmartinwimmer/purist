@@ -28,7 +28,7 @@
 use super::common::{extract_type_ident, has_suppression_attribute, path_ends_with_ident};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -94,7 +94,7 @@ impl<'ast> Visit<'ast> for VisitorFieldScanner<'_> {
             let span = self.ctx.to_span(field.span());
 
             self.diagnostics.push(
-                RuleDiagnostic::VisitorInteriorMutability {
+                ArchitectureDiagnostic::VisitorInteriorMutability {
                     struct_name: struct_name.clone(),
                     field_name,
                     bad_type: bad_type.to_string(),

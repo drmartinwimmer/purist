@@ -50,7 +50,7 @@ use super::common::{
 use crate::checkers::extract_fn_return_type;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -177,17 +177,25 @@ fn check_error_type_naming(
         return None;
     }
 
-    if is_subject_error_name(&name) {
+    if is_subject_error_name(&name)
+        || (derives_trait(attrs, "Diagnostic") && is_subject_diagnostic_name(&name))
+    {
         return None;
     }
 
     let span = ctx.to_span(ident.span());
-    Some(RuleDiagnostic::ErrorTypeNaming { name }.into_diagnostic(span))
+    Some(ArchitectureDiagnostic::ErrorTypeNaming { name }.into_diagnostic(span))
 }
 
 /// Returns true if `name` ends with `Error` and has a non-empty `<Subject>` prefix.
 fn is_subject_error_name(name: &str) -> bool {
     name.strip_suffix("Error")
+        .is_some_and(|prefix| !prefix.is_empty())
+}
+
+/// Returns true if `name` ends with `Diagnostic` and has a non-empty `<Subject>` prefix.
+fn is_subject_diagnostic_name(name: &str) -> bool {
+    name.strip_suffix("Diagnostic")
         .is_some_and(|prefix| !prefix.is_empty())
 }
 
@@ -202,7 +210,7 @@ fn check_manual_error_impl(ctx: &LintContext<'_>, item_impl: &syn::ItemImpl) -> 
         .map_or_else(|| "error type".to_string(), ToString::to_string);
     let span = ctx.to_span(trait_path.span());
 
-    Some(RuleDiagnostic::ManualErrorImpl { target_name }.into_diagnostic(span))
+    Some(ArchitectureDiagnostic::ManualErrorImpl { target_name }.into_diagnostic(span))
 }
 
 /// Returns true if `path` refers to `Error`, `error::Error`, `std::error::Error`, or `core::error::Error`.
@@ -229,7 +237,9 @@ fn check_fn_signature_unstructured_error(
     let span = ctx.to_span(error_ty.span());
     let fn_name = sig.ident.to_string();
 
-    Some(RuleDiagnostic::UnstructuredErrorReturn { fn_name, err_desc }.into_diagnostic(span))
+    Some(
+        ArchitectureDiagnostic::UnstructuredErrorReturn { fn_name, err_desc }.into_diagnostic(span),
+    )
 }
 
 /// Detects if a return type is `Result<T, String>` or `Result<T, &str>`, returning the inner error type and description.

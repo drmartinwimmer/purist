@@ -25,7 +25,7 @@
 use super::common::has_test_attr;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 
@@ -55,7 +55,7 @@ impl Rule for NoRedundantWrappersRule {
                     let span = ctx.to_span(item_fn.sig.ident.span());
                     let fn_name = item_fn.sig.ident.to_string();
                     diagnostics.push(
-                        RuleDiagnostic::RedundantWrapperFn {
+                        HygieneDiagnostic::RedundantWrapperFn {
                             fn_name,
                             target_desc,
                         }

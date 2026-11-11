@@ -34,7 +34,7 @@ use super::common::{TestScope, WithTestScope, is_drop_trait_impl};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -121,7 +121,7 @@ impl TempDirVisitor<'_> {
 
         let span = self.ctx.to_span(call.span());
         self.diagnostics
-            .push(RuleDiagnostic::ManualRemoveDirAllInTest.into_diagnostic(span));
+            .push(HygieneDiagnostic::ManualRemoveDirAllInTest.into_diagnostic(span));
     }
 }
 

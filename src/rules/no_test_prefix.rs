@@ -29,7 +29,7 @@ use super::common::{TestScope, WithTestScope, has_test_attr};
 use crate::checkers::check_ident_has_test_prefix;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `test_` or `test` prefixes in test function names.
@@ -101,7 +101,7 @@ fn check_fn_ident_forbidden_test_prefix(
     }
 
     let span = ctx.to_span(ident.span());
-    Some(RuleDiagnostic::RedundantTestPrefix { name }.into_diagnostic(span))
+    Some(HygieneDiagnostic::RedundantTestPrefix { name }.into_diagnostic(span))
 }
 
 #[cfg(test)]

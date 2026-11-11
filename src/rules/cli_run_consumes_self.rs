@@ -44,7 +44,7 @@ use super::common::{TestScope, WithTestScope, extract_type_ident};
 use crate::checkers::{ReceiverKind, check_fn_receiver};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     TypeScope, WithTypeScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name,
@@ -155,7 +155,7 @@ fn check_method_receiver_consumes_self(
 
     let span = ctx.to_span(impl_fn.sig.inputs.first()?.span());
     Some(
-        RuleDiagnostic::CliRunTakesRefSelf {
+        ArchitectureDiagnostic::CliRunTakesRefSelf {
             fn_name,
             struct_name: struct_name.to_string(),
         }

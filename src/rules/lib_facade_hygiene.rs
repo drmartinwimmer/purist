@@ -32,7 +32,7 @@ use super::common::{
 };
 use crate::diagnostics::{Diagnostic, Span};
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::{Item, Visibility};
 
@@ -79,7 +79,7 @@ impl Rule for LibFacadeHygieneRule {
         if prod_lines > max_prod_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
             diagnostics.push(
-                RuleDiagnostic::LibRsTooLarge {
+                ArchitectureDiagnostic::LibRsTooLarge {
                     prod_lines,
                     max_prod_lines,
                 }
@@ -102,7 +102,7 @@ impl Rule for LibFacadeHygieneRule {
                 if fn_lines > max_fn_lines {
                     let fn_name = item_fn.sig.ident.to_string();
                     diagnostics.push(
-                        RuleDiagnostic::LibRsFnTooLong {
+                        ArchitectureDiagnostic::LibRsFnTooLong {
                             fn_name,
                             fn_lines,
                             max_fn_lines,
@@ -121,7 +121,7 @@ impl Rule for LibFacadeHygieneRule {
                     "command" | "commands" | "tool" | "tools" | "cmd"
                 ) {
                     diagnostics.push(
-                        RuleDiagnostic::LibRsPubAdapterMod { mod_name }
+                        ArchitectureDiagnostic::LibRsPubAdapterMod { mod_name }
                             .into_diagnostic(ctx.to_span(item_mod.ident.span())),
                     );
                 }

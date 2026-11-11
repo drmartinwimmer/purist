@@ -65,7 +65,7 @@ use super::common::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     TypeScope, WithTypeScope, is_command_execution_fn_name, is_command_struct_name,
     is_flattened_field, is_parser_struct_name,
@@ -198,8 +198,10 @@ impl CommandStructNamingVisitor<'_> {
         if derives_parser {
             if !is_parser_struct_name(&struct_name) {
                 let span = self.ctx.to_span(item_struct.ident.span());
-                self.diagnostics
-                    .push(RuleDiagnostic::ParserStructNaming { struct_name }.into_diagnostic(span));
+                self.diagnostics.push(
+                    ArchitectureDiagnostic::ParserStructNaming { struct_name }
+                        .into_diagnostic(span),
+                );
             }
             return;
         }
@@ -231,9 +233,9 @@ impl CommandStructNamingVisitor<'_> {
         );
 
         let diag = if is_bare_suffix {
-            RuleDiagnostic::BareCommandStructSuffix { struct_name }
+            ArchitectureDiagnostic::BareCommandStructSuffix { struct_name }
         } else {
-            RuleDiagnostic::InvalidCommandStructNaming { struct_name }
+            ArchitectureDiagnostic::InvalidCommandStructNaming { struct_name }
         };
 
         self.diagnostics.push(diag.into_diagnostic(span));

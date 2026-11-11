@@ -50,7 +50,7 @@ use super::common::path_ends_with_ident;
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{MainScope, WithMainScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -122,7 +122,7 @@ impl ExitCodeVisitor<'_> {
         let span = self.ctx.to_span(item_fn.sig.output.span());
         let fn_name = item_fn.sig.ident.to_string();
         self.diagnostics
-            .push(RuleDiagnostic::FnReturnsExitCode { fn_name }.into_diagnostic(span));
+            .push(ArchitectureDiagnostic::FnReturnsExitCode { fn_name }.into_diagnostic(span));
     }
 
     /// Inspects a call expression for `process::exit`, returning diagnostics for raw integer codes or calls outside `main()`.
@@ -139,13 +139,13 @@ impl ExitCodeVisitor<'_> {
             && matches!(expr_lit.lit, syn::Lit::Int(_))
         {
             self.diagnostics
-                .push(RuleDiagnostic::RawIntProcessExit.into_diagnostic(span.clone()));
+                .push(ArchitectureDiagnostic::RawIntProcessExit.into_diagnostic(span.clone()));
         }
 
         // Check if exit is called outside of main function in main.rs
         if !self.main_scope.is_in_main() {
             self.diagnostics
-                .push(RuleDiagnostic::ProcessExitOutsideMain.into_diagnostic(span));
+                .push(ArchitectureDiagnostic::ProcessExitOutsideMain.into_diagnostic(span));
         }
     }
 }

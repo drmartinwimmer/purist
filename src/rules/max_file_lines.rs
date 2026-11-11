@@ -28,7 +28,7 @@
 use super::common::count_production_lines;
 use crate::diagnostics::{Diagnostic, Span};
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 
 /// Default maximum allowed lines of production code in a single file (excluding `#[cfg(test)]`).
 pub const DEFAULT_MAX_PRODUCTION_LINES: usize = 600;
@@ -68,7 +68,7 @@ impl Rule for MaxFileLinesRule {
             if total_lines > max_total_lines {
                 let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
                 diagnostics.push(
-                    RuleDiagnostic::TestFileTooLong {
+                    ArchitectureDiagnostic::TestFileTooLong {
                         file_name: file_name.to_string(),
                         total_lines,
                         max_total_lines,
@@ -84,7 +84,7 @@ impl Rule for MaxFileLinesRule {
         if prod_lines > max_production_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
             diagnostics.push(
-                RuleDiagnostic::SourceFileTooLong {
+                ArchitectureDiagnostic::SourceFileTooLong {
                     file_name: file_name.to_string(),
                     prod_lines,
                     max_production_lines,

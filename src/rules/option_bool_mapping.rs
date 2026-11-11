@@ -26,7 +26,7 @@
 use super::common::path_ends_with_ident;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -84,8 +84,8 @@ fn check_expr_if_verbose_option_mapping(
         let else_kind = inspect_else_kind(else_box);
         let span = ctx.to_span(expr_if.span());
         match else_kind {
-            ElseKind::False => Some(RuleDiagnostic::IfLetSomeElseFalse.into_diagnostic(span)),
-            ElseKind::NoneVal => Some(RuleDiagnostic::IfLetSomeElseNone.into_diagnostic(span)),
+            ElseKind::False => Some(HygieneDiagnostic::IfLetSomeElseFalse.into_diagnostic(span)),
+            ElseKind::NoneVal => Some(HygieneDiagnostic::IfLetSomeElseNone.into_diagnostic(span)),
             ElseKind::Other => None,
         }
     } else {

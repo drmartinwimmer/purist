@@ -37,7 +37,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     ClapScope, TestScope, WithClapScope, WithTestScope, is_command_execution_fn_name,
     is_command_struct_name, is_flattened_field,
@@ -145,8 +145,9 @@ impl ClapEncapsulationVisitor<'_> {
         let requires_run_method = is_command_struct_name(&struct_name) || derives_parser;
         if requires_run_method && !self.struct_has_run_method.contains(&struct_name) {
             let span = self.ctx.to_span(item_struct.ident.span());
-            self.diagnostics
-                .push(RuleDiagnostic::ClapMissingRunMethod { struct_name }.into_diagnostic(span));
+            self.diagnostics.push(
+                ArchitectureDiagnostic::ClapMissingRunMethod { struct_name }.into_diagnostic(span),
+            );
         }
     }
 
@@ -164,7 +165,7 @@ impl ClapEncapsulationVisitor<'_> {
                 .unwrap_or_else(|| "unnamed".to_string());
             let span = self.ctx.to_span(field.vis.span());
             self.diagnostics.push(
-                RuleDiagnostic::ClapPublicField {
+                ArchitectureDiagnostic::ClapPublicField {
                     field_name,
                     struct_name,
                 }

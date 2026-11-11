@@ -28,7 +28,7 @@
 use crate::checkers::check_macro_matches;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::Token;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
@@ -121,7 +121,7 @@ fn check_method_call_redundant_borrow(
     let method_name = call.method.to_string();
     if method_name == "as_str" {
         let span = ctx.to_span(call.span());
-        Some(RuleDiagnostic::RedundantMatcherBorrow { method_name }.into_diagnostic(span))
+        Some(HygieneDiagnostic::RedundantMatcherBorrow { method_name }.into_diagnostic(span))
     } else {
         None
     }

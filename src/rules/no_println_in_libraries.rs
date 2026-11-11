@@ -37,7 +37,7 @@ use super::common::{TestScope, WithTestScope, extract_type_ident, path_last_iden
 use crate::checkers::check_macro_matches;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     ClapScope, WithClapScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
 };
@@ -196,7 +196,7 @@ impl PrintlnVisitor<'_> {
 
         let span = self.ctx.to_span(mac.path.span());
         self.diagnostics.push(
-            RuleDiagnostic::PrintlnInLibrary {
+            ArchitectureDiagnostic::PrintlnInLibrary {
                 macro_name: name.to_string(),
             }
             .into_diagnostic(span),

@@ -29,7 +29,7 @@
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use quote::ToTokens;
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -112,7 +112,7 @@ impl LifecycleVisitor<'_> {
                 {
                     let span = self.ctx.to_span(enter_call.span());
                     self.diagnostics.push(
-                        RuleDiagnostic::ManualPairedLifecycleCalls {
+                        ArchitectureDiagnostic::ManualPairedLifecycleCalls {
                             enter_name,
                             exit_name: method_name,
                             receiver_key,

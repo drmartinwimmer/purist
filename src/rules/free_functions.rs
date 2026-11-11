@@ -47,7 +47,7 @@
 use super::common::extract_type_ident;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::{HashMap, HashSet};
 use syn::Fields;
 
@@ -171,7 +171,7 @@ fn build_free_function_diagnostics(
 
         if static_fn_count > 0 && !has_instance_methods && !implements_traits {
             diagnostics.push(
-                RuleDiagnostic::StatelessNamespaceStruct { struct_name }
+                ArchitectureDiagnostic::StatelessNamespaceStruct { struct_name }
                     .into_diagnostic(ctx.to_span(span)),
             );
         }

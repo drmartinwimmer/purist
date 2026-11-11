@@ -52,7 +52,7 @@
 use super::common::{extract_type_ident, has_cfg_test_attr, has_test_attr};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TestScope, WithTestScope, derives_clap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::{self, Visit};
@@ -212,7 +212,7 @@ struct DiagEmitter<'a, 'c> {
 impl DiagEmitter<'_, '_> {
     fn emit(&mut self, method: &MethodInfo<'_>, kind: &str, partner_name: &str) {
         self.diagnostics.push(
-            RuleDiagnostic::TrivialGetterSetterCombo {
+            HygieneDiagnostic::TrivialGetterSetterCombo {
                 method_name: method.name.clone(),
                 kind: kind.to_string(),
                 field_name: self.field_name.to_string(),

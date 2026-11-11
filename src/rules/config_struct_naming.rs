@@ -57,7 +57,7 @@ use super::common::{
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope, derives_clap};
 use std::collections::HashSet;
 use std::path::Path;
@@ -352,7 +352,7 @@ impl ConfigStructNamingVisitor<'_> {
         let span = self.ctx.to_span(item_struct.ident.span());
 
         self.diagnostics.push(
-            RuleDiagnostic::InvalidConfigStructNaming {
+            ArchitectureDiagnostic::InvalidConfigStructNaming {
                 struct_name,
                 suggested_name,
             }

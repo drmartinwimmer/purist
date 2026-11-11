@@ -62,7 +62,7 @@
 use super::common::{TestScope, WithTestScope, is_bool_type};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 use syn::{FnArg, Pat, ReturnType};
 
@@ -155,7 +155,7 @@ impl DoubleNegationVisitor<'_> {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_method_name(&fn_name);
             self.diagnostics.push(
-                RuleDiagnostic::NegativeBooleanMethod {
+                HygieneDiagnostic::NegativeBooleanMethod {
                     fn_name: fn_name.clone(),
                     suggested,
                 }
@@ -168,7 +168,7 @@ impl DoubleNegationVisitor<'_> {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_predicate_name(&fn_name);
             self.diagnostics.push(
-                RuleDiagnostic::NegativeBooleanPredicate { fn_name, suggested }
+                HygieneDiagnostic::NegativeBooleanPredicate { fn_name, suggested }
                     .into_diagnostic(span),
             );
         }
@@ -183,7 +183,8 @@ impl DoubleNegationVisitor<'_> {
             if is_negative_parameter_name(&param_name) {
                 let span = self.ctx.to_span(pat_ident.ident.span());
                 self.diagnostics.push(
-                    RuleDiagnostic::NegativeBooleanParameter { param_name }.into_diagnostic(span),
+                    HygieneDiagnostic::NegativeBooleanParameter { param_name }
+                        .into_diagnostic(span),
                 );
             }
         }

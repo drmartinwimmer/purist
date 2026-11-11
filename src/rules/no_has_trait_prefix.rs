@@ -29,7 +29,7 @@
 use super::common::has_suppression_attribute;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `Has...` prefixes on trait definitions.
@@ -74,7 +74,7 @@ impl TraitNamingVisitor<'_> {
         if is_has_trait_name(&ident_str) {
             let span = self.ctx.to_span(item_trait.ident.span());
             self.diagnostics.push(
-                RuleDiagnostic::HasTraitPrefix {
+                HygieneDiagnostic::HasTraitPrefix {
                     trait_name: ident_str,
                 }
                 .into_diagnostic(span),

@@ -42,7 +42,7 @@ use super::common::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -312,15 +312,21 @@ impl DispatchVisitor<'_> {
         };
 
         let diag_span = self.ctx.to_span(span);
-        self.diagnostics.push(
-            RuleDiagnostic::BifurcatedTraitDispatch {
+        let rule_diag = if let Some(shared_trait) = shared_trait_opt {
+            ArchitectureDiagnostic::BifurcatedTraitDispatchWithTrait {
                 type_a: d1.type_name.clone(),
                 type_b: d2.type_name.clone(),
                 method_name: d1.method_name.clone(),
-                shared_trait: shared_trait_opt,
+                shared_trait,
             }
-            .into_diagnostic(diag_span),
-        );
+        } else {
+            ArchitectureDiagnostic::BifurcatedTraitDispatch {
+                type_a: d1.type_name.clone(),
+                type_b: d2.type_name.clone(),
+                method_name: d1.method_name.clone(),
+            }
+        };
+        self.diagnostics.push(rule_diag.into_diagnostic(diag_span));
         true
     }
 }

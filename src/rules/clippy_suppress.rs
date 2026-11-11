@@ -27,7 +27,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -85,10 +85,14 @@ fn check_attr_clippy_suppression(
 
     match (has_reason, has_comment) {
         (false, false) => {
-            Some(RuleDiagnostic::SuppressionMissingReasonAndComment.into_diagnostic(span))
+            Some(ArchitectureDiagnostic::SuppressionMissingReasonAndComment.into_diagnostic(span))
         }
-        (false, true) => Some(RuleDiagnostic::SuppressionMissingReason.into_diagnostic(span)),
-        (true, false) => Some(RuleDiagnostic::SuppressionMissingComment.into_diagnostic(span)),
+        (false, true) => {
+            Some(ArchitectureDiagnostic::SuppressionMissingReason.into_diagnostic(span))
+        }
+        (true, false) => {
+            Some(ArchitectureDiagnostic::SuppressionMissingComment.into_diagnostic(span))
+        }
         (true, true) => None,
     }
 }

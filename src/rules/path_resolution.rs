@@ -27,7 +27,7 @@ use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
@@ -134,7 +134,7 @@ impl PathVisitor<'_> {
             if is_unanchored_relative_path(&val) {
                 let span = self.ctx.to_span(lit_str.span());
                 self.diagnostics.push(
-                    RuleDiagnostic::UnanchoredRelativePath {
+                    ArchitectureDiagnostic::UnanchoredRelativePath {
                         path_val: val,
                         file_path: self.ctx.file_path().display().to_string(),
                     }

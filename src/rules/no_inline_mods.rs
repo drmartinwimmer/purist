@@ -31,7 +31,7 @@
 use super::common::has_cfg_test_attr;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 
 /// Rule enforcing modular project organization by forbidding inline modules in entry point files.
 pub(crate) struct NoInlineModsRule;
@@ -78,7 +78,7 @@ fn check_mod_forbidden_inline_in_root(
     let span = ctx.to_span(item_mod.ident.span());
 
     Some(
-        RuleDiagnostic::InlineModule {
+        ArchitectureDiagnostic::InlineModule {
             mod_name,
             file_path: ctx.file_path().display().to_string(),
         }

@@ -38,7 +38,7 @@ use super::common::{TestScope, WithTestScope};
 use crate::checkers::{check_macro_matches, check_method_call_matches_name};
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -116,7 +116,7 @@ impl TestVisitor<'_> {
         if segments.len() < 3 {
             let span = self.ctx.to_span(ident.span());
             self.diagnostics
-                .push(RuleDiagnostic::ShortTestFnName { name }.into_diagnostic(span));
+                .push(HygieneDiagnostic::ShortTestFnName { name }.into_diagnostic(span));
         }
     }
 
@@ -129,7 +129,7 @@ impl TestVisitor<'_> {
 
         let span = self.ctx.to_span(mac.path.span());
         self.diagnostics.push(
-            RuleDiagnostic::LegacyAssertionMacroInTest {
+            HygieneDiagnostic::LegacyAssertionMacroInTest {
                 macro_name: name.to_string(),
             }
             .into_diagnostic(span),
@@ -141,7 +141,7 @@ impl TestVisitor<'_> {
         if check_method_call_matches_name(call, &["unwrap"]) {
             let span = self.ctx.to_span(call.method.span());
             self.diagnostics
-                .push(RuleDiagnostic::UnwrapInTest.into_diagnostic(span));
+                .push(HygieneDiagnostic::UnwrapInTest.into_diagnostic(span));
         }
     }
 }

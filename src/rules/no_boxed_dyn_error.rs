@@ -37,7 +37,7 @@ use super::common::{TestScope, WithTestScope, path_ends_with_ident};
 use crate::checkers::extract_fn_return_type;
 use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
-use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -136,7 +136,7 @@ fn check_fn_signature_boxed_dyn_error(
     }
 
     let span = ctx.to_span(sig.output.span());
-    Some(RuleDiagnostic::BoxedDynErrorReturn { fn_name }.into_diagnostic(span))
+    Some(ArchitectureDiagnostic::BoxedDynErrorReturn { fn_name }.into_diagnostic(span))
 }
 
 /// Recursively detects whether a type contains `Box<dyn Error>` or any trait object targeting `Error`.
