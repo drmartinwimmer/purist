@@ -24,20 +24,20 @@
 //! ```
 
 use super::common::path_ends_with_ident;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging verbose `if let Some(...) = ... else { false }` or `{ None }` in favor of combinators.
-pub(crate) struct OptionBoolMappingRule;
+pub(crate) struct IdiomaticOptionBoolMappingRule;
 
-impl Rule for OptionBoolMappingRule {
-    fn name(&self) -> &'static str {
-        "purist::idiomatic_option_bool_mapping"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl IdiomaticOptionBoolMappingRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<IdiomaticOptionBoolMappingDiagnostic> {
         let mut visitor = OptionMappingVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -51,7 +51,7 @@ impl Rule for OptionBoolMappingRule {
 /// Visitor that inspects `if let Some(...)` expressions for redundant manual bool or None mappings.
 struct OptionMappingVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<IdiomaticOptionBoolMappingDiagnostic>,
 }
 
 enum ElseKind {
@@ -75,7 +75,7 @@ impl<'ast> Visit<'ast> for OptionMappingVisitor<'_> {
 fn check_expr_if_verbose_option_mapping(
     ctx: &LintContext<'_>,
     expr_if: &syn::ExprIf,
-) -> Option<Diagnostic> {
+) -> Option<IdiomaticOptionBoolMappingDiagnostic> {
     if let syn::Expr::Let(expr_let) = &*expr_if.cond
         && is_pattern_some(&expr_let.pat)
         && let Some((_, else_box)) = &expr_if.else_branch
@@ -83,24 +83,12 @@ fn check_expr_if_verbose_option_mapping(
         let else_kind = inspect_else_kind(else_box);
         let span = ctx.to_span(expr_if.span());
         match else_kind {
-            ElseKind::False => Some(
-                Diagnostic::new(
-                    "purist::idiomatic_option_bool_mapping",
-                    Severity::Warning,
-                    "Manual 'if let Some(...) = ... else { false }' construct. Use '.is_some_and(...)' instead.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with '.is_some_and(|val| ...)'."),
-            ),
-            ElseKind::NoneVal => Some(
-                Diagnostic::new(
-                    "purist::idiomatic_option_bool_mapping",
-                    Severity::Warning,
-                    "Manual 'if let Some(...) = ... else { None }' construct. Use functional combinators like '.and_then(...)' or '.map(...)'.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with '.and_then(...)' or '.map(...)'. "),
-            ),
+            ElseKind::False => {
+                Some(IdiomaticOptionBoolMappingDiagnostic::IfLetSomeElseFalse { span })
+            }
+            ElseKind::NoneVal => {
+                Some(IdiomaticOptionBoolMappingDiagnostic::IfLetSomeElseNone { span })
+            }
             ElseKind::Other => None,
         }
     } else {
@@ -160,10 +148,27 @@ fn check_expr_else_branch_kind(expr: &syn::Expr) -> ElseKind {
     }
 }
 
+/// Diagnostics emitted by `purist::idiomatic_option_bool_mapping`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum IdiomaticOptionBoolMappingDiagnostic {
+    #[error(
+        "Manual 'if let Some(...) = ... else {{ false }}' construct. Use '.is_some_and(...)' instead."
+    )]
+    #[diagnostic(help("Replace with '.is_some_and(|val| ...)'."))]
+    IfLetSomeElseFalse { span: Span },
+    #[error(
+        "Manual 'if let Some(...) = ... else {{ None }}' construct. Use functional combinators like '.and_then(...)' or '.map(...)'."
+    )]
+    #[diagnostic(help("Replace with '.and_then(...)' or '.map(...)'. "))]
+    IfLetSomeElseNone { span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -179,13 +184,16 @@ pub fn check(val: Option<i32>) -> bool {
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = OptionBoolMappingRule.check_file(&ctx, &ast);
+        let diags = IdiomaticOptionBoolMappingRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::idiomatic_option_bool_mapping"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::idiomatic_option_bool_mapping")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual 'if let Some(...) = ... else { false }' construct")
         );
         Ok(())
@@ -204,13 +212,16 @@ pub fn transform(val: Option<i32>) -> Option<i32> {
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = OptionBoolMappingRule.check_file(&ctx, &ast);
+        let diags = IdiomaticOptionBoolMappingRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::idiomatic_option_bool_mapping"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::idiomatic_option_bool_mapping")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual 'if let Some(...) = ... else { None }' construct")
         );
         Ok(())
@@ -231,7 +242,7 @@ pub fn log_and_check(val: Option<i32>) -> bool {
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = OptionBoolMappingRule.check_file(&ctx, &ast);
+        let diags = IdiomaticOptionBoolMappingRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())

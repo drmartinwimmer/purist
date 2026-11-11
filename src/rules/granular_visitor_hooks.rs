@@ -46,8 +46,8 @@
 //! ```
 
 use super::common::{has_suppression_attribute, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -59,12 +59,12 @@ use syn::{
 /// Rule enforcing granular visitor hooks over manual child collection iteration.
 pub(crate) struct GranularVisitorHooksRule;
 
-impl Rule for GranularVisitorHooksRule {
-    fn name(&self) -> &'static str {
-        "purist::granular_visitor_hooks"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl GranularVisitorHooksRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<GranularVisitorHooksDiagnostic> {
         let mut visitor = AstHookScanner {
             ctx,
             diagnostics: Vec::new(),
@@ -79,7 +79,7 @@ impl Rule for GranularVisitorHooksRule {
 /// Visitor that inspects functions and methods for manual child AST collection iteration loops.
 struct AstHookScanner<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<GranularVisitorHooksDiagnostic>,
     in_visitor_impl: bool,
 }
 
@@ -123,19 +123,12 @@ impl AstHookScanner<'_> {
 
         for (span, hook_name, description) in loop_checker.found_violations {
             let diag_span = self.ctx.to_span(span);
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::granular_visitor_hooks",
-                    Severity::Warning,
-                    format!(
-                        "Manual iteration over {description} in '{fn_name}'. Implement and delegate to the specialized '{hook_name}' visitor hook instead to preserve recursive traversal and attribute scoping."
-                    ),
-                )
-                .with_span(diag_span)
-                .with_suggested_fix(format!(
-                    "Implement the specialized 'fn {hook_name}(...)' visitor hook instead of manual iteration."
-                )),
-            );
+            self.diagnostics.push(GranularVisitorHooksDiagnostic {
+                description: description.to_string(),
+                fn_name: fn_name.clone(),
+                hook_name: hook_name.to_string(),
+                span: diag_span,
+            });
         }
     }
 }
@@ -373,10 +366,28 @@ fn extract_root_ident(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Diagnostic emitted by `purist::granular_visitor_hooks`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Manual iteration over {description} in '{fn_name}'. Implement and delegate to the specialized '{hook_name}' visitor hook instead to preserve recursive traversal and attribute scoping."
+)]
+#[diagnostic(help(
+    "Implement the specialized 'fn {hook_name}(...)' visitor hook instead of manual iteration."
+))]
+pub struct GranularVisitorHooksDiagnostic {
+    pub description: String,
+    pub fn_name: String,
+    pub hook_name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -401,10 +412,16 @@ impl<'ast> Visit<'ast> for StructVisitor {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::granular_visitor_hooks"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::granular_visitor_hooks")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual iteration over struct fields in 'visit_item_struct'")
         );
         Ok(())
@@ -481,7 +498,7 @@ impl<'ast> Visit<'ast> for FileVisitor {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring("Manual iteration over file items in 'visit_file'")
         );
         Ok(())
@@ -602,10 +619,16 @@ impl CustomRule {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::granular_visitor_hooks"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::granular_visitor_hooks")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual iteration over struct fields in 'check_file'")
         );
         Ok(())
@@ -628,7 +651,7 @@ fn validate_enum_variants(item_enum: &syn::ItemEnum) {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring("Manual iteration over enum variants in 'validate_enum_variants'")
         );
         Ok(())
@@ -650,7 +673,7 @@ fn validate_match_arms(expr_match: &syn::ExprMatch) {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring("Manual iteration over match arms in 'validate_match_arms'")
         );
         Ok(())

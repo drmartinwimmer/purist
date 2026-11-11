@@ -25,20 +25,20 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::visit::{self, Visit};
 use syn::{ImplItemFn, ItemFn, ItemImpl};
 
 /// Rule enforcing descriptive `check_<subject>_<condition>` function names.
 pub(crate) struct DescriptiveCheckerNamesRule;
 
-impl Rule for DescriptiveCheckerNamesRule {
-    fn name(&self) -> &'static str {
-        "purist::descriptive_checker_names"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl DescriptiveCheckerNamesRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<DescriptiveCheckerNamesDiagnostic> {
         let mut visitor = CheckerNamingVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -55,7 +55,7 @@ impl Rule for DescriptiveCheckerNamesRule {
 #[derive(WithTestScope)]
 struct CheckerNamingVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<DescriptiveCheckerNamesDiagnostic>,
     test_scope: TestScope,
     in_trait_impl: bool,
 }
@@ -108,17 +108,8 @@ impl CheckerNamingVisitor<'_> {
         let name = ident.to_string();
         if is_vague_checker_name(&name) {
             let span = self.ctx.to_span(ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::descriptive_checker_names",
-                    Severity::Warning,
-                    format!(
-                        "Function '{name}' uses a vague check name. Follow the 'check_<subject>_<condition>' naming convention (e.g. 'check_fn_signature_unsafe_in_test')."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Rename to include both the subject and the condition/violation being checked."),
-            );
+            self.diagnostics
+                .push(DescriptiveCheckerNamesDiagnostic { name, span });
         }
     }
 }
@@ -142,10 +133,26 @@ fn is_vague_checker_name(name: &str) -> bool {
     parts.len() < 3
 }
 
+/// Diagnostic emitted by `purist::descriptive_checker_names`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Function '{name}' uses a vague check name. Follow the 'check_<subject>_<condition>' naming convention (e.g. 'check_fn_signature_unsafe_in_test')."
+)]
+#[diagnostic(help(
+    "Rename to include both the subject and the condition/violation being checked."
+))]
+pub struct DescriptiveCheckerNamesDiagnostic {
+    pub name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -161,10 +168,16 @@ impl MyVisitor {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::descriptive_checker_names"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::descriptive_checker_names")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Function 'check_signature' uses a vague check name")
         );
         Ok(())

@@ -1,9 +1,10 @@
 use crate::cargo::{CargoManifest, LintConfig, RuleLevel};
-use crate::diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
+use crate::diagnostics::{DiagnosticReport, EngineDiagnostic, PuristDiagnostic, Severity, Span};
 use crate::discovery::{discover_project_files, discover_project_files_from_manifest};
-use crate::rules::default_rules;
+use crate::rules::{RuleDiagnostic, default_rules};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -12,6 +13,7 @@ use syn::visit::{self, Visit};
 pub(crate) struct LintContext<'a> {
     file_path: &'a Path,
     source: &'a str,
+    source_arc: Arc<str>,
     lines: Vec<&'a str>,
     config: Option<&'a LintConfig>,
 }
@@ -23,6 +25,7 @@ impl<'a> LintContext<'a> {
         Self {
             file_path,
             source,
+            source_arc: Arc::from(source),
             lines,
             config: None,
         }
@@ -74,6 +77,7 @@ impl<'a> LintContext<'a> {
     pub(crate) fn to_span(&self, span: proc_macro2::Span) -> Span {
         let start = span.start();
         let end = span.end();
+        let byte_range = span.byte_range();
         Span::new(
             self.file_path,
             start.line,
@@ -81,6 +85,8 @@ impl<'a> LintContext<'a> {
             end.line,
             end.column.saturating_add(1),
         )
+        .with_byte_offsets(byte_range.start, byte_range.end)
+        .with_source(Arc::clone(&self.source_arc))
     }
 
     /// Checks if the line immediately preceding `line_number` contains a comment (`// ...`).
@@ -113,7 +119,7 @@ pub(crate) trait Rule: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Analyzes the parsed AST file and reports any diagnostics found.
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic>;
+    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<RuleDiagnostic>;
 }
 
 /// In-code suppression directive parsed from attributes.
@@ -174,7 +180,7 @@ impl PuristEngine {
                     raw_diags.extend(rule.check_file(&ctx, &ast));
                 }
 
-                for mut diag in raw_diags {
+                for diag in raw_diags {
                     // Check in-code suppression (e.g. #[allow(purist::...)] or #[expect(...)])
                     if is_suppressed(&diag, &suppressions) {
                         continue;
@@ -182,13 +188,22 @@ impl PuristEngine {
 
                     // Apply config overrides (e.g. deny upgrades warning to error)
                     if let Some(cfg) = config {
-                        match cfg.level_for(&diag.rule) {
+                        let code = diag.rule_id().qualified_name();
+                        match cfg.level_for(code) {
                             Some(RuleLevel::Allow) => continue,
                             Some(RuleLevel::Deny | RuleLevel::Forbid) => {
-                                diag.severity = Severity::Error;
+                                report.add(PuristDiagnostic::with_severity_override(
+                                    diag,
+                                    Severity::Error,
+                                ));
+                                continue;
                             }
                             Some(RuleLevel::Warn) => {
-                                diag.severity = Severity::Warning;
+                                report.add(PuristDiagnostic::with_severity_override(
+                                    diag,
+                                    Severity::Warning,
+                                ));
+                                continue;
                             }
                             None => {}
                         }
@@ -199,30 +214,30 @@ impl PuristEngine {
             }
             Err(parse_err) => {
                 let span = ctx.to_span(parse_err.span());
-                report.add(
-                    Diagnostic::new(
-                        "purist::syntax_error",
-                        Severity::Error,
-                        format!("Failed to parse Rust syntax: {parse_err}"),
-                    )
-                    .with_span(span),
-                );
+                report.add(EngineDiagnostic::SyntaxError {
+                    details: parse_err.to_string(),
+                    span,
+                });
             }
         }
 
         if emit_config_warnings && let Some(cfg) = config {
             for warning in cfg.warnings() {
-                let rule = if warning.starts_with("Rule 'purist::")
+                let span = Span::new(file_path, 1, 1, 1, 1);
+                let engine_diag = if warning.starts_with("Rule 'purist::")
                     || warning.starts_with("Rule 'opinionated::")
                 {
-                    "purist::deprecated_rule"
+                    EngineDiagnostic::DeprecatedRule {
+                        message: warning,
+                        span,
+                    }
                 } else {
-                    "purist::unknown_rule"
+                    EngineDiagnostic::UnknownRule {
+                        message: warning,
+                        span,
+                    }
                 };
-                report.add(
-                    Diagnostic::new(rule, Severity::Warning, warning)
-                        .with_span(Span::new(file_path, 1, 1, 1, 1)),
-                );
+                report.add(engine_diag);
             }
         }
 
@@ -242,22 +257,21 @@ impl PuristEngine {
         // Report manifest-level configuration warnings once for the target path
         let manifest_path = project_dir.join("Cargo.toml");
         for warning in config.warnings() {
-            let rule = if warning.starts_with("Rule 'purist::")
+            let span = Span::new(&manifest_path, 1, 1, 1, 1);
+            let engine_diag = if warning.starts_with("Rule 'purist::")
                 || warning.starts_with("Rule 'opinionated::")
             {
-                "purist::deprecated_rule"
+                EngineDiagnostic::DeprecatedRule {
+                    message: warning,
+                    span,
+                }
             } else {
-                "purist::unknown_rule"
+                EngineDiagnostic::UnknownRule {
+                    message: warning,
+                    span,
+                }
             };
-            report.add(
-                Diagnostic::new(rule, Severity::Warning, warning).with_span(Span::new(
-                    &manifest_path,
-                    1,
-                    1,
-                    1,
-                    1,
-                )),
-            );
+            report.add(engine_diag);
         }
 
         let mut targets_scanned = 0;
@@ -265,14 +279,11 @@ impl PuristEngine {
             let content = match fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(err) => {
-                    report.add(
-                        Diagnostic::new(
-                            "purist::io_error",
-                            Severity::Error,
-                            format!("Failed to read file '{}': {err}", path.display()),
-                        )
-                        .with_span(Span::new(path, 1, 1, 1, 1)),
-                    );
+                    report.add(EngineDiagnostic::IoError {
+                        path: path.clone(),
+                        details: err.to_string(),
+                        span: Span::new(path, 1, 1, 1, 1),
+                    });
                     continue;
                 }
             };
@@ -509,20 +520,15 @@ fn get_item_attrs(item: &syn::Item) -> &[syn::Attribute] {
     }
 }
 
-fn is_suppressed(diag: &Diagnostic, suppressions: &[CodeSuppression]) -> bool {
-    let Some(span) = &diag.span else {
-        return false;
-    };
-    let stripped = diag
-        .rule
-        .strip_prefix("purist::")
-        .or_else(|| diag.rule.strip_prefix("opinionated::"))
-        .unwrap_or(&diag.rule);
+fn is_suppressed(diag: &RuleDiagnostic, suppressions: &[CodeSuppression]) -> bool {
+    let start_line = diag.span().start_line;
+    let rule = diag.rule_id().qualified_name();
+    let stripped = diag.rule_id().as_str();
 
     for s in suppressions {
-        if (s.rule == "all" || s.rule == diag.rule || s.rule == stripped)
-            && span.start_line >= s.start_line
-            && span.start_line <= s.end_line
+        if (s.rule == "all" || s.rule == rule || s.rule == stripped)
+            && start_line >= s.start_line
+            && start_line <= s.end_line
         {
             return true;
         }
@@ -534,6 +540,9 @@ fn is_suppressed(diag: &Diagnostic, suppressions: &[CodeSuppression]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ErrorTypesDiagnostic;
+    use crate::NoWildcardImportsDiagnostic;
+    use crate::diagnostics::Diagnostic;
     use googletest::prelude::*;
 
     impl PuristEngine {
@@ -572,7 +581,7 @@ mod tests {
 
     impl DummyRule {
         fn new() -> Self {
-            Self("purist::dummy")
+            Self("purist::no_wildcard_imports")
         }
 
         fn with_name(name: &'static str) -> Self {
@@ -585,16 +594,26 @@ mod tests {
             self.0
         }
 
-        fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+        fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<RuleDiagnostic> {
             let line = file
                 .items
                 .first()
                 .map(|i| i.span().start().line)
                 .unwrap_or(1);
-            vec![
-                Diagnostic::new(self.name(), Severity::Warning, "Dummy finding for testing")
-                    .with_span(Span::new(ctx.file_path(), line, 1, line, 5)),
-            ]
+            let span = Span::new(ctx.file_path(), line, 1, line, 5);
+            if self.0 == "purist::error_types" {
+                vec![RuleDiagnostic::from(
+                    ErrorTypesDiagnostic::ErrorTypeNaming {
+                        name: "Error".to_string(),
+                        span,
+                    },
+                )]
+            } else {
+                vec![RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+                    path_str: "foo::*".to_string(),
+                    span,
+                })]
+            }
         }
     }
 
@@ -632,7 +651,10 @@ mod tests {
         assert_that!(report.has_errors(), is_true());
         assert_that!(report.diagnostics.len(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::syntax_error"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()),
+            some(eq("purist::syntax_error"))
+        );
         Ok(())
     }
 
@@ -644,14 +666,17 @@ mod tests {
         assert_that!(report.has_errors(), is_false());
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::dummy"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()),
+            some(eq("purist::no_wildcard_imports"))
+        );
         Ok(())
     }
 
     #[googletest::test]
     fn in_code_suppression_via_allow_attribute() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "#![allow(purist::dummy)]\nfn ok() {}\n";
+        let source = "#![allow(purist::no_wildcard_imports)]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -661,7 +686,7 @@ mod tests {
     #[googletest::test]
     fn in_code_suppression_via_expect_attribute() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "#![expect(dummy, reason = \"test\")]\nfn ok() {}\n";
+        let source = "#![expect(no_wildcard_imports, reason = \"test\")]\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -671,7 +696,7 @@ mod tests {
     #[googletest::test]
     fn in_code_suppression_via_comment_next_line() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "// purist:allow(dummy)\nfn ok() {}\n";
+        let source = "// purist:allow(no_wildcard_imports)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -681,7 +706,7 @@ mod tests {
     #[googletest::test]
     fn in_code_suppression_via_comment_same_line() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "fn ok() {} // purist:allow(dummy)\n";
+        let source = "fn ok() {} // purist:allow(no_wildcard_imports)\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -691,7 +716,7 @@ mod tests {
     #[googletest::test]
     fn in_code_suppression_via_file_comment() -> Result<(), Box<dyn std::error::Error>> {
         let engine = PuristEngine::empty().with_rule(Box::new(DummyRule::new()));
-        let source = "//! purist:allow(dummy)\nfn ok() {}\n";
+        let source = "//! purist:allow(no_wildcard_imports)\nfn ok() {}\n";
         let report = engine.check_source(Path::new("clean.rs"), source);
 
         assert_that!(report.is_empty(), is_true());
@@ -735,7 +760,10 @@ mod tests {
 
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::unknown_rule"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()),
+            some(eq("purist::unknown_rule"))
+        );
         Ok(())
     }
 
@@ -750,7 +778,10 @@ mod tests {
 
         assert_that!(report.warning_count(), eq(1));
         let diag = report.diagnostics.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::deprecated_rule"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()),
+            some(eq("purist::deprecated_rule"))
+        );
         Ok(())
     }
 

@@ -40,20 +40,20 @@ use std::collections::{HashMap, HashSet};
 use super::common::{
     TestScope, WithTestScope, extract_type_ident, has_suppression_attribute, path_last_ident,
 };
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule forbidding conditional branches from instantiating alternate sibling types to dispatch the same trait method.
 pub(crate) struct NoBifurcatedTraitDispatchRule;
 
-impl Rule for NoBifurcatedTraitDispatchRule {
-    fn name(&self) -> &'static str {
-        "purist::no_bifurcated_trait_dispatch"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoBifurcatedTraitDispatchRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoBifurcatedTraitDispatchDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -200,7 +200,7 @@ struct DispatchCandidate {
 struct DispatchVisitor<'a> {
     ctx: &'a LintContext<'a>,
     registry: &'a FileTypeRegistry,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoBifurcatedTraitDispatchDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -311,31 +311,23 @@ impl DispatchVisitor<'_> {
         };
 
         let diag_span = self.ctx.to_span(span);
-        let type_a = &d1.type_name;
-        let type_b = &d2.type_name;
-        let method_name = &d1.method_name;
-
-        let message = if let Some(trait_name) = &shared_trait_opt {
-            format!(
-                "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' implementing trait '{trait_name}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
-            )
+        let rule_diag = if let Some(shared_trait) = shared_trait_opt {
+            NoBifurcatedTraitDispatchDiagnostic::BifurcatedTraitDispatchWithTrait {
+                type_a: d1.type_name.clone(),
+                type_b: d2.type_name.clone(),
+                method_name: d1.method_name.clone(),
+                shared_trait,
+                span: diag_span,
+            }
         } else {
-            format!(
-                "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
-            )
+            NoBifurcatedTraitDispatchDiagnostic::BifurcatedTraitDispatch {
+                type_a: d1.type_name.clone(),
+                type_b: d2.type_name.clone(),
+                method_name: d1.method_name.clone(),
+                span: diag_span,
+            }
         };
-
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_bifurcated_trait_dispatch",
-                Severity::Warning,
-                message,
-            )
-            .with_span(diag_span)
-            .with_suggested_fix(format!(
-                "Consolidate '{type_a}' and '{type_b}' into a single parameterized type, or instantiate a trait object/enum before dispatching."
-            )),
-        );
+        self.diagnostics.push(rule_diag);
         true
     }
 }
@@ -533,6 +525,38 @@ fn extract_target_arg_name(expr: &syn::Expr) -> Option<String> {
     }
 }
 
+/// Diagnostics emitted by `purist::no_bifurcated_trait_dispatch`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoBifurcatedTraitDispatchDiagnostic {
+    #[error(
+        "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' implementing trait '{shared_trait}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
+    )]
+    #[diagnostic(help(
+        "Consolidate '{type_a}' and '{type_b}' into a single parameterized type, or instantiate a trait object/enum before dispatching."
+    ))]
+    BifurcatedTraitDispatchWithTrait {
+        type_a: String,
+        type_b: String,
+        method_name: String,
+        shared_trait: String,
+        span: Span,
+    },
+
+    #[error(
+        "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
+    )]
+    #[diagnostic(help(
+        "Consolidate '{type_a}' and '{type_b}' into a single parameterized type, or instantiate a trait object/enum before dispatching."
+    ))]
+    BifurcatedTraitDispatch {
+        type_a: String,
+        type_b: String,
+        method_name: String,
+        span: Span,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -570,7 +594,7 @@ fn inspect(flag: bool, block: &syn::Block) {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring(
                 "Bifurcated dispatch to sibling types 'VisitorA' and 'VisitorB' implementing trait 'Visit' on method 'visit_block'"
             )
@@ -618,7 +642,7 @@ fn dispatch(mode: Mode, req: &str) {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring(
                 "Bifurcated dispatch to sibling types 'HandlerA' and 'HandlerB' implementing trait 'Handler' on method 'handle'"
             )
@@ -658,7 +682,7 @@ fn run(is_fast: bool, input: &str) {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring(
                 "Bifurcated dispatch to sibling types 'FastProcessor' and 'SlowProcessor' implementing trait 'Processor' on method 'process'"
             )

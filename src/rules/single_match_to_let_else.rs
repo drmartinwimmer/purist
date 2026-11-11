@@ -27,20 +27,20 @@
 //! ```
 
 use super::common::{macro_name, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule recommending `let ... = ... else { ... };` over single-variant `match` with early exit.
 pub(crate) struct SingleMatchToLetElseRule;
 
-impl Rule for SingleMatchToLetElseRule {
-    fn name(&self) -> &'static str {
-        "purist::single_match_to_let_else"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl SingleMatchToLetElseRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<SingleMatchToLetElseDiagnostic> {
         let mut visitor = MatchToLetElseVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -54,7 +54,7 @@ impl Rule for SingleMatchToLetElseRule {
 /// Visitor that inspects `match` expressions for candidates that can be simplified with `let ... else`.
 struct MatchToLetElseVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<SingleMatchToLetElseDiagnostic>,
 }
 
 impl<'ast> Visit<'ast> for MatchToLetElseVisitor<'_> {
@@ -85,7 +85,7 @@ fn pat_has_guard(pat: &syn::Pat) -> bool {
 fn check_expr_match_single_to_let_else(
     ctx: &LintContext<'_>,
     expr_match: &syn::ExprMatch,
-) -> Option<Diagnostic> {
+) -> Option<SingleMatchToLetElseDiagnostic> {
     if let [arm0, arm1] = &expr_match.arms[..]
         && !pat_has_guard(&arm0.pat)
         && !pat_has_guard(&arm1.pat)
@@ -102,15 +102,7 @@ fn check_expr_match_single_to_let_else(
 
         if can_convert {
             let span = ctx.to_span(expr_match.span());
-            return Some(
-                Diagnostic::new(
-                    "purist::single_match_to_let_else",
-                    Severity::Warning,
-                    "Match expression can be simplified using idiomatic 'let ... = ... else { ... };' construct.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace 'match' with 'let Some(...) = expr else { ... };' to reduce indentation."),
-            );
+            return Some(SingleMatchToLetElseDiagnostic { span });
         }
     }
 
@@ -261,10 +253,24 @@ fn token_tree_contains_ident(tt: &proc_macro2::TokenTree, target: &str) -> bool 
     }
 }
 
+/// Diagnostic emitted by `purist::single_match_to_let_else`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Match expression can be simplified using idiomatic 'let ... = ... else {{ ... }};' construct."
+)]
+#[diagnostic(help(
+    "Replace 'match' with 'let Some(...) = expr else {{ ... }};' to reduce indentation."
+))]
+pub struct SingleMatchToLetElseDiagnostic {
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -284,9 +290,12 @@ pub fn parse_val(opt: Option<i32>) -> i32 {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::single_match_to_let_else"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::single_match_to_let_else")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("let ... = ... else { ... };")
         );
         Ok(())

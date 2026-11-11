@@ -48,8 +48,8 @@
 
 use super::common::path_ends_with_ident;
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{MainScope, WithMainScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -57,12 +57,12 @@ use syn::visit::{self, Visit};
 /// Rule enforcing exit code hygiene: no raw integer exits, and no `process::exit` or `ExitCode` in libraries.
 pub(crate) struct ExitCodeHygieneRule;
 
-impl Rule for ExitCodeHygieneRule {
-    fn name(&self) -> &'static str {
-        "purist::exit_code_hygiene"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl ExitCodeHygieneRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<ExitCodeHygieneDiagnostic> {
         let is_main_file = ctx
             .file_path()
             .file_name()
@@ -87,7 +87,7 @@ struct ExitCodeVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ExitCodeHygieneDiagnostic>,
     /// Indicates whether the current file is `main.rs`.
     is_main_file: bool,
     /// Tracks whether AST traversal is currently inside `fn main()` in `main.rs`.
@@ -120,17 +120,8 @@ impl ExitCodeVisitor<'_> {
 
         let span = self.ctx.to_span(item_fn.sig.output.span());
         let fn_name = item_fn.sig.ident.to_string();
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::exit_code_hygiene",
-                Severity::Warning,
-                format!(
-                    "Function '{fn_name}' returns 'ExitCode'. Library functions must return 'Result' and let the CLI entrypoint handle exit codes."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Change return type to 'Result<...>' and propagate errors to the caller."),
-        );
+        self.diagnostics
+            .push(ExitCodeHygieneDiagnostic::FnReturnsExitCode { fn_name, span });
     }
 
     /// Inspects a call expression for `process::exit`, returning diagnostics for raw integer codes or calls outside `main()`.
@@ -146,28 +137,14 @@ impl ExitCodeVisitor<'_> {
         if let Some(syn::Expr::Lit(expr_lit)) = call.args.first()
             && matches!(expr_lit.lit, syn::Lit::Int(_))
         {
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::exit_code_hygiene",
-                    Severity::Warning,
-                    "Raw integer literal passed to 'exit(...)'. Use 'ExitCode::SUCCESS' or 'ExitCode::FAILURE' instead.",
-                )
-                .with_span(span.clone())
-                .with_suggested_fix("Replace integer literal with 'ExitCode::SUCCESS' or 'ExitCode::FAILURE'."),
-            );
+            self.diagnostics
+                .push(ExitCodeHygieneDiagnostic::RawIntProcessExit { span: span.clone() });
         }
 
         // Check if exit is called outside of main function in main.rs
         if !self.main_scope.is_in_main() {
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::exit_code_hygiene",
-                    Severity::Warning,
-                    "Direct invocation of 'process::exit' outside 'main()'. Propagate errors using 'Result' instead.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Propagate errors via 'Result' and handle exit codes strictly in 'fn main() -> ExitCode'."),
-            );
+            self.diagnostics
+                .push(ExitCodeHygieneDiagnostic::ProcessExitOutsideMain { span });
         }
     }
 }
@@ -182,10 +159,35 @@ fn returns_exit_code(output: &syn::ReturnType) -> bool {
     false
 }
 
+/// Diagnostics emitted by `purist::exit_code_hygiene`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum ExitCodeHygieneDiagnostic {
+    #[error(
+        "Function '{fn_name}' returns 'ExitCode'. Library functions must return 'Result' and let the CLI entrypoint handle exit codes."
+    )]
+    #[diagnostic(help("Change return type to 'Result<...>' and propagate errors to the caller."))]
+    FnReturnsExitCode { fn_name: String, span: Span },
+
+    #[error(
+        "Raw integer literal passed to 'exit(...)'. Use 'ExitCode::SUCCESS' or 'ExitCode::FAILURE' instead."
+    )]
+    #[diagnostic(help("Replace integer literal with 'ExitCode::SUCCESS' or 'ExitCode::FAILURE'."))]
+    RawIntProcessExit { span: Span },
+    #[error(
+        "Direct invocation of 'process::exit' outside 'main()'. Propagate errors using 'Result' instead."
+    )]
+    #[diagnostic(help(
+        "Propagate errors via 'Result' and handle exit codes strictly in 'fn main() -> ExitCode'."
+    ))]
+    ProcessExitOutsideMain { span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -201,7 +203,10 @@ pub fn abort_execution() {
 
         assert_that!(diags.len(), eq(2)); // Both raw int and non-main call
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::exit_code_hygiene"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::exit_code_hygiene")
+        );
         Ok(())
     }
 
@@ -214,9 +219,12 @@ pub fn abort_execution() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::exit_code_hygiene"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::exit_code_hygiene")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Function 'execute' returns 'ExitCode'")
         );
         Ok(())

@@ -35,8 +35,8 @@
 //! }
 //! ```
 
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{
     ClapScope, TestScope, WithClapScope, WithTestScope, is_command_execution_fn_name,
     is_command_struct_name, is_flattened_field,
@@ -46,14 +46,14 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing encapsulation for Clap CLI models (private fields and associated `run` method).
-pub(crate) struct ClapEncapsulationRule;
+pub(crate) struct ClapStructEncapsulationRule;
 
-impl Rule for ClapEncapsulationRule {
-    fn name(&self) -> &'static str {
-        "purist::clap_struct_encapsulation"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl ClapStructEncapsulationRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<ClapStructEncapsulationDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -102,7 +102,7 @@ impl<'ast> Visit<'ast> for RunMethodCollector {
 #[derive(WithTestScope, WithClapScope)]
 struct ClapEncapsulationVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ClapStructEncapsulationDiagnostic>,
     test_scope: TestScope,
     clap_scope: ClapScope,
     struct_has_run_method: HashSet<String>,
@@ -144,48 +144,60 @@ impl ClapEncapsulationVisitor<'_> {
         let requires_run_method = is_command_struct_name(&struct_name) || derives_parser;
         if requires_run_method && !self.struct_has_run_method.contains(&struct_name) {
             let span = self.ctx.to_span(item_struct.ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::clap_struct_encapsulation",
-                    Severity::Warning,
-                    format!(
-                        "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Implement 'pub fn run(self, ...)' for this command struct."),
-            );
+            self.diagnostics
+                .push(ClapStructEncapsulationDiagnostic::MissingRunMethod { struct_name, span });
         }
     }
 
     fn check_clap_field_public_visibility(&mut self, field: &syn::Field) {
         if matches!(field.vis, syn::Visibility::Public(_)) && !is_flattened_field(field) {
-            let struct_name = self.clap_scope.current_struct_name().unwrap_or("unknown");
+            let struct_name = self
+                .clap_scope
+                .current_struct_name()
+                .unwrap_or("unknown")
+                .to_string();
             let field_name = field
                 .ident
                 .as_ref()
                 .map(|i| i.to_string())
                 .unwrap_or_else(|| "unnamed".to_string());
             let span = self.ctx.to_span(field.vis.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::clap_struct_encapsulation",
-                    Severity::Warning,
-                    format!(
-                        "Field '{field_name}' in Clap struct '{struct_name}' is declared public. Clap argument fields should remain private to encapsulate command execution."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Make field private and encapsulate logic within struct methods."),
-            );
+            self.diagnostics
+                .push(ClapStructEncapsulationDiagnostic::PublicField {
+                    field_name,
+                    struct_name,
+                    span,
+                });
         }
     }
+}
+
+/// Diagnostics emitted by `purist::clap_struct_encapsulation`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum ClapStructEncapsulationDiagnostic {
+    #[error(
+        "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
+    )]
+    #[diagnostic(help("Implement 'pub fn run(self, ...)' for this command struct."))]
+    MissingRunMethod { struct_name: String, span: Span },
+
+    #[error(
+        "Field '{field_name}' in Clap struct '{struct_name}' is declared public. Clap argument fields should remain private to encapsulate command execution."
+    )]
+    #[diagnostic(help("Make field private and encapsulate logic within struct methods."))]
+    PublicField {
+        field_name: String,
+        struct_name: String,
+        span: Span,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -202,13 +214,16 @@ impl LintCommand {
 "#;
         let ctx = LintContext::new(Path::new("src/commands/lint.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clap_struct_encapsulation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Field 'fix' in Clap struct 'LintCommand' is declared public")
         );
         Ok(())
@@ -224,13 +239,16 @@ pub struct CheckCommand {
 "#;
         let ctx = LintContext::new(Path::new("src/commands/check.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clap_struct_encapsulation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("lacks an associated 'run' or 'execute' method")
         );
         Ok(())
@@ -253,7 +271,7 @@ impl FormatCommand {
 "#;
         let ctx = LintContext::new(Path::new("src/commands/format.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -274,7 +292,7 @@ impl RunCommand {
 "#;
         let ctx = LintContext::new(Path::new("src/commands/run.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -296,7 +314,7 @@ pub struct WorkspaceSubcommand {
 "#;
         let ctx = LintContext::new(Path::new("src/commands/workspace.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(2));
         Ok(())
@@ -312,13 +330,16 @@ pub struct Cli {
 "#;
         let ctx = LintContext::new(Path::new("src/cli.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClapEncapsulationRule.check_file(&ctx, &ast);
+        let diags = ClapStructEncapsulationRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clap_struct_encapsulation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clap_struct_encapsulation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Clap command struct 'Cli' lacks an associated 'run' or 'execute' method"
             )

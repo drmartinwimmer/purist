@@ -60,20 +60,20 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, is_bool_type};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::visit::{self, Visit};
 use syn::{FnArg, Pat, ReturnType};
 
 /// Rule forbidding negative boolean identifiers and double negation patterns.
 pub(crate) struct NoDoubleNegationRule;
 
-impl Rule for NoDoubleNegationRule {
-    fn name(&self) -> &'static str {
-        "purist::no_double_negation"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoDoubleNegationRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoDoubleNegationDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -93,7 +93,7 @@ impl Rule for NoDoubleNegationRule {
 #[derive(WithTestScope)]
 struct DoubleNegationVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoDoubleNegationDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -153,38 +153,24 @@ impl DoubleNegationVisitor<'_> {
         if has_bool_param && is_negative_method_name(&fn_name) {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_method_name(&fn_name);
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_double_negation",
-                    Severity::Warning,
-                    format!(
-                        "Method '{fn_name}' uses negative boolean naming causing double negation (e.g. '{fn_name}(false)'). Use affirmative naming instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename to an affirmative identifier (e.g. '{suggested}')."
-                )),
-            );
+            self.diagnostics
+                .push(NoDoubleNegationDiagnostic::NegativeBooleanMethod {
+                    fn_name: fn_name.clone(),
+                    suggested,
+                    span,
+                });
         }
 
         // 2. Check predicate/getter returning bool
         if returns_bool(&sig.output) && is_negative_predicate_name(&fn_name) {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_predicate_name(&fn_name);
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_double_negation",
-                    Severity::Warning,
-                    format!(
-                        "Predicate '{fn_name}' uses negative boolean naming causing double negation when negated (e.g. '!{fn_name}()'). Use affirmative naming instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename to an affirmative predicate (e.g. '{suggested}')."
-                )),
-            );
+            self.diagnostics
+                .push(NoDoubleNegationDiagnostic::NegativeBooleanPredicate {
+                    fn_name,
+                    suggested,
+                    span,
+                });
         }
     }
 
@@ -196,19 +182,11 @@ impl DoubleNegationVisitor<'_> {
             let param_name = pat_ident.ident.to_string();
             if is_negative_parameter_name(&param_name) {
                 let span = self.ctx.to_span(pat_ident.ident.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::no_double_negation",
-                        Severity::Warning,
-                        format!(
-                            "Parameter '{param_name}' uses negative boolean naming causing double negation when passed 'false'. Use affirmative naming instead (e.g. 'enabled', 'include')."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(
-                        "Rename to an affirmative parameter such as 'enabled' or 'include'.",
-                    ),
-                );
+                self.diagnostics
+                    .push(NoDoubleNegationDiagnostic::NegativeBooleanParameter {
+                        param_name,
+                        span,
+                    });
             }
         }
     }
@@ -342,10 +320,42 @@ fn suggest_affirmative_predicate_name(name: &str) -> String {
     }
 }
 
+/// Diagnostics emitted by `purist::no_double_negation`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoDoubleNegationDiagnostic {
+    #[error(
+        "Method '{fn_name}' uses negative boolean naming causing double negation (e.g. '{fn_name}(false)'). Use affirmative naming instead."
+    )]
+    #[diagnostic(help("Rename to an affirmative identifier (e.g. '{suggested}')."))]
+    NegativeBooleanMethod {
+        fn_name: String,
+        suggested: String,
+        span: Span,
+    },
+
+    #[error(
+        "Predicate '{fn_name}' uses negative boolean naming causing double negation when negated (e.g. '!{fn_name}()'). Use affirmative naming instead."
+    )]
+    #[diagnostic(help("Rename to an affirmative predicate (e.g. '{suggested}')."))]
+    NegativeBooleanPredicate {
+        fn_name: String,
+        suggested: String,
+        span: Span,
+    },
+
+    #[error(
+        "Parameter '{param_name}' uses negative boolean naming causing double negation when passed 'false'. Use affirmative naming instead (e.g. 'enabled', 'include')."
+    )]
+    #[diagnostic(help("Rename to an affirmative parameter such as 'enabled' or 'include'."))]
+    NegativeBooleanParameter { param_name: String, span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -364,9 +374,12 @@ impl Command {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_double_negation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_double_negation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Method 'with_skip_fmt' uses negative boolean naming")
         );
         Ok(())
@@ -390,9 +403,12 @@ impl Command {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_double_negation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_double_negation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Predicate 'is_skip_fmt' uses negative boolean naming")
         );
         Ok(())
@@ -409,9 +425,12 @@ pub fn configure(skip: bool) {}
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_double_negation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_double_negation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Parameter 'skip' uses negative boolean naming")
         );
         Ok(())
@@ -433,9 +452,12 @@ impl Config {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_double_negation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_double_negation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Method 'with_disable_cache' uses negative boolean naming")
         );
         Ok(())
@@ -454,9 +476,12 @@ pub trait Builder {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_double_negation"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_double_negation")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Method 'with_skip_fmt' uses negative boolean naming")
         );
         Ok(())

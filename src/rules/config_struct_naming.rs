@@ -55,8 +55,8 @@ use super::common::{
     TestScope, WithTestScope, derives_any, extract_type_ident, has_suppression_attribute,
 };
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{TypeScope, WithTypeScope, derives_clap};
 use std::collections::HashSet;
 use std::path::Path;
@@ -65,12 +65,12 @@ use syn::visit::{self, Visit};
 /// Rule enforcing `<Subject>Config`, `<Subject>Manifest`, or `<Subject>Metadata` naming for configuration structs while permitting non-config Serde models.
 pub(crate) struct ConfigStructNamingRule;
 
-impl Rule for ConfigStructNamingRule {
-    fn name(&self) -> &'static str {
-        "purist::config_struct_naming"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl ConfigStructNamingRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<ConfigStructNamingDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -266,7 +266,7 @@ fn is_config_like_struct_name(name: &str) -> bool {
 #[derive(WithTestScope)]
 struct ConfigStructNamingVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ConfigStructNamingDiagnostic>,
     test_scope: TestScope,
     in_config_file: bool,
     config_mod_depth: usize,
@@ -350,19 +350,11 @@ impl ConfigStructNamingVisitor<'_> {
         let suggested_name = suggest_config_struct_name(&struct_name);
         let span = self.ctx.to_span(item_struct.ident.span());
 
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::config_struct_naming",
-                Severity::Warning,
-                format!(
-                    "Configuration struct '{struct_name}' does not follow the '<Subject>Config', '<Subject>Manifest', or '<Subject>Metadata' naming convention. Rename it to '{suggested_name}'."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix(format!(
-                "Rename configuration struct '{struct_name}' to '{suggested_name}'."
-            )),
-        );
+        self.diagnostics.push(ConfigStructNamingDiagnostic {
+            struct_name,
+            suggested_name,
+            span,
+        });
     }
 }
 
@@ -452,10 +444,24 @@ fn suggest_config_struct_name(name: &str) -> String {
     format!("{name}Config")
 }
 
+/// Diagnostic emitted by `purist::config_struct_naming`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Configuration struct '{struct_name}' does not follow the '<Subject>Config', '<Subject>Manifest', or '<Subject>Metadata' naming convention. Rename it to '{suggested_name}'."
+)]
+#[diagnostic(help("Rename configuration struct '{struct_name}' to '{suggested_name}'."))]
+pub struct ConfigStructNamingDiagnostic {
+    pub struct_name: String,
+    pub suggested_name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -518,21 +524,24 @@ pub struct Profile {
         let d1 = diags.get(1).ok_or("expected d1")?;
         let d2 = diags.get(2).ok_or("expected d2")?;
         let d3 = diags.get(3).ok_or("expected d3")?;
-        assert_that!(&d0.rule, eq("purist::config_struct_naming"));
         assert_that!(
-            &d0.message,
+            d0.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::config_struct_naming")
+        );
+        assert_that!(
+            d0.to_string(),
             contains_substring("Rename it to 'DatabaseConfig'")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Rename it to 'ServerConfig'")
         );
         assert_that!(
-            &d2.message,
+            d2.to_string(),
             contains_substring("Rename it to 'RetryConfig'")
         );
         assert_that!(
-            &d3.message,
+            d3.to_string(),
             contains_substring("Rename it to 'ProfileConfig'")
         );
         Ok(())
@@ -558,8 +567,14 @@ pub struct Configuration {
         assert_that!(diags.len(), eq(2));
         let d0 = diags.first().ok_or("expected d0")?;
         let d1 = diags.get(1).ok_or("expected d1")?;
-        assert_that!(&d0.message, contains_substring("Rename it to 'AppConfig'"));
-        assert_that!(&d1.message, contains_substring("Rename it to 'AppConfig'"));
+        assert_that!(
+            d0.to_string(),
+            contains_substring("Rename it to 'AppConfig'")
+        );
+        assert_that!(
+            d1.to_string(),
+            contains_substring("Rename it to 'AppConfig'")
+        );
         Ok(())
     }
 
@@ -619,10 +634,13 @@ pub struct AppOptions {
         let d0 = diags.first().ok_or("expected d0")?;
         let d1 = diags.get(1).ok_or("expected d1")?;
         assert_that!(
-            &d0.message,
+            d0.to_string(),
             contains_substring("Rename it to 'RuntimeConfig'")
         );
-        assert_that!(&d1.message, contains_substring("Rename it to 'AppConfig'"));
+        assert_that!(
+            d1.to_string(),
+            contains_substring("Rename it to 'AppConfig'")
+        );
         Ok(())
     }
 
@@ -757,11 +775,11 @@ pub struct Dependencies {
         let m0 = manifest_diags.first().ok_or("expected m0")?;
         let m1 = manifest_diags.get(1).ok_or("expected m1")?;
         assert_that!(
-            &m0.message,
+            m0.to_string(),
             contains_substring("Rename it to 'AppManifest'")
         );
         assert_that!(
-            &m1.message,
+            m1.to_string(),
             contains_substring("Rename it to 'DependenciesConfig'")
         );
 
@@ -778,7 +796,7 @@ pub struct Metadata {
         assert_that!(metadata_diags.len(), eq(1));
         let md0 = metadata_diags.first().ok_or("expected md0")?;
         assert_that!(
-            &md0.message,
+            md0.to_string(),
             contains_substring("Rename it to 'AppMetadata'")
         );
         Ok(())

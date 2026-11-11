@@ -27,19 +27,19 @@
 
 use super::common::{TestScope, WithTestScope, has_test_attr};
 use crate::checkers::check_ident_has_test_prefix;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `test_` or `test` prefixes in test function names.
 pub(crate) struct NoTestPrefixRule;
 
-impl Rule for NoTestPrefixRule {
-    fn name(&self) -> &'static str {
-        "purist::no_test_prefix"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoTestPrefixRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoTestPrefixDiagnostic> {
         let mut visitor = TestPrefixVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -55,7 +55,7 @@ impl Rule for NoTestPrefixRule {
 #[derive(WithTestScope)]
 struct TestPrefixVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoTestPrefixDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -93,32 +93,35 @@ impl TestPrefixVisitor<'_> {
 fn check_fn_ident_forbidden_test_prefix(
     ctx: &LintContext<'_>,
     ident: &syn::Ident,
-) -> Option<Diagnostic> {
+) -> Option<NoTestPrefixDiagnostic> {
     let name = ident.to_string();
     if !check_ident_has_test_prefix(&name) {
         return None;
     }
 
     let span = ctx.to_span(ident.span());
-    Some(
-        Diagnostic::new(
-            "purist::no_test_prefix",
-            Severity::Warning,
-            format!(
-                "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(format!(
-            "Rename test '{name}' to remove the 'test_' prefix and follow '<action>_<scenario>_<outcome>'."
-        )),
-    )
+    Some(NoTestPrefixDiagnostic { name, span })
+}
+
+/// Diagnostic emitted by `purist::no_test_prefix`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
+)]
+#[diagnostic(help(
+    "Rename test '{name}' to remove the 'test_' prefix and follow '<action>_<scenario>_<outcome>'."
+))]
+pub struct NoTestPrefixDiagnostic {
+    pub name: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -130,9 +133,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_test_prefix"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_test_prefix")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("redundant 'test_' prefix")
         );
         Ok(())

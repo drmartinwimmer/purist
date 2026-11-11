@@ -49,8 +49,8 @@
 //! }
 //! ```
 
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{DepthScope, TestScope, WithDepthScope, WithTestScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -61,12 +61,12 @@ pub const DEFAULT_MAX_NESTING_DEPTH: usize = 4;
 /// Rule enforcing boundaries on control flow nesting depth.
 pub(crate) struct MaxNestingDepthRule;
 
-impl Rule for MaxNestingDepthRule {
-    fn name(&self) -> &'static str {
-        "purist::max_nesting_depth"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl MaxNestingDepthRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<MaxNestingDepthDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -96,27 +96,18 @@ struct NestingVisitor<'a> {
     max_depth: usize,
     depth_scope: DepthScope,
     test_scope: TestScope,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<MaxNestingDepthDiagnostic>,
 }
 
 impl<'a> NestingVisitor<'a> {
     fn check_expr_nesting_depth_limit(&mut self, span: proc_macro2::Span) {
         if !self.test_scope.is_in_test() && self.depth_scope.get() == self.max_depth + 1 {
             let diag_span = self.ctx.to_span(span);
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::max_nesting_depth",
-                    Severity::Warning,
-                    format!(
-                        "Control flow nesting depth of {} exceeds the maximum limit of {}.",
-                        self.depth_scope.get(), self.max_depth
-                    ),
-                )
-                .with_span(diag_span)
-                .with_suggested_fix(
-                    "Consider refactoring deeply nested logic into separate helper functions or using early returns.",
-                ),
-            );
+            self.diagnostics.push(MaxNestingDepthDiagnostic {
+                depth: self.depth_scope.get(),
+                max_depth: self.max_depth,
+                span: diag_span,
+            });
         }
     }
 
@@ -220,10 +211,24 @@ impl<'ast> Visit<'ast> for NestingVisitor<'_> {
     }
 }
 
+/// Diagnostic emitted by `purist::max_nesting_depth`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error("Control flow nesting depth of {depth} exceeds the maximum limit of {max_depth}.")]
+#[diagnostic(help(
+    "Consider refactoring deeply nested logic into separate helper functions or using early returns."
+))]
+pub struct MaxNestingDepthDiagnostic {
+    pub depth: usize,
+    pub max_depth: usize,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -271,8 +276,11 @@ fn deep() {
         let diags = rule.check_file(&ctx, &file);
         let diag = diags.first().ok_or("expected diagnostic")?;
         expect_that!(diags.len(), eq(1));
-        expect_that!(&diag.rule, eq("purist::max_nesting_depth"));
-        expect_that!(&diag.message, contains_substring("nesting depth of 5"));
+        expect_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::max_nesting_depth")
+        );
+        expect_that!(diag.to_string(), contains_substring("nesting depth of 5"));
         Ok(())
     }
 

@@ -48,20 +48,20 @@ use super::common::{
     path_ends_with_ident,
 };
 use crate::checkers::extract_fn_return_type;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing structured `<Subject>Error` types deriving `thiserror::Error` and forbidding unstructured string error returns.
 pub(crate) struct ErrorTypesRule;
 
-impl Rule for ErrorTypesRule {
-    fn name(&self) -> &'static str {
-        "purist::error_types"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl ErrorTypesRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<ErrorTypesDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -83,7 +83,7 @@ struct ErrorTypesVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ErrorTypesDiagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
 }
@@ -168,7 +168,7 @@ fn check_error_type_naming(
     ctx: &LintContext<'_>,
     ident: &syn::Ident,
     attrs: &[syn::Attribute],
-) -> Option<Diagnostic> {
+) -> Option<ErrorTypesDiagnostic> {
     let name = ident.to_string();
     let derives_error = derives_trait(attrs, "Error");
 
@@ -176,24 +176,12 @@ fn check_error_type_naming(
         return None;
     }
 
-    if is_subject_error_name(&name) {
+    if is_subject_error_name(&name) || is_subject_diagnostic_name(&name) {
         return None;
     }
 
     let span = ctx.to_span(ident.span());
-    Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Error type '{name}' must follow the '<Subject>Error' naming convention (e.g., 'ConfigError', 'ParseError')."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(
-            "Rename the error type to '<Subject>Error' so it remains unambiguous when imported or re-exported.",
-        ),
-    )
+    Some(ErrorTypesDiagnostic::ErrorTypeNaming { name, span })
 }
 
 /// Returns true if `name` ends with `Error` and has a non-empty `<Subject>` prefix.
@@ -202,8 +190,17 @@ fn is_subject_error_name(name: &str) -> bool {
         .is_some_and(|prefix| !prefix.is_empty())
 }
 
+/// Returns true if `name` ends with `Diagnostic` and has a non-empty `<Subject>` prefix.
+fn is_subject_diagnostic_name(name: &str) -> bool {
+    name.strip_suffix("Diagnostic")
+        .is_some_and(|prefix| !prefix.is_empty())
+}
+
 /// Checks whether an `impl` block manually implements `std::error::Error` (or `core::error::Error`).
-fn check_manual_error_impl(ctx: &LintContext<'_>, item_impl: &syn::ItemImpl) -> Option<Diagnostic> {
+fn check_manual_error_impl(
+    ctx: &LintContext<'_>,
+    item_impl: &syn::ItemImpl,
+) -> Option<ErrorTypesDiagnostic> {
     let (trait_path, _) = item_impl.trait_.as_ref()?;
     if !is_std_error_trait_path(trait_path) {
         return None;
@@ -213,19 +210,7 @@ fn check_manual_error_impl(ctx: &LintContext<'_>, item_impl: &syn::ItemImpl) -> 
         .map_or_else(|| "error type".to_string(), ToString::to_string);
     let span = ctx.to_span(trait_path.span());
 
-    Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Manual 'Error' trait implementation for '{target_name}'. Derive 'thiserror::Error' instead."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(
-            "Replace manual 'impl std::error::Error' and 'Display' boilerplate with '#[derive(Debug, thiserror::Error)]'.",
-        ),
-    )
+    Some(ErrorTypesDiagnostic::ManualErrorImpl { target_name, span })
 }
 
 /// Returns true if `path` refers to `Error`, `error::Error`, `std::error::Error`, or `core::error::Error`.
@@ -245,24 +230,18 @@ fn is_std_error_trait_path(path: &syn::Path) -> bool {
 fn check_fn_signature_unstructured_error(
     ctx: &LintContext<'_>,
     sig: &syn::Signature,
-) -> Option<Diagnostic> {
+) -> Option<ErrorTypesDiagnostic> {
     let return_type = extract_fn_return_type(sig)?;
 
     let (error_ty, err_desc) = detect_string_error_type(return_type)?;
     let span = ctx.to_span(error_ty.span());
     let fn_name = sig.ident.to_string();
 
-    Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Define a dedicated error enum deriving 'thiserror::Error' or use 'anyhow::Result'."),
-    )
+    Some(ErrorTypesDiagnostic::UnstructuredErrorReturn {
+        fn_name,
+        err_desc,
+        span,
+    })
 }
 
 /// Detects if a return type is `Result<T, String>` or `Result<T, &str>`, returning the inner error type and description.
@@ -317,10 +296,44 @@ fn is_str_ref_type(ty: &syn::Type) -> bool {
     false
 }
 
+/// Diagnostics emitted by `purist::error_types`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum ErrorTypesDiagnostic {
+    #[error(
+        "Error type '{name}' must follow the '<Subject>Error' naming convention (e.g., 'ConfigError', 'ParseError')."
+    )]
+    #[diagnostic(help(
+        "Rename the error type to '<Subject>Error' so it remains unambiguous when imported or re-exported."
+    ))]
+    ErrorTypeNaming { name: String, span: Span },
+
+    #[error(
+        "Manual 'Error' trait implementation for '{target_name}'. Derive 'thiserror::Error' instead."
+    )]
+    #[diagnostic(help(
+        "Replace manual 'impl std::error::Error' and 'Display' boilerplate with '#[derive(Debug, thiserror::Error)]'."
+    ))]
+    ManualErrorImpl { target_name: String, span: Span },
+
+    #[error(
+        "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
+    )]
+    #[diagnostic(help(
+        "Define a dedicated error enum deriving 'thiserror::Error' or use 'anyhow::Result'."
+    ))]
+    UnstructuredErrorReturn {
+        fn_name: String,
+        err_desc: String,
+        span: Span,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -332,9 +345,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::error_types")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("returns unstructured error type 'String'")
         );
         Ok(())
@@ -349,9 +365,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::error_types")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("returns unstructured error type '&str'")
         );
         Ok(())
@@ -388,9 +407,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::error_types")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Error type 'Error' must follow the '<Subject>Error' naming convention"
             )
@@ -407,9 +429,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::error_types")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Error type 'ParseFailure' must follow the '<Subject>Error' naming convention"
             )
@@ -438,9 +463,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::error_types"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::error_types")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Manual 'Error' trait implementation for 'DimacsError'. Derive 'thiserror::Error' instead."
             )

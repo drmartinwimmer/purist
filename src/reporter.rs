@@ -1,4 +1,4 @@
-use super::diagnostics::{Diagnostic, DiagnosticReport, Severity};
+use super::diagnostics::{Diagnostic, DiagnosticReport, PuristDiagnostic, Severity};
 use annotate_snippets::{Group, Level, Origin, Renderer};
 use anstyle::Style;
 use std::collections::BTreeMap;
@@ -79,34 +79,43 @@ fn render_console(
         Renderer::plain()
     };
 
-    // Group diagnostics by file path (None represents global diagnostics)
-    let mut by_file: BTreeMap<Option<&Path>, Vec<&Diagnostic>> = BTreeMap::new();
+    // Group diagnostics by file path
+    let mut by_file: BTreeMap<&Path, Vec<&PuristDiagnostic>> = BTreeMap::new();
     for diag in &report.diagnostics {
-        let file = diag.span.as_ref().map(|s| s.file.as_path());
-        by_file.entry(file).or_default().push(diag);
+        by_file
+            .entry(diag.span().file.as_path())
+            .or_default()
+            .push(diag);
     }
 
-    for (_file_opt, diags) in by_file {
+    for (file, diags) in by_file {
+        let path_str = file.display().to_string();
         for diag in diags {
-            let level = match diag.severity {
+            let level = match diag.severity().unwrap_or(Severity::Warning) {
                 Severity::Error => Level::ERROR,
                 Severity::Warning => Level::WARNING,
-                Severity::Info => Level::INFO,
-                Severity::Hint => Level::HELP,
+                Severity::Advice => Level::HELP,
             };
 
-            let title = level.primary_title(&diag.message).id(&diag.rule);
+            let message = diag.to_string();
+            let rule = diag
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "purist::unknown".to_string());
+            let help_str = diag.help().map(|h| h.to_string());
+            let span = diag.span();
+
+            let title = level.primary_title(&message).id(&rule);
             let mut group = Group::with_title(title);
 
-            if let Some(span) = &diag.span {
-                let path_str = span.file.display().to_string();
-                let origin = Origin::path(path_str)
+            if !path_str.is_empty() {
+                let origin = Origin::path(&path_str)
                     .line(span.start_line)
                     .char_column(span.start_col);
                 group = group.element(origin);
             }
 
-            if let Some(fix) = &diag.suggested_fix {
+            if let Some(fix) = &help_str {
                 group = group.element(Level::HELP.message(fix));
             }
 
@@ -116,11 +125,10 @@ fn render_console(
     }
 
     let summary_line = format!(
-        "{} error(s), {} warning(s), {} info, {} hint(s) found.",
+        "{} error(s), {} warning(s), 0 info, {} hint(s) found.",
         report.error_count(),
         report.warning_count(),
-        report.info_count(),
-        report.hint_count()
+        report.advice_count()
     );
 
     if use_color {
@@ -154,12 +162,19 @@ fn render_markdown(report: &DiagnosticReport, writer: &mut dyn io::Write) -> io:
     writeln!(writer, "| --- | --- | --- | --- | --- |")?;
 
     for diag in &report.diagnostics {
-        let location = match &diag.span {
-            Some(s) => format!("`{}:{}:{}`", s.file.display(), s.start_line, s.start_col),
-            None => "-".to_string(),
+        let span = diag.span();
+        let location = if span.file.as_os_str().is_empty() {
+            "-".to_string()
+        } else {
+            format!(
+                "`{}:{}:{}`",
+                span.file.display(),
+                span.start_line,
+                span.start_col
+            )
         };
 
-        let suggestion = match &diag.suggested_fix {
+        let suggestion = match diag.help().map(|h| h.to_string()) {
             Some(fix) => {
                 let sanitized_fix = fix.replace('|', "\\|").replace('\n', " ");
                 format!("`{sanitized_fix}`")
@@ -167,22 +182,26 @@ fn render_markdown(report: &DiagnosticReport, writer: &mut dyn io::Write) -> io:
             None => "-".to_string(),
         };
 
-        let sanitized_msg = diag.message.replace('|', "\\|").replace('\n', " ");
+        let sanitized_msg = diag.to_string().replace('|', "\\|").replace('\n', " ");
+        let rule = diag
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "purist::unknown".to_string());
+        let severity = diag.severity().unwrap_or(Severity::Warning);
 
         writeln!(
             writer,
             "| {:?} | `{}` | {} | {} | {} |",
-            diag.severity, diag.rule, location, sanitized_msg, suggestion
+            severity, rule, location, sanitized_msg, suggestion
         )?;
     }
 
     writeln!(
         writer,
-        "\n**Summary**: {} error(s), {} warning(s), {} info, {} hint(s)",
+        "\n**Summary**: {} error(s), {} warning(s), 0 info, {} hint(s)",
         report.error_count(),
         report.warning_count(),
-        report.info_count(),
-        report.hint_count()
+        report.advice_count()
     )?;
 
     Ok(())
@@ -191,7 +210,9 @@ fn render_markdown(report: &DiagnosticReport, writer: &mut dyn io::Write) -> io:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::{Diagnostic, Severity, Span};
+    use crate::NoWildcardImportsDiagnostic;
+    use crate::diagnostics::{EngineDiagnostic, Span};
+    use crate::rules::RuleDiagnostic;
     use googletest::prelude::*;
 
     #[googletest::test]
@@ -208,20 +229,21 @@ mod tests {
     fn render_console_diagnostics_formats_grouped_by_file_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new("rule::test", Severity::Error, "Syntax error")
-                .with_span(Span::new("src/main.rs", 15, 2, 15, 10))
-                .with_suggested_fix("add semicolon"),
-        );
-        report.add(
-            Diagnostic::new("rule::hint", Severity::Hint, "Consider refactoring")
-                .with_span(Span::new("src/main.rs", 20, 1, 20, 5)),
-        );
-        report.add(Diagnostic::new(
-            "rule::global",
-            Severity::Warning,
-            "Global issue",
+        report.add(EngineDiagnostic::SyntaxError {
+            details: "Syntax error".to_string(),
+            span: Span::new("src/main.rs", 15, 2, 15, 10),
+        });
+        report.add(PuristDiagnostic::with_severity_override(
+            RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+                path_str: "foo::*".to_string(),
+                span: Span::new("src/main.rs", 20, 1, 20, 5),
+            }),
+            Severity::Advice,
         ));
+        report.add(EngineDiagnostic::UnknownRule {
+            message: "Global issue".to_string(),
+            span: Span::new("", 1, 1, 1, 1),
+        });
 
         let mut buffer = Vec::new();
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, false)?;
@@ -229,12 +251,14 @@ mod tests {
 
         expect_that!(output, contains_substring("--> src/main.rs:15:2"));
         expect_that!(output, contains_substring("--> src/main.rs:20:1"));
-        expect_that!(output, contains_substring("error[rule::test]"));
-        expect_that!(output, contains_substring("help[rule::hint]"));
-        expect_that!(output, contains_substring("warning[rule::global]"));
-        expect_that!(output, contains_substring("rule::test"));
+        expect_that!(output, contains_substring("error[purist::syntax_error]"));
+        expect_that!(
+            output,
+            contains_substring("help[purist::no_wildcard_imports]")
+        );
+        expect_that!(output, contains_substring("warning[purist::unknown_rule]"));
         expect_that!(output, contains_substring("src/main.rs:15:2"));
-        expect_that!(output, contains_substring("add semicolon"));
+        expect_that!(output, contains_substring("explicit item imports"));
         expect_that!(output, contains_substring("1 error(s)"));
         expect_that!(output, contains_substring("1 warning(s)"));
         expect_that!(output, contains_substring("1 hint(s)"));
@@ -245,15 +269,10 @@ mod tests {
     fn render_console_with_color_includes_ansi_escape_codes()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new("rule::err", Severity::Error, "Failure").with_span(Span::new(
-                "src/lib.rs",
-                1,
-                1,
-                1,
-                2,
-            )),
-        );
+        report.add(EngineDiagnostic::SyntaxError {
+            details: "Failure".to_string(),
+            span: Span::new("src/lib.rs", 1, 1, 1, 2),
+        });
 
         let mut buffer = Vec::new();
         render_report_with_options(&report, OutputFormat::Console, &mut buffer, true)?;
@@ -268,11 +287,10 @@ mod tests {
     fn render_json_outputs_valid_pretty_json_with_summary() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut report = DiagnosticReport::default();
-        report.add(Diagnostic::new(
-            "rule::json",
-            Severity::Warning,
-            "Check format",
-        ));
+        report.add(RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span: Span::new("src/lib.rs", 1, 1, 1, 5),
+        }));
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Json, &mut buffer)?;
         let parsed: serde_json::Value = serde_json::from_slice(&buffer)?;
@@ -282,7 +300,7 @@ mod tests {
             .and_then(|d| d.get(0))
             .and_then(|e| e.get("rule"))
             .and_then(|r| r.as_str());
-        expect_that!(rule, eq(Some("rule::json")));
+        expect_that!(rule, eq(Some("purist::no_wildcard_imports")));
 
         let total_warnings = parsed
             .get("summary")
@@ -308,10 +326,10 @@ mod tests {
     fn render_markdown_diagnostics_outputs_table_and_summary()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new("rule::md", Severity::Error, "Missing doc")
-                .with_span(Span::new("lib.rs", 1, 1, 1, 5)),
-        );
+        report.add(EngineDiagnostic::SyntaxError {
+            details: "Missing token".to_string(),
+            span: Span::new("lib.rs", 1, 1, 1, 5),
+        });
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Markdown, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
@@ -321,7 +339,9 @@ mod tests {
         );
         expect_that!(
             output,
-            contains_substring("| Error | `rule::md` | `lib.rs:1:1` | Missing doc | - |")
+            contains_substring(
+                "| Error | `purist::syntax_error` | `lib.rs:1:1` | Failed to parse Rust syntax: Missing token | - |"
+            )
         );
         expect_that!(
             output,
@@ -331,19 +351,18 @@ mod tests {
     }
 
     #[googletest::test]
-    fn render_markdown_sanitizes_pipes_and_newlines_in_suggested_fix()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn render_markdown_formats_suggested_fix_column() -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new("rule::fix", Severity::Warning, "Fix issue")
-                .with_suggested_fix("first line | second line\nthird line"),
-        );
+        report.add(RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span: Span::new("src/lib.rs", 1, 1, 1, 5),
+        }));
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Markdown, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
         expect_that!(
             output,
-            contains_substring("`first line \\| second line third line`")
+            contains_substring("`Replace wildcard import with explicit item imports.`")
         );
         Ok(())
     }
@@ -351,20 +370,15 @@ mod tests {
     #[googletest::test]
     fn render_report_renders_console_successfully() -> Result<(), Box<dyn std::error::Error>> {
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new("rule::test", Severity::Warning, "Check code").with_span(Span::new(
-                "src/lib.rs",
-                10,
-                5,
-                10,
-                15,
-            )),
-        );
+        report.add(RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span: Span::new("src/lib.rs", 10, 5, 10, 15),
+        }));
         let mut buffer = Vec::new();
         render_report(&report, OutputFormat::Console, &mut buffer)?;
         let output = String::from_utf8(buffer)?;
-        expect_that!(output, contains_substring("rule::test"));
-        expect_that!(output, contains_substring("Check code"));
+        expect_that!(output, contains_substring("purist::no_wildcard_imports"));
+        expect_that!(output, contains_substring("foo::*"));
         expect_that!(output, contains_substring("src/lib.rs:10:5"));
         Ok(())
     }

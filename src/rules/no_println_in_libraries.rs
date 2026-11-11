@@ -35,8 +35,8 @@
 
 use super::common::{TestScope, WithTestScope, extract_type_ident, path_last_ident};
 use crate::checkers::check_macro_matches;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{
     ClapScope, WithClapScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
 };
@@ -46,12 +46,12 @@ use syn::visit::{self, Visit};
 /// Rule flagging `println!` / `eprintln!` in library modules.
 pub(crate) struct NoPrintlnInLibrariesRule;
 
-impl Rule for NoPrintlnInLibrariesRule {
-    fn name(&self) -> &'static str {
-        "purist::no_println_in_libraries"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoPrintlnInLibrariesRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoPrintlnInLibrariesDiagnostic> {
         if is_exempt_entrypoint_or_cli_module(ctx) {
             return Vec::new();
         }
@@ -130,7 +130,7 @@ struct PrintlnVisitor<'a> {
     /// Lint context containing file path and coordinates.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoPrintlnInLibrariesDiagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
     /// Tracks active Clap and CLI implementation and runner scopes.
@@ -194,24 +194,32 @@ impl PrintlnVisitor<'_> {
         };
 
         let span = self.ctx.to_span(mac.path.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_println_in_libraries",
-                Severity::Warning,
-                format!(
-                    "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
-        );
+        self.diagnostics.push(NoPrintlnInLibrariesDiagnostic {
+            macro_name: name.to_string(),
+            span,
+        });
     }
+}
+
+/// Diagnostic emitted by `purist::no_println_in_libraries`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Direct use of '{macro_name}!' in library code. Library code should return structured errors or use logging."
+)]
+#[diagnostic(help(
+    "Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."
+))]
+pub struct NoPrintlnInLibrariesDiagnostic {
+    pub macro_name: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -227,8 +235,11 @@ pub fn parse_input() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_println_in_libraries"));
-        assert_that!(&diag.message, contains_substring("println!"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_println_in_libraries")
+        );
+        assert_that!(diag.to_string(), contains_substring("println!"));
         Ok(())
     }
 

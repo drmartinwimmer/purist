@@ -25,19 +25,19 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
 pub(crate) struct PathResolutionRule;
 
-impl Rule for PathResolutionRule {
-    fn name(&self) -> &'static str {
-        "purist::path_resolution"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl PathResolutionRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<PathResolutionDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -57,7 +57,7 @@ impl Rule for PathResolutionRule {
 #[derive(WithTestScope)]
 struct PathVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<PathResolutionDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -132,20 +132,11 @@ impl PathVisitor<'_> {
             let val = lit_str.value();
             if is_unanchored_relative_path(&val) {
                 let span = self.ctx.to_span(lit_str.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::path_resolution",
-                        Severity::Warning,
-                        format!(
-                            "Unanchored relative path '{val}' in '{}'. Relative paths break when executed outside the crate root.",
-                            self.ctx.file_path().display()
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(format!(
-                        "Anchor path using 'Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"{val}\")' or workspace root."
-                    )),
-                );
+                self.diagnostics.push(PathResolutionDiagnostic {
+                    path_val: val,
+                    file_path: self.ctx.file_path().display().to_string(),
+                    span,
+                });
             }
         }
     }
@@ -193,10 +184,26 @@ fn is_unanchored_relative_path(path_str: &str) -> bool {
         || trimmed.ends_with(".rs")
 }
 
+/// Diagnostic emitted by `purist::path_resolution`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Unanchored relative path '{path_val}' in '{file_path}'. Relative paths break when executed outside the crate root."
+)]
+#[diagnostic(help(
+    "Anchor path using 'Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"{path_val}\")' or workspace root."
+))]
+pub struct PathResolutionDiagnostic {
+    pub path_val: String,
+    pub file_path: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -208,9 +215,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::path_resolution"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::path_resolution")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Unanchored relative path")
         );
         Ok(())

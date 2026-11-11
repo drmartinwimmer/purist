@@ -1,28 +1,14 @@
-use serde::{Deserialize, Serialize};
+use crate::rules::RuleDiagnostic;
+pub use miette::{Diagnostic, Severity};
+use miette::{LabeledSpan, MietteError, MietteSpanContents, SourceCode, SourceSpan, SpanContents};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-/// Severity classification for a diagnostic finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-    Hint,
-}
-
-impl fmt::Display for Severity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Error => write!(f, "error"),
-            Self::Warning => write!(f, "warning"),
-            Self::Info => write!(f, "info"),
-            Self::Hint => write!(f, "hint"),
-        }
-    }
-}
-
-/// Source code location denoting start and end line/column coordinates and optional byte offsets.
+/// Source code location denoting start and end line/column coordinates, optional byte offsets,
+/// and optional source code text for [`miette::SourceCode`] rendering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub file: PathBuf,
@@ -30,8 +16,12 @@ pub struct Span {
     pub start_col: usize,
     pub end_line: usize,
     pub end_col: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) start_byte: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) end_byte: Option<usize>,
+    #[serde(skip)]
+    pub(crate) source: Option<Arc<str>>,
 }
 
 impl Span {
@@ -51,6 +41,7 @@ impl Span {
             end_col,
             start_byte: None,
             end_byte: None,
+            source: None,
         }
     }
 
@@ -60,40 +51,210 @@ impl Span {
         self.end_byte = Some(end_byte);
         self
     }
+
+    /// Attaches shared source code text to the span.
+    pub(crate) fn with_source(mut self, source: Arc<str>) -> Self {
+        self.source = Some(source);
+        self
+    }
 }
 
-/// An individual quality, safety, or style finding.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Diagnostic {
-    pub rule: String,
-    pub severity: Severity,
-    pub message: String,
-    pub span: Option<Span>,
-    pub suggested_fix: Option<String>,
+impl From<&Span> for SourceSpan {
+    fn from(span: &Span) -> Self {
+        if let (Some(start), Some(end)) = (span.start_byte, span.end_byte) {
+            Self::new(start.into(), end.saturating_sub(start))
+        } else {
+            Self::new(0.into(), 0)
+        }
+    }
 }
 
-impl Diagnostic {
-    /// Creates a new diagnostic without a span or suggested fix.
-    pub fn new(rule: impl Into<String>, severity: Severity, message: impl Into<String>) -> Self {
-        Self {
-            rule: rule.into(),
-            severity,
-            message: message.into(),
-            span: None,
-            suggested_fix: None,
+impl From<Span> for SourceSpan {
+    fn from(span: Span) -> Self {
+        Self::from(&span)
+    }
+}
+
+impl SourceCode for Span {
+    fn read_span<'a>(
+        &'a self,
+        span: &SourceSpan,
+        context_lines_before: usize,
+        context_lines_after: usize,
+    ) -> Result<Box<dyn SpanContents<'a> + 'a>, MietteError> {
+        let name = self.file.display().to_string();
+        if let Some(src) = &self.source
+            && !src.is_empty()
+            && self.start_byte.is_some()
+            && span.offset() <= src.len()
+            && let Ok(inner) =
+                src.as_ref()
+                    .read_span(span, context_lines_before, context_lines_after)
+        {
+            let contents = MietteSpanContents::new_named(
+                name,
+                inner.data(),
+                *inner.span(),
+                self.start_line.saturating_sub(1),
+                self.start_col.saturating_sub(1),
+                inner.line_count(),
+            )
+            .with_language("Rust");
+            return Ok(Box::new(contents));
+        }
+
+        let line_count = self.end_line.saturating_sub(self.start_line).max(1);
+        let contents = MietteSpanContents::new_named(
+            name,
+            &[],
+            *span,
+            self.start_line.saturating_sub(1),
+            self.start_col.saturating_sub(1),
+            line_count,
+        );
+        Ok(Box::new(contents))
+    }
+}
+
+/// Engine-level diagnostics emitted during project parsing, I/O, or manifest configuration checks.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum EngineDiagnostic {
+    #[error("Failed to parse Rust syntax: {details}")]
+    #[diagnostic(code(purist::syntax_error), severity(Error))]
+    SyntaxError {
+        details: String,
+        #[source_code]
+        #[label]
+        span: Span,
+    },
+
+    #[error("Failed to read file '{}': {details}", path.display())]
+    #[diagnostic(code(purist::io_error), severity(Error))]
+    IoError {
+        path: PathBuf,
+        details: String,
+        #[source_code]
+        #[label]
+        span: Span,
+    },
+
+    #[error("{message}")]
+    #[diagnostic(code(purist::deprecated_rule), severity(Warning))]
+    DeprecatedRule {
+        message: String,
+        #[source_code]
+        #[label]
+        span: Span,
+    },
+
+    #[error("{message}")]
+    #[diagnostic(code(purist::unknown_rule), severity(Warning))]
+    UnknownRule {
+        message: String,
+        #[source_code]
+        #[label]
+        span: Span,
+    },
+}
+
+impl EngineDiagnostic {
+    /// Returns the source [`Span`] associated with this engine diagnostic.
+    pub const fn span(&self) -> &Span {
+        match self {
+            Self::SyntaxError { span, .. }
+            | Self::IoError { span, .. }
+            | Self::DeprecatedRule { span, .. }
+            | Self::UnknownRule { span, .. } => span,
+        }
+    }
+}
+
+/// Top-level concrete diagnostic enum encompassing all rule and engine diagnostics produced by `purist`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PuristDiagnostic {
+    /// A lint rule violation emitted by one of the built-in `purist` rules.
+    #[error(transparent)]
+    Rule(#[from] RuleDiagnostic),
+
+    /// An engine-level syntax, I/O, or manifest configuration diagnostic.
+    #[error(transparent)]
+    Engine(#[from] EngineDiagnostic),
+
+    /// A lint rule violation whose severity was overridden by `Cargo.toml` configuration.
+    #[error("{diagnostic}")]
+    Overridden {
+        #[source]
+        diagnostic: RuleDiagnostic,
+        severity: Severity,
+    },
+}
+
+impl PuristDiagnostic {
+    /// Returns the source [`Span`] where this diagnostic was triggered.
+    pub const fn span(&self) -> &Span {
+        match self {
+            Self::Rule(diag)
+            | Self::Overridden {
+                diagnostic: diag, ..
+            } => diag.span(),
+            Self::Engine(diag) => diag.span(),
         }
     }
 
-    /// Attaches a source span to the diagnostic.
-    pub fn with_span(mut self, span: Span) -> Self {
-        self.span = Some(span);
-        self
+    /// Overrides the [`Severity`] on a rule diagnostic according to `Cargo.toml` configuration.
+    pub(crate) fn with_severity_override(diag: RuleDiagnostic, severity: Severity) -> Self {
+        Self::Overridden {
+            diagnostic: diag,
+            severity,
+        }
     }
 
-    /// Attaches a suggested fix to the diagnostic.
-    pub fn with_suggested_fix(mut self, fix: impl Into<String>) -> Self {
-        self.suggested_fix = Some(fix.into());
-        self
+    fn as_inner_diagnostic(&self) -> &dyn Diagnostic {
+        match self {
+            Self::Rule(diag)
+            | Self::Overridden {
+                diagnostic: diag, ..
+            } => diag,
+            Self::Engine(diag) => diag,
+        }
+    }
+}
+
+impl Diagnostic for PuristDiagnostic {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.as_inner_diagnostic().code()
+    }
+
+    fn severity(&self) -> Option<Severity> {
+        match self {
+            Self::Overridden { severity, .. } => Some(*severity),
+            Self::Rule(diag) => diag.severity(),
+            Self::Engine(diag) => diag.severity(),
+        }
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.as_inner_diagnostic().help()
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.as_inner_diagnostic().url()
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.as_inner_diagnostic().source_code()
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        self.as_inner_diagnostic().labels()
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.as_inner_diagnostic().related()
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.as_inner_diagnostic().diagnostic_source()
     }
 }
 
@@ -102,33 +263,72 @@ impl Diagnostic {
 pub(crate) struct ReportSummary {
     pub(crate) total_errors: usize,
     pub(crate) total_warnings: usize,
-    pub(crate) total_info: usize,
-    pub(crate) total_hints: usize,
+    pub(crate) total_advice: usize,
     pub(crate) targets_scanned: usize,
     pub(crate) duration_ms: u64,
 }
 
-/// An aggregated container of all diagnostics produced during a check run.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Serialize)]
+struct SerializedDiagnostic<'a> {
+    rule: String,
+    severity: Severity,
+    message: String,
+    span: &'a Span,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested_fix: Option<String>,
+}
+
+/// An aggregated container of all [`PuristDiagnostic`] findings produced during a check run.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiagnosticReport {
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<PuristDiagnostic>,
     pub(crate) summary: ReportSummary,
+}
+
+impl Serialize for DiagnosticReport {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let serialized_diags: Vec<SerializedDiagnostic<'_>> = self
+            .diagnostics
+            .iter()
+            .map(|d| {
+                let rule = d
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "purist::unknown".to_string());
+                let severity = d.severity().unwrap_or(Severity::Warning);
+                let suggested_fix = d.help().map(|h| h.to_string());
+                SerializedDiagnostic {
+                    rule,
+                    severity,
+                    message: d.to_string(),
+                    span: d.span(),
+                    suggested_fix,
+                }
+            })
+            .collect();
+
+        let mut state = serializer.serialize_struct("DiagnosticReport", 2)?;
+        state.serialize_field("diagnostics", &serialized_diags)?;
+        state.serialize_field("summary", &self.summary)?;
+        state.end()
+    }
 }
 
 impl DiagnosticReport {
     /// Creates a new diagnostic report with the given diagnostics, automatically computing summary counts.
-    pub fn new(diagnostics: Vec<Diagnostic>) -> Self {
+    pub fn new(diagnostics: Vec<PuristDiagnostic>) -> Self {
         let mut total_errors = 0;
         let mut total_warnings = 0;
-        let mut total_info = 0;
-        let mut total_hints = 0;
+        let mut total_advice = 0;
 
         for d in &diagnostics {
-            match d.severity {
+            match d.severity().unwrap_or(Severity::Warning) {
                 Severity::Error => total_errors += 1,
                 Severity::Warning => total_warnings += 1,
-                Severity::Info => total_info += 1,
-                Severity::Hint => total_hints += 1,
+                Severity::Advice => total_advice += 1,
             }
         }
 
@@ -137,8 +337,7 @@ impl DiagnosticReport {
             summary: ReportSummary {
                 total_errors,
                 total_warnings,
-                total_info,
-                total_hints,
+                total_advice,
                 targets_scanned: 0,
                 duration_ms: 0,
             },
@@ -168,14 +367,9 @@ impl DiagnosticReport {
         self.summary.total_warnings
     }
 
-    /// Returns the total count of informational diagnostics.
-    pub(crate) fn info_count(&self) -> usize {
-        self.summary.total_info
-    }
-
-    /// Returns the total count of hint diagnostics.
-    pub(crate) fn hint_count(&self) -> usize {
-        self.summary.total_hints
+    /// Returns the total count of advice/hint diagnostics.
+    pub(crate) fn advice_count(&self) -> usize {
+        self.summary.total_advice
     }
 
     /// Returns true if there are no diagnostics in the report.
@@ -184,12 +378,12 @@ impl DiagnosticReport {
     }
 
     /// Adds a diagnostic to the report and updates summary metrics.
-    pub(crate) fn add(&mut self, diag: Diagnostic) {
-        match diag.severity {
+    pub(crate) fn add(&mut self, diag: impl Into<PuristDiagnostic>) {
+        let diag = diag.into();
+        match diag.severity().unwrap_or(Severity::Warning) {
             Severity::Error => self.summary.total_errors += 1,
             Severity::Warning => self.summary.total_warnings += 1,
-            Severity::Info => self.summary.total_info += 1,
-            Severity::Hint => self.summary.total_hints += 1,
+            Severity::Advice => self.summary.total_advice += 1,
         }
         self.diagnostics.push(diag);
     }
@@ -198,6 +392,7 @@ impl DiagnosticReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NoWildcardImportsDiagnostic;
     use googletest::prelude::*;
 
     #[googletest::test]
@@ -208,8 +403,7 @@ mod tests {
         expect_that!(report.has_errors(), is_false());
         expect_that!(report.error_count(), eq(0));
         expect_that!(report.warning_count(), eq(0));
-        expect_that!(report.info_count(), eq(0));
-        expect_that!(report.hint_count(), eq(0));
+        expect_that!(report.advice_count(), eq(0));
         expect_that!(report.summary.targets_scanned, eq(0));
         expect_that!(report.summary.duration_ms, eq(0));
         Ok(())
@@ -219,38 +413,24 @@ mod tests {
     fn add_diagnostics_updates_error_and_warning_counts() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut report = DiagnosticReport::default();
-        report.add(Diagnostic::new(
-            "rule::error",
-            Severity::Error,
-            "An error occurred",
-        ));
-        report.add(Diagnostic::new(
-            "rule::warning",
-            Severity::Warning,
-            "A warning occurred",
-        ));
-        report.add(Diagnostic::new(
-            "rule::info",
-            Severity::Info,
-            "Informational notice",
-        ));
-        report.add(Diagnostic::new(
-            "rule::hint",
-            Severity::Hint,
-            "A helpful hint",
-        ));
+        let span = Span::new("src/lib.rs", 1, 1, 1, 10);
+        report.add(EngineDiagnostic::SyntaxError {
+            details: "bad token".to_string(),
+            span: span.clone(),
+        });
+        report.add(RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span,
+        }));
 
         expect_that!(report.is_empty(), is_false());
         expect_that!(report.has_errors(), is_true());
         expect_that!(report.error_count(), eq(1));
         expect_that!(report.warning_count(), eq(1));
-        expect_that!(report.info_count(), eq(1));
-        expect_that!(report.hint_count(), eq(1));
-        expect_that!(report.diagnostics.len(), eq(4));
+        expect_that!(report.advice_count(), eq(0));
+        expect_that!(report.diagnostics.len(), eq(2));
         expect_that!(report.summary.total_errors, eq(1));
         expect_that!(report.summary.total_warnings, eq(1));
-        expect_that!(report.summary.total_info, eq(1));
-        expect_that!(report.summary.total_hints, eq(1));
         Ok(())
     }
 
@@ -268,51 +448,59 @@ mod tests {
     }
 
     #[googletest::test]
-    fn serialize_diagnostic_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
+    fn purist_diagnostic_exposes_span_and_miette_metadata() -> Result<(), Box<dyn std::error::Error>>
+    {
         let span = Span::new("src/main.rs", 10, 5, 10, 20).with_byte_offsets(85, 100);
-        let diag = Diagnostic::new("rule::style", Severity::Warning, "Avoid raw unwrap")
-            .with_span(span.clone())
-            .with_suggested_fix("use ? instead");
+        let diag = PuristDiagnostic::from(RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span: span.clone(),
+        }));
 
-        let serialized = serde_json::to_string(&diag)?;
-        let deserialized: Diagnostic = serde_json::from_str(&serialized)?;
-
-        expect_that!(diag, eq(&deserialized));
-        expect_that!(deserialized.span.as_ref(), eq(Some(&span)));
         expect_that!(
-            deserialized.suggested_fix.as_deref(),
-            eq(Some("use ? instead"))
+            diag.code().map(|c| c.to_string()),
+            some(eq("purist::no_wildcard_imports"))
         );
+        expect_that!(
+            diag.help().map(|h| h.to_string()),
+            some(contains_substring("explicit item imports"))
+        );
+        expect_that!(diag.span(), eq(&span));
         Ok(())
     }
 
     #[googletest::test]
-    fn serialize_report_with_summary_roundtrips_json() -> Result<(), Box<dyn std::error::Error>> {
+    fn serialize_report_with_summary_outputs_json() -> Result<(), Box<dyn std::error::Error>> {
+        let span = Span::new("foo.rs", 1, 1, 1, 10);
         let report = DiagnosticReport::new(vec![
-            Diagnostic::new("rule::one", Severity::Error, "First issue")
-                .with_span(Span::new("foo.rs", 1, 1, 1, 10)),
-            Diagnostic::new("rule::two", Severity::Hint, "Second issue"),
+            PuristDiagnostic::from(EngineDiagnostic::SyntaxError {
+                details: "unexpected eof".to_string(),
+                span: span.clone(),
+            }),
+            PuristDiagnostic::with_severity_override(
+                RuleDiagnostic::from(NoWildcardImportsDiagnostic {
+                    path_str: "bar::*".to_string(),
+                    span,
+                }),
+                Severity::Advice,
+            ),
         ])
         .with_metrics(42, 150);
 
-        let serialized = serde_json::to_string_pretty(&report)?;
-        let deserialized: DiagnosticReport = serde_json::from_str(&serialized)?;
-
-        expect_that!(report, eq(&deserialized));
-        expect_that!(deserialized.diagnostics.len(), eq(2));
-        expect_that!(deserialized.summary.total_errors, eq(1));
-        expect_that!(deserialized.summary.total_hints, eq(1));
-        expect_that!(deserialized.summary.targets_scanned, eq(42));
-        expect_that!(deserialized.summary.duration_ms, eq(150));
-        Ok(())
-    }
-
-    #[googletest::test]
-    fn display_severity_formats_lowercase() -> Result<(), Box<dyn std::error::Error>> {
-        expect_that!(Severity::Error.to_string(), eq("error"));
-        expect_that!(Severity::Warning.to_string(), eq("warning"));
-        expect_that!(Severity::Info.to_string(), eq("info"));
-        expect_that!(Severity::Hint.to_string(), eq("hint"));
+        let serialized = serde_json::to_value(&report)?;
+        expect_that!(
+            serialized
+                .get("summary")
+                .and_then(|s| s.get("total_errors"))
+                .and_then(|v| v.as_u64()),
+            some(eq(1))
+        );
+        expect_that!(
+            serialized
+                .get("summary")
+                .and_then(|s| s.get("total_advice"))
+                .and_then(|v| v.as_u64()),
+            some(eq(1))
+        );
         Ok(())
     }
 }

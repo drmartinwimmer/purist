@@ -33,8 +33,8 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{SuppressionScope, WithSuppressionScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -42,12 +42,12 @@ use syn::visit::{self, Visit};
 /// Rule forbidding `unsafe` blocks and functions in test suites.
 pub(crate) struct NoUnsafeInTestsRule;
 
-impl Rule for NoUnsafeInTestsRule {
-    fn name(&self) -> &'static str {
-        "purist::no_unsafe_in_tests"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoUnsafeInTestsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoUnsafeInTestsDiagnostic> {
         let mut visitor = UnsafeTestVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -64,7 +64,7 @@ impl Rule for NoUnsafeInTestsRule {
 #[derive(WithTestScope, WithSuppressionScope)]
 struct UnsafeTestVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoUnsafeInTestsDiagnostic>,
     test_scope: TestScope,
     suppression_scope: SuppressionScope,
 }
@@ -124,40 +124,55 @@ impl UnsafeTestVisitor<'_> {
     fn check_fn_signature_unsafe_in_test(&mut self, sig: &syn::Signature) {
         if matches!(sig.safety, syn::Safety::Unsafe(_)) {
             let span = self.ctx.to_span(sig.fn_token.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_unsafe_in_tests",
-                    Severity::Error,
-                    format!(
-                        "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
-                        sig.ident
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Remove 'unsafe' from test code; verify behavior strictly through safe public interfaces."),
-            );
+            self.diagnostics
+                .push(NoUnsafeInTestsDiagnostic::UnsafeFnInTest {
+                    fn_name: sig.ident.to_string(),
+                    span,
+                });
         }
     }
 
     /// Emits a diagnostic for an `unsafe` block expression in test context.
     fn check_expr_unsafe_block_in_test(&mut self, expr_unsafe: &syn::ExprUnsafe) {
         let span = self.ctx.to_span(expr_unsafe.unsafe_token.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_unsafe_in_tests",
-                Severity::Error,
-                "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Remove 'unsafe' block from test code; verify behavior strictly through safe public interfaces."),
-        );
+        self.diagnostics
+            .push(NoUnsafeInTestsDiagnostic::UnsafeBlockInTest { span });
     }
+}
+
+/// Diagnostics emitted by `purist::no_unsafe_in_tests`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoUnsafeInTestsDiagnostic {
+    #[error(
+        "Function '{fn_name}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces."
+    )]
+    #[diagnostic(
+        severity(Error),
+        help(
+            "Remove 'unsafe' from test code; verify behavior strictly through safe public interfaces."
+        )
+    )]
+    UnsafeFnInTest { fn_name: String, span: Span },
+
+    #[error(
+        "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions."
+    )]
+    #[diagnostic(
+        severity(Error),
+        help(
+            "Remove 'unsafe' block from test code; verify behavior strictly through safe public interfaces."
+        )
+    )]
+    UnsafeBlockInTest { span: Span },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -178,8 +193,14 @@ fn test_foo() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_unsafe_in_tests"));
-        assert_that!(diag.severity, eq(Severity::Error));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_unsafe_in_tests")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Error)
+        );
         Ok(())
     }
 
@@ -215,8 +236,14 @@ unsafe fn test_foo() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_unsafe_in_tests"));
-        assert_that!(diag.severity, eq(Severity::Error));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_unsafe_in_tests")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Error)
+        );
         Ok(())
     }
 }

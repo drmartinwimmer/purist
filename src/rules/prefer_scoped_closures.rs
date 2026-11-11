@@ -27,8 +27,8 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use quote::ToTokens;
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -38,12 +38,12 @@ use syn::{Block, Expr, ExprMethodCall, ImplItemFn, ItemFn, Stmt};
 /// Rule enforcing scoped closures over manual paired lifecycle calls.
 pub(crate) struct PreferScopedClosuresRule;
 
-impl Rule for PreferScopedClosuresRule {
-    fn name(&self) -> &'static str {
-        "purist::prefer_scoped_closures"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl PreferScopedClosuresRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<PreferScopedClosuresDiagnostic> {
         let mut visitor = LifecycleVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -59,7 +59,7 @@ impl Rule for PreferScopedClosuresRule {
 #[derive(WithTestScope)]
 struct LifecycleVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<PreferScopedClosuresDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -110,17 +110,12 @@ impl LifecycleVisitor<'_> {
                     && let Some((enter_call, enter_name)) = active_pushes.remove(&receiver_key)
                 {
                     let span = self.ctx.to_span(enter_call.span());
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "purist::prefer_scoped_closures",
-                            Severity::Warning,
-                            format!(
-                                "Manual paired lifecycle calls ('{enter_name}' / '{method_name}') on '{receiver_key}'. Use a scoped closure ('with_...') or RAII guard to guarantee state restoration on error or early return."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Replace manual push/pop with a scoped closure or RAII guard."),
-                    );
+                    self.diagnostics.push(PreferScopedClosuresDiagnostic {
+                        enter_name,
+                        exit_name: method_name,
+                        receiver_key,
+                        span,
+                    });
                 }
             }
         }
@@ -145,10 +140,26 @@ fn is_exit_lifecycle_method(name: &str) -> bool {
         || name.starts_with("exit_")
 }
 
+/// Diagnostic emitted by `purist::prefer_scoped_closures`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Manual paired lifecycle calls ('{enter_name}' / '{exit_name}') on '{receiver_key}'. Use a scoped closure ('with_...') or RAII guard to guarantee state restoration on error or early return."
+)]
+#[diagnostic(help("Replace manual push/pop with a scoped closure or RAII guard."))]
+pub struct PreferScopedClosuresDiagnostic {
+    pub enter_name: String,
+    pub exit_name: String,
+    pub receiver_key: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -168,10 +179,16 @@ impl MyVisitor {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::prefer_scoped_closures"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::prefer_scoped_closures")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual paired lifecycle calls ('push' / 'pop') on 'self . scope'")
         );
         Ok(())

@@ -6,17 +6,18 @@
 
 ### Structs
 
-- `pub struct Diagnostic { pub rule: String, pub severity: Severity, pub message: String, pub span: Option < Span >, pub suggested_fix: Option < String > }` — _An individual quality, safety, or style finding._
-- `pub struct DiagnosticReport { pub diagnostics: Vec < Diagnostic > }` — _An aggregated container of all diagnostics produced during a check run._
+- `pub struct DiagnosticReport { pub diagnostics: Vec < PuristDiagnostic > }` — _An aggregated container of all [`PuristDiagnostic`] findings produced during a check run._
 - `pub struct PuristCommand { /* no public fields */ }` — _Arguments for the purist linter subcommand._
 - `pub struct PuristEngine { /* no public fields */ }` — _Static analysis engine running registered purist rules over Rust source files._
-- `pub struct Span { pub file: PathBuf, pub start_line: usize, pub start_col: usize, pub end_line: usize, pub end_col: usize }` — _Source code location denoting start and end line/column coordinates and optional byte offsets._
+- `pub struct Span { pub file: PathBuf, pub start_line: usize, pub start_col: usize, pub end_line: usize, pub end_col: usize }` — _Source code location denoting start and end line/column coordinates, optional byte offsets,_
 
 ### Enums
 
+- `pub enum EngineDiagnostic { SyntaxError { details: String, span: Span }, IoError { path: PathBuf, details: String, span: Span }, DeprecatedRule { message: String, span: Span }, UnknownRule { message: String, span: Span } }` — _Engine-level diagnostics emitted during project parsing, I/O, or manifest configuration checks._
 - `pub enum OutputFormat { Console, Json, Markdown }` — _Output format for diagnostic reports._
+- `pub enum PuristDiagnostic { Rule(RuleDiagnostic), Engine(EngineDiagnostic), Overridden { diagnostic: RuleDiagnostic, severity: Severity } }` — _Top-level concrete diagnostic enum encompassing all rule and engine diagnostics produced by `purist`._
 - `pub enum PuristError { PathNotFound(PathBuf), ManifestNotFound(PathBuf), CargoTomlNotFound(PathBuf), ManifestParse(String), ExpectedFile(PathBuf), PathOutsideProject(PathBuf, PathBuf), Io(std :: io :: Error), LintViolationsFound { count: usize } }` — _Error type for purist linter execution._
-- `pub enum Severity { Error, Warning, Info, Hint }` — _Severity classification for a diagnostic finding._
+- `pub enum RuleDiagnostic { CentralizedCommandExecution(CentralizedCommandExecutionDiagnostic), ClapStructEncapsulation(ClapStructEncapsulationDiagnostic), CliRunConsumesSelf(CliRunConsumesSelfDiagnostic), ClippySuppressionHygiene(ClippySuppressionHygieneDiagnostic), CommandStructNaming(CommandStructNamingDiagnostic), ConfigStructNaming(ConfigStructNamingDiagnostic), DescriptiveCheckerNames(DescriptiveCheckerNamesDiagnostic), ErrorTypes(ErrorTypesDiagnostic), ExitCodeHygiene(ExitCodeHygieneDiagnostic), FreeFunctions(FreeFunctionsDiagnostic), GoogletestConventions(GoogletestConventionsDiagnostic), GranularVisitorHooks(GranularVisitorHooksDiagnostic), IdiomaticOptionBoolMapping(IdiomaticOptionBoolMappingDiagnostic), LibFacadeHygiene(LibFacadeHygieneDiagnostic), MaxFileLines(MaxFileLinesDiagnostic), MaxNestingDepth(MaxNestingDepthDiagnostic), NoBifurcatedTraitDispatch(NoBifurcatedTraitDispatchDiagnostic), NoBoxedDynError(NoBoxedDynErrorDiagnostic), NoDoubleNegation(NoDoubleNegationDiagnostic), NoEnvAccessOutsideConfig(NoEnvAccessOutsideConfigDiagnostic), NoHasTraitPrefix(NoHasTraitPrefixDiagnostic), NoInlineMods(NoInlineModsDiagnostic), NoInteriorMutabilityInVisitors(NoInteriorMutabilityInVisitorsDiagnostic), NoNegativeBool(NoNegativeBoolDiagnostic), NoPrimitiveFlagClutter(NoPrimitiveFlagClutterDiagnostic), NoPrintlnInLibraries(NoPrintlnInLibrariesDiagnostic), NoRedundantConversions(NoRedundantConversionsDiagnostic), NoRedundantWrappers(NoRedundantWrappersDiagnostic), NoTestPrefix(NoTestPrefixDiagnostic), NoTrivialGettersSetters(NoTrivialGettersSettersDiagnostic), NoUnsafeInTests(NoUnsafeInTestsDiagnostic), NoWildcardImports(NoWildcardImportsDiagnostic), PathResolution(PathResolutionDiagnostic), PreferScopedClosures(PreferScopedClosuresDiagnostic), RaiiTempDirectories(RaiiTempDirectoriesDiagnostic), SingleMatchToLetElse(SingleMatchToLetElseDiagnostic), TestMatcherBorrowSimplification(TestMatcherBorrowSimplificationDiagnostic), TestPatterns(TestPatternsDiagnostic), UseDeclarationsOverQualifiedPaths(UseDeclarationsOverQualifiedPathsDiagnostic) }` — _Top-level `miette::Diagnostic` enum flattening all built-in `purist` rule diagnostics._
 
 ### Functions
 
@@ -24,14 +25,12 @@
 
 ### Methods
 
-- `pub fn Diagnostic::new(rule: impl Into < String >, severity: Severity, message: impl Into < String >) -> Self` — _Creates a new diagnostic without a span or suggested fix._
-- `pub fn Diagnostic::with_span(mut self, span: Span) -> Self` — _Attaches a source span to the diagnostic._
-- `pub fn Diagnostic::with_suggested_fix(mut self, fix: impl Into < String >) -> Self` — _Attaches a suggested fix to the diagnostic._
 - `pub fn DiagnosticReport::error_count(& self) -> usize` — _Returns the total count of error diagnostics._
 - `pub fn DiagnosticReport::has_errors(& self) -> bool` — _Returns true if any diagnostic has error severity._
 - `pub fn DiagnosticReport::is_empty(& self) -> bool` — _Returns true if there are no diagnostics in the report._
-- `pub fn DiagnosticReport::new(diagnostics: Vec < Diagnostic >) -> Self` — _Creates a new diagnostic report with the given diagnostics, automatically computing summary counts._
+- `pub fn DiagnosticReport::new(diagnostics: Vec < PuristDiagnostic >) -> Self` — _Creates a new diagnostic report with the given diagnostics, automatically computing summary counts._
 - `pub fn DiagnosticReport::warning_count(& self) -> usize` — _Returns the total count of warning diagnostics._
+- `const pub fn EngineDiagnostic::span(& self) -> & Span` — _Returns the source [`Span`] associated with this engine diagnostic._
 - `pub fn PuristCommand::format(& self) -> Option < OutputFormat >` — _Returns the specified output format, if any._
 - `pub fn PuristCommand::is_fix(& self) -> bool` — _Returns whether automated fixing is requested._
 - `pub fn PuristCommand::is_quiet(& self) -> bool` — _Returns whether logging output is suppressed._
@@ -39,10 +38,55 @@
 - `pub fn PuristCommand::path(& self) -> Option < & Path >` — _Returns the target path, if specified._
 - `pub fn PuristCommand::run(self) -> Result < () , PuristError >` — _Runs the purist static analysis checks and renders diagnostics._
 - `pub fn PuristCommand::with_format(mut self, format: OutputFormat) -> Self` — _Sets the output format._
+- `const pub fn PuristDiagnostic::span(& self) -> & Span` — _Returns the source [`Span`] where this diagnostic was triggered._
 - `pub fn PuristEngine::check_path(& self, target_path: & Path) -> Result < DiagnosticReport , std :: io :: Error >` — _Analyzes all Rust files in the specified path (file or directory)._
 - `pub fn PuristEngine::new() -> Self` — _Creates a new engine instance with default purist rules registered._
 - `pub fn Span::new(file: impl Into < PathBuf >, start_line: usize, start_col: usize, end_line: usize, end_col: usize) -> Self` — _Creates a new source code span without byte offsets._
 - `pub fn Span::with_byte_offsets(mut self, start_byte: usize, end_byte: usize) -> Self` — _Attaches byte offsets to the span._
+
+### Re-exports
+
+- `pub use rules::CentralizedCommandExecutionDiagnostic;`
+- `pub use rules::ClapStructEncapsulationDiagnostic;`
+- `pub use rules::CliRunConsumesSelfDiagnostic;`
+- `pub use rules::ClippySuppressionHygieneDiagnostic;`
+- `pub use rules::CommandStructNamingDiagnostic;`
+- `pub use rules::ConfigStructNamingDiagnostic;`
+- `pub use rules::DescriptiveCheckerNamesDiagnostic;`
+- `pub use diagnostics::Diagnostic;`
+- `pub use rules::ErrorTypesDiagnostic;`
+- `pub use rules::ExitCodeHygieneDiagnostic;`
+- `pub use rules::FreeFunctionsDiagnostic;`
+- `pub use rules::GoogletestConventionsDiagnostic;`
+- `pub use rules::GranularVisitorHooksDiagnostic;`
+- `pub use rules::IdiomaticOptionBoolMappingDiagnostic;`
+- `pub use rules::LibFacadeHygieneDiagnostic;`
+- `pub use rules::MaxFileLinesDiagnostic;`
+- `pub use rules::MaxNestingDepthDiagnostic;`
+- `pub use rules::NoBifurcatedTraitDispatchDiagnostic;`
+- `pub use rules::NoBoxedDynErrorDiagnostic;`
+- `pub use rules::NoDoubleNegationDiagnostic;`
+- `pub use rules::NoEnvAccessOutsideConfigDiagnostic;`
+- `pub use rules::NoHasTraitPrefixDiagnostic;`
+- `pub use rules::NoInlineModsDiagnostic;`
+- `pub use rules::NoInteriorMutabilityInVisitorsDiagnostic;`
+- `pub use rules::NoNegativeBoolDiagnostic;`
+- `pub use rules::NoPrimitiveFlagClutterDiagnostic;`
+- `pub use rules::NoPrintlnInLibrariesDiagnostic;`
+- `pub use rules::NoRedundantConversionsDiagnostic;`
+- `pub use rules::NoRedundantWrappersDiagnostic;`
+- `pub use rules::NoTestPrefixDiagnostic;`
+- `pub use rules::NoTrivialGettersSettersDiagnostic;`
+- `pub use rules::NoUnsafeInTestsDiagnostic;`
+- `pub use rules::NoWildcardImportsDiagnostic;`
+- `pub use rules::PathResolutionDiagnostic;`
+- `pub use rules::PreferScopedClosuresDiagnostic;`
+- `pub use rules::RaiiTempDirectoriesDiagnostic;`
+- `pub use diagnostics::Severity;`
+- `pub use rules::SingleMatchToLetElseDiagnostic;`
+- `pub use rules::TestMatcherBorrowSimplificationDiagnostic;`
+- `pub use rules::TestPatternsDiagnostic;`
+- `pub use rules::UseDeclarationsOverQualifiedPathsDiagnostic;`
 
 ## 2. CLI API
 

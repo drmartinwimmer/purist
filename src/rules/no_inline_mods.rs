@@ -29,18 +29,18 @@
 //! ```
 
 use super::common::has_cfg_test_attr;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 
 /// Rule enforcing modular project organization by forbidding inline modules in entry point files.
 pub(crate) struct NoInlineModsRule;
 
-impl Rule for NoInlineModsRule {
-    fn name(&self) -> &'static str {
-        "purist::no_inline_mods"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoInlineModsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoInlineModsDiagnostic> {
         // Only enforce in entry point files (main.rs, lib.rs, bin targets)
         if !ctx.is_main_or_lib() {
             return Vec::new();
@@ -50,7 +50,7 @@ impl Rule for NoInlineModsRule {
 
         for item in &file.items {
             if let syn::Item::Mod(item_mod) = item
-                && let Some(diag) = check_mod_forbidden_inline_in_root(ctx, self.name(), item_mod)
+                && let Some(diag) = check_mod_forbidden_inline_in_root(ctx, item_mod)
             {
                 diagnostics.push(diag);
             }
@@ -63,9 +63,8 @@ impl Rule for NoInlineModsRule {
 /// Checks whether an item module is an unidiomatic inline module in a crate root file.
 fn check_mod_forbidden_inline_in_root(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     item_mod: &syn::ItemMod,
-) -> Option<Diagnostic> {
+) -> Option<NoInlineModsDiagnostic> {
     // Ignore file module declarations (e.g. `mod foo;` without inline body)
     item_mod.content.as_ref()?;
 
@@ -77,26 +76,33 @@ fn check_mod_forbidden_inline_in_root(
     let mod_name = item_mod.ident.to_string();
     let span = ctx.to_span(item_mod.ident.span());
 
-    Some(
-        Diagnostic::new(
-            rule_name,
-            Severity::Warning,
-            format!(
-                "Inline module '{mod_name}' in '{}' violates modularity guidelines. Submodules should be placed in dedicated files.",
-                ctx.file_path().display()
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(format!(
-            "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
-        )),
-    )
+    Some(NoInlineModsDiagnostic {
+        mod_name,
+        file_path: ctx.file_path().display().to_string(),
+        span,
+    })
+}
+
+/// Diagnostic emitted by `purist::no_inline_mods`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Inline module '{mod_name}' in '{file_path}' violates modularity guidelines. Submodules should be placed in dedicated files."
+)]
+#[diagnostic(help(
+    "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
+))]
+pub struct NoInlineModsDiagnostic {
+    pub mod_name: String,
+    pub file_path: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -108,10 +114,16 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_inline_mods"));
-        assert_that!(&diag.message, contains_substring("Inline module 'helpers'"));
         assert_that!(
-            diag.suggested_fix.as_deref(),
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_inline_mods")
+        );
+        assert_that!(
+            diag.to_string(),
+            contains_substring("Inline module 'helpers'")
+        );
+        assert_that!(
+            diag.help().map(|h| h.to_string()).as_deref(),
             eq(Some(
                 "Move module content to 'helpers.rs' or 'helpers/mod.rs' and declare 'mod helpers;'."
             ))

@@ -45,20 +45,20 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging raw `std::env::var` / `set_var` calls outside dedicated config, CLI, or tool modules.
 pub(crate) struct NoEnvAccessOutsideConfigRule;
 
-impl Rule for NoEnvAccessOutsideConfigRule {
-    fn name(&self) -> &'static str {
-        "purist::no_env_access_outside_config"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoEnvAccessOutsideConfigRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoEnvAccessOutsideConfigDiagnostic> {
         if is_exempt_config_path(ctx) {
             return Vec::new();
         }
@@ -96,7 +96,7 @@ struct EnvAccessVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoEnvAccessOutsideConfigDiagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
 }
@@ -150,24 +150,30 @@ impl EnvAccessVisitor<'_> {
             .unwrap_or_else(|| "env".to_string());
         let span = self.ctx.to_span(call.span());
 
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_env_access_outside_config",
-                Severity::Warning,
-                format!(
-                    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI/tool modules. Parse environment parameters in a dedicated configuration layer."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Parse environment variables in a centralized 'config.rs', 'manifest.rs', 'metadata.rs', 'cli.rs', or 'tool' module and pass explicit parameters."),
-        );
+        self.diagnostics
+            .push(NoEnvAccessOutsideConfigDiagnostic { func_name, span });
     }
+}
+
+/// Diagnostic emitted by `purist::no_env_access_outside_config`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI/tool modules. Parse environment parameters in a dedicated configuration layer."
+)]
+#[diagnostic(help(
+    "Parse environment variables in a centralized 'config.rs', 'manifest.rs', 'metadata.rs', 'cli.rs', or 'tool' module and pass explicit parameters."
+))]
+pub struct NoEnvAccessOutsideConfigDiagnostic {
+    pub func_name: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -183,8 +189,11 @@ pub fn connect() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_env_access_outside_config"));
-        assert_that!(&diag.message, contains_substring("std::env::var"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_env_access_outside_config")
+        );
+        assert_that!(diag.to_string(), contains_substring("std::env::var"));
         Ok(())
     }
 

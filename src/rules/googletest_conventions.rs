@@ -43,8 +43,8 @@
 
 use super::common::{TestScope, WithTestScope, has_bare_test_attr, has_framework_test_attr};
 use crate::checkers::check_macro_matches;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -52,12 +52,12 @@ use syn::visit::{self, Visit};
 /// Rule enforcing GoogleTest suite conventions and discouraging legacy test patterns.
 pub(crate) struct GoogletestConventionsRule;
 
-impl Rule for GoogletestConventionsRule {
-    fn name(&self) -> &'static str {
-        "purist::googletest_conventions"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl GoogletestConventionsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<GoogletestConventionsDiagnostic> {
         let mut visitor = GoogletestConventionsVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -73,7 +73,7 @@ impl Rule for GoogletestConventionsRule {
 #[derive(WithTestScope)]
 struct GoogletestConventionsVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<GoogletestConventionsDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -127,17 +127,8 @@ impl GoogletestConventionsVisitor<'_> {
         if has_bare_test && !has_framework_test {
             let span = self.ctx.to_span(ident.span());
             let fn_name = ident.to_string();
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{fn_name}' uses standard '#[test]' attribute. Use '#[googletest::test]' instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace '#[test]' with '#[googletest::test]'."),
-            );
+            self.diagnostics
+                .push(GoogletestConventionsDiagnostic::StandardTestAttr { fn_name, span });
         }
     }
 
@@ -155,28 +146,15 @@ impl GoogletestConventionsVisitor<'_> {
 
         if mac_name == "assert" {
             let span = self.ctx.to_span(mac.path.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    "Usage of 'assert!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with 'assert_that!(actual, matcher)' or 'expect_that!(actual, matcher)'."),
-            );
+            self.diagnostics
+                .push(GoogletestConventionsDiagnostic::StandardAssertMacro { span });
         } else if mac_name == "assert_eq" || mac_name == "assert_ne" {
             let span = self.ctx.to_span(mac.path.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    format!(
-                        "Usage of '{mac_name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))'."),
-            );
+            self.diagnostics
+                .push(GoogletestConventionsDiagnostic::StandardAssertEqMacro {
+                    mac_name: mac_name.to_string(),
+                    span,
+                });
         } else if mac_name == "assert_that" || mac_name == "expect_that" {
             self.check_macro_googletest_assertion(mac);
         }
@@ -185,17 +163,8 @@ impl GoogletestConventionsVisitor<'_> {
     fn check_method_call_expect_in_test(&mut self, call: &syn::ExprMethodCall) {
         if call.method == "expect" {
             let span = self.ctx.to_span(call.method.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::googletest_conventions",
-                    Severity::Warning,
-                    "Avoid calling '.expect(...)' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
-                )
-                .with_span(span)
-                .with_suggested_fix(
-                    "Return 'Result<(), Box<dyn std::error::Error>>' or 'googletest::Result<()>' and use '?' instead of '.expect(...)'.",
-                ),
-            );
+            self.diagnostics
+                .push(GoogletestConventionsDiagnostic::ExpectInTest { span });
         }
     }
 
@@ -220,27 +189,13 @@ impl GoogletestConventionsVisitor<'_> {
                 match bin.op {
                     syn::BinOp::Eq(_) => {
                         let span = self.ctx.to_span(bin.span());
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion compares equality using '=='. Use GoogleTest matcher 'eq(...)' directly on the left operand.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(left, eq(right))'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatBinaryEq { span });
                     }
                     syn::BinOp::Ne(_) => {
                         let span = self.ctx.to_span(bin.span());
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion compares inequality using '!='. Use GoogleTest matcher 'not(eq(...))' directly on the left operand.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(left, not(eq(right)))'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatBinaryNe { span });
                     }
                     _ => {}
                 }
@@ -249,48 +204,20 @@ impl GoogletestConventionsVisitor<'_> {
                 let span = self.ctx.to_span(call.span());
                 match method_name.as_str() {
                     "is_ok" => {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion checks '.is_ok()' using boolean matcher. Use GoogleTest matcher 'ok(...)' directly on the Result.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(target, ok(...))'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatIsOk { span });
                     }
                     "is_err" => {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion checks '.is_err()' using boolean matcher. Use GoogleTest matcher 'err(...)' directly on the Result.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(target, err(...))'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatIsErr { span });
                     }
                     "is_some" => {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion checks '.is_some()' using boolean matcher. Use GoogleTest matcher 'some(...)' directly on the Option.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(target, some(...))'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatIsSome { span });
                     }
                     "is_none" => {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                "purist::googletest_conventions",
-                                Severity::Warning,
-                                "Assertion checks '.is_none()' using boolean matcher. Use GoogleTest matcher 'none()' directly on the Option.",
-                            )
-                            .with_span(span)
-                            .with_suggested_fix("Replace with 'assert_that!(target, none())'."),
-                        );
+                        self.diagnostics
+                            .push(GoogletestConventionsDiagnostic::AssertThatIsNone { span });
                     }
                     _ => {}
                 }
@@ -331,10 +258,73 @@ fn is_true_matcher(expr: &syn::Expr) -> bool {
     }
 }
 
+/// Diagnostics emitted by `purist::googletest_conventions`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum GoogletestConventionsDiagnostic {
+    #[error(
+        "Test function '{fn_name}' uses standard '#[test]' attribute. Use '#[googletest::test]' instead."
+    )]
+    #[diagnostic(help("Replace '#[test]' with '#[googletest::test]'."))]
+    StandardTestAttr { fn_name: String, span: Span },
+
+    #[error(
+        "Usage of 'assert!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
+    )]
+    #[diagnostic(help(
+        "Replace with 'assert_that!(actual, matcher)' or 'expect_that!(actual, matcher)'."
+    ))]
+    StandardAssertMacro { span: Span },
+    #[error(
+        "Usage of '{mac_name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(actual, eq(expected))'."))]
+    StandardAssertEqMacro { mac_name: String, span: Span },
+
+    #[error(
+        "Avoid calling '.expect(...)' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers."
+    )]
+    #[diagnostic(help(
+        "Return 'Result<(), Box<dyn std::error::Error>>' or 'googletest::Result<()>' and use '?' instead of '.expect(...)'."
+    ))]
+    ExpectInTest { span: Span },
+    #[error(
+        "Assertion compares equality using '=='. Use GoogleTest matcher 'eq(...)' directly on the left operand."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(left, eq(right))'."))]
+    AssertThatBinaryEq { span: Span },
+    #[error(
+        "Assertion compares inequality using '!='. Use GoogleTest matcher 'not(eq(...))' directly on the left operand."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(left, not(eq(right)))'."))]
+    AssertThatBinaryNe { span: Span },
+    #[error(
+        "Assertion checks '.is_ok()' using boolean matcher. Use GoogleTest matcher 'ok(...)' directly on the Result."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(target, ok(...))'."))]
+    AssertThatIsOk { span: Span },
+    #[error(
+        "Assertion checks '.is_err()' using boolean matcher. Use GoogleTest matcher 'err(...)' directly on the Result."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(target, err(...))'."))]
+    AssertThatIsErr { span: Span },
+    #[error(
+        "Assertion checks '.is_some()' using boolean matcher. Use GoogleTest matcher 'some(...)' directly on the Option."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(target, some(...))'."))]
+    AssertThatIsSome { span: Span },
+    #[error(
+        "Assertion checks '.is_none()' using boolean matcher. Use GoogleTest matcher 'none()' directly on the Option."
+    )]
+    #[diagnostic(help("Replace with 'assert_that!(target, none())'."))]
+    AssertThatIsNone { span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -349,9 +339,12 @@ fn parse_manifest_succeeds() {}
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("uses standard '#[test]' attribute")
         );
         Ok(())
@@ -385,9 +378,12 @@ fn check_condition_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Usage of 'assert!' in test")
         );
         Ok(())
@@ -407,9 +403,12 @@ fn check_equality_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Usage of 'assert_eq!' in test")
         );
         Ok(())
@@ -429,9 +428,12 @@ fn check_parsing_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Avoid calling '.expect(...)' in test bodies")
         );
         Ok(())
@@ -451,9 +453,12 @@ fn check_equality_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Assertion compares equality using '=='")
         );
         Ok(())
@@ -474,9 +479,12 @@ fn check_inequality_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Assertion compares inequality using '!='")
         );
         Ok(())
@@ -497,9 +505,12 @@ fn check_result_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Assertion checks '.is_ok()' using boolean matcher")
         );
         Ok(())
@@ -520,9 +531,12 @@ fn check_option_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::googletest_conventions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::googletest_conventions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Assertion checks '.is_some()' using boolean matcher")
         );
         Ok(())

@@ -11,6 +11,7 @@ description = "Derive macros for the purist AST linter scope traits"
 proc-macro = true
 
 [dependencies]
+heck = "0.5"
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "3.0", features = ["full", "extra-traits"] }

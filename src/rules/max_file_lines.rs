@@ -26,8 +26,8 @@
 //! ```
 
 use super::common::count_production_lines;
-use crate::diagnostics::{Diagnostic, Severity, Span};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 
 /// Default maximum allowed lines of production code in a single file (excluding `#[cfg(test)]`).
 pub const DEFAULT_MAX_PRODUCTION_LINES: usize = 600;
@@ -38,12 +38,12 @@ pub const DEFAULT_MAX_TOTAL_LINES: usize = 1000;
 /// Rule enforcing boundaries on source file line lengths.
 pub(crate) struct MaxFileLinesRule;
 
-impl Rule for MaxFileLinesRule {
-    fn name(&self) -> &'static str {
-        "purist::max_file_lines"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl MaxFileLinesRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<MaxFileLinesDiagnostic> {
         let mut diagnostics = Vec::new();
         let total_lines = ctx.source().lines().count();
         let file_name = ctx
@@ -66,17 +66,12 @@ impl Rule for MaxFileLinesRule {
             // Check test file against total lines limit
             if total_lines > max_total_lines {
                 let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
-                diagnostics.push(
-                    Diagnostic::new(
-                        self.name(),
-                        Severity::Warning,
-                        format!(
-                            "Test file '{file_name}' exceeds maximum length ({total_lines} lines, limit is {max_total_lines}). Split large test suites into focused sub-modules or separate integration test files.",
-                        ),
-                    )
-                    .with_span(first_line_span)
-                    .with_suggested_fix("Split tests across multiple integration test files or helper modules."),
-                );
+                diagnostics.push(MaxFileLinesDiagnostic::TestFileTooLong {
+                    file_name: file_name.to_string(),
+                    total_lines,
+                    max_total_lines,
+                    span: first_line_span,
+                });
             }
             return diagnostics;
         }
@@ -85,21 +80,45 @@ impl Rule for MaxFileLinesRule {
         let prod_lines = count_production_lines(file, ctx.source());
         if prod_lines > max_production_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
-            diagnostics.push(
-                Diagnostic::new(
-                    self.name(),
-                    Severity::Warning,
-                    format!(
-                        "Source file '{file_name}' exceeds maximum production length ({prod_lines} production lines, limit is {max_production_lines}). Decompose into smaller, cohesive submodules.",
-                    ),
-                )
-                .with_span(first_line_span)
-                .with_suggested_fix("Extract distinct responsibilities into submodules declared with 'mod <name>;'."),
-            );
+            diagnostics.push(MaxFileLinesDiagnostic::SourceFileTooLong {
+                file_name: file_name.to_string(),
+                prod_lines,
+                max_production_lines,
+                span: first_line_span,
+            });
         }
 
         diagnostics
     }
+}
+
+/// Diagnostics emitted by `purist::max_file_lines`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum MaxFileLinesDiagnostic {
+    #[error(
+        "Test file '{file_name}' exceeds maximum length ({total_lines} lines, limit is {max_total_lines}). Split large test suites into focused sub-modules or separate integration test files."
+    )]
+    #[diagnostic(help("Split tests across multiple integration test files or helper modules."))]
+    TestFileTooLong {
+        file_name: String,
+        total_lines: usize,
+        max_total_lines: usize,
+        span: Span,
+    },
+
+    #[error(
+        "Source file '{file_name}' exceeds maximum production length ({prod_lines} production lines, limit is {max_production_lines}). Decompose into smaller, cohesive submodules."
+    )]
+    #[diagnostic(help(
+        "Extract distinct responsibilities into submodules declared with 'mod <name>;'."
+    ))]
+    SourceFileTooLong {
+        file_name: String,
+        prod_lines: usize,
+        max_production_lines: usize,
+        span: Span,
+    },
 }
 
 #[cfg(test)]
@@ -131,7 +150,7 @@ mod tests {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            diag.message,
+            diag.to_string(),
             contains_substring("exceeds maximum production length")
         );
         Ok(())
@@ -211,7 +230,7 @@ mod tests {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            diag.message,
+            diag.to_string(),
             contains_substring("Test file 'huge_integration_test.rs' exceeds maximum length")
         );
         Ok(())

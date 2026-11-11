@@ -35,20 +35,20 @@
 
 use super::common::{TestScope, WithTestScope, path_ends_with_ident};
 use crate::checkers::extract_fn_return_type;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule banning `Box<dyn std::error::Error>` in production code return types.
 pub(crate) struct NoBoxedDynErrorRule;
 
-impl Rule for NoBoxedDynErrorRule {
-    fn name(&self) -> &'static str {
-        "purist::no_boxed_dyn_error"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoBoxedDynErrorRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoBoxedDynErrorDiagnostic> {
         let mut visitor = BoxedDynErrorVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -66,7 +66,7 @@ struct BoxedDynErrorVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoBoxedDynErrorDiagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
 }
@@ -116,7 +116,7 @@ fn check_fn_signature_boxed_dyn_error(
     ctx: &LintContext<'_>,
     in_test: bool,
     sig: &syn::Signature,
-) -> Option<Diagnostic> {
+) -> Option<NoBoxedDynErrorDiagnostic> {
     if in_test {
         return None;
     }
@@ -135,17 +135,7 @@ fn check_fn_signature_boxed_dyn_error(
     }
 
     let span = ctx.to_span(sig.output.span());
-    Some(
-        Diagnostic::new(
-            "purist::no_boxed_dyn_error",
-            Severity::Error,
-            format!(
-                "Function '{fn_name}' returns 'Box<dyn Error>'. Return a concrete domain error enum deriving 'thiserror::Error' instead."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Return a concrete domain error enum deriving 'thiserror::Error' with appropriate '#[from]' conversions."),
-    )
+    Some(NoBoxedDynErrorDiagnostic { fn_name, span })
 }
 
 /// Recursively detects whether a type contains `Box<dyn Error>` or any trait object targeting `Error`.
@@ -194,10 +184,29 @@ fn is_dyn_error_trait(ty: &syn::Type) -> bool {
     }
 }
 
+/// Diagnostic emitted by `purist::no_boxed_dyn_error`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Function '{fn_name}' returns 'Box<dyn Error>'. Return a concrete domain error enum deriving 'thiserror::Error' instead."
+)]
+#[diagnostic(
+    severity(Error),
+    help(
+        "Return a concrete domain error enum deriving 'thiserror::Error' with appropriate '#[from]' conversions."
+    )
+)]
+pub struct NoBoxedDynErrorDiagnostic {
+    pub fn_name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -209,9 +218,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_boxed_dyn_error"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_boxed_dyn_error")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Function 'run' returns 'Box<dyn Error>'")
         );
         Ok(())
@@ -226,7 +238,10 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(diag.severity, eq(Severity::Error));
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Error)
+        );
         Ok(())
     }
 
