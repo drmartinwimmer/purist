@@ -25,8 +25,9 @@
 //! fn read_config() { ... }
 //! ```
 
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -35,7 +36,7 @@ pub(crate) struct ClippySuppressRule;
 
 impl Rule for ClippySuppressRule {
     fn name(&self) -> &'static str {
-        "purist::clippy_suppression_hygiene"
+        RuleId::ClippySuppressionHygiene.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -83,33 +84,15 @@ fn check_attr_clippy_suppression(
     let span = ctx.to_span(attr.span());
 
     match (has_reason, has_comment) {
-        (false, false) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add reason = \"...\" to the attribute and document the rationale in a comment directly above it."),
-        ),
-        (false, true) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add reason = \"...\" parameter to the suppression attribute."),
-        ),
-        (true, false) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add an explanatory '// ...' comment on the line immediately preceding the attribute."),
-        ),
+        (false, false) => {
+            Some(ArchitectureDiagnostic::SuppressionMissingReasonAndComment.into_diagnostic(span))
+        }
+        (false, true) => {
+            Some(ArchitectureDiagnostic::SuppressionMissingReason.into_diagnostic(span))
+        }
+        (true, false) => {
+            Some(ArchitectureDiagnostic::SuppressionMissingComment.into_diagnostic(span))
+        }
         (true, true) => None,
     }
 }

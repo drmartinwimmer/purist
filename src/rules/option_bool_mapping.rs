@@ -24,8 +24,9 @@
 //! ```
 
 use super::common::path_ends_with_ident;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -34,7 +35,7 @@ pub(crate) struct OptionBoolMappingRule;
 
 impl Rule for OptionBoolMappingRule {
     fn name(&self) -> &'static str {
-        "purist::idiomatic_option_bool_mapping"
+        RuleId::IdiomaticOptionBoolMapping.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -83,24 +84,8 @@ fn check_expr_if_verbose_option_mapping(
         let else_kind = inspect_else_kind(else_box);
         let span = ctx.to_span(expr_if.span());
         match else_kind {
-            ElseKind::False => Some(
-                Diagnostic::new(
-                    "purist::idiomatic_option_bool_mapping",
-                    Severity::Warning,
-                    "Manual 'if let Some(...) = ... else { false }' construct. Use '.is_some_and(...)' instead.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with '.is_some_and(|val| ...)'."),
-            ),
-            ElseKind::NoneVal => Some(
-                Diagnostic::new(
-                    "purist::idiomatic_option_bool_mapping",
-                    Severity::Warning,
-                    "Manual 'if let Some(...) = ... else { None }' construct. Use functional combinators like '.and_then(...)' or '.map(...)'.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace with '.and_then(...)' or '.map(...)'. "),
-            ),
+            ElseKind::False => Some(HygieneDiagnostic::IfLetSomeElseFalse.into_diagnostic(span)),
+            ElseKind::NoneVal => Some(HygieneDiagnostic::IfLetSomeElseNone.into_diagnostic(span)),
             ElseKind::Other => None,
         }
     } else {

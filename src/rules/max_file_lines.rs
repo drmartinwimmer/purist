@@ -26,8 +26,9 @@
 //! ```
 
 use super::common::count_production_lines;
-use crate::diagnostics::{Diagnostic, Severity, Span};
+use crate::diagnostics::{Diagnostic, Span};
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 
 /// Default maximum allowed lines of production code in a single file (excluding `#[cfg(test)]`).
 pub const DEFAULT_MAX_PRODUCTION_LINES: usize = 600;
@@ -40,7 +41,7 @@ pub(crate) struct MaxFileLinesRule;
 
 impl Rule for MaxFileLinesRule {
     fn name(&self) -> &'static str {
-        "purist::max_file_lines"
+        RuleId::MaxFileLines.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -67,15 +68,12 @@ impl Rule for MaxFileLinesRule {
             if total_lines > max_total_lines {
                 let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
                 diagnostics.push(
-                    Diagnostic::new(
-                        self.name(),
-                        Severity::Warning,
-                        format!(
-                            "Test file '{file_name}' exceeds maximum length ({total_lines} lines, limit is {max_total_lines}). Split large test suites into focused sub-modules or separate integration test files.",
-                        ),
-                    )
-                    .with_span(first_line_span)
-                    .with_suggested_fix("Split tests across multiple integration test files or helper modules."),
+                    ArchitectureDiagnostic::TestFileTooLong {
+                        file_name: file_name.to_string(),
+                        total_lines,
+                        max_total_lines,
+                    }
+                    .into_diagnostic(first_line_span),
                 );
             }
             return diagnostics;
@@ -86,15 +84,12 @@ impl Rule for MaxFileLinesRule {
         if prod_lines > max_production_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
             diagnostics.push(
-                Diagnostic::new(
-                    self.name(),
-                    Severity::Warning,
-                    format!(
-                        "Source file '{file_name}' exceeds maximum production length ({prod_lines} production lines, limit is {max_production_lines}). Decompose into smaller, cohesive submodules.",
-                    ),
-                )
-                .with_span(first_line_span)
-                .with_suggested_fix("Extract distinct responsibilities into submodules declared with 'mod <name>;'."),
+                ArchitectureDiagnostic::SourceFileTooLong {
+                    file_name: file_name.to_string(),
+                    prod_lines,
+                    max_production_lines,
+                }
+                .into_diagnostic(first_line_span),
             );
         }
 

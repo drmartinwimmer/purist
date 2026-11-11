@@ -7,6 +7,7 @@ use crate::PuristError;
 use crate::cargo::CargoManifest;
 use crate::diagnostics::DiagnosticReport;
 use crate::discovery::{find_cargo_toml, find_workspace_cargo_toml};
+use crate::rule_diagnostics::RuleId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,56 +15,7 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 /// Returns the canonical rule name if `rule_name` is a known purist lint rule.
 pub(crate) fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
-    let stripped = rule_name
-        .strip_prefix("purist::")
-        .or_else(|| rule_name.strip_prefix("opinionated::"))
-        .unwrap_or(rule_name);
-
-    match stripped {
-        "no_inline_mods" => Some("no_inline_mods"),
-        "free_functions" => Some("free_functions"),
-        "path_resolution" => Some("path_resolution"),
-        "error_types" => Some("error_types"),
-        "clippy_suppression_hygiene" => Some("clippy_suppression_hygiene"),
-        "test_patterns" => Some("test_patterns"),
-        "no_redundant_conversions" => Some("no_redundant_conversions"),
-        "use_declarations_over_qualified_paths" => Some("use_declarations_over_qualified_paths"),
-        "no_redundant_wrappers" => Some("no_redundant_wrappers"),
-        "no_boxed_dyn_error" => Some("no_boxed_dyn_error"),
-        "test_matcher_borrow_simplification" => Some("test_matcher_borrow_simplification"),
-        "no_test_prefix" => Some("no_test_prefix"),
-        "no_unsafe_in_tests" => Some("no_unsafe_in_tests"),
-        "centralized_command_execution" => Some("centralized_command_execution"),
-        "clap_struct_encapsulation" => Some("clap_struct_encapsulation"),
-        "command_struct_naming" => Some("command_struct_naming"),
-        "config_struct_naming" => Some("config_struct_naming"),
-        "exit_code_hygiene" => Some("exit_code_hygiene"),
-        "idiomatic_option_bool_mapping" => Some("idiomatic_option_bool_mapping"),
-        "no_wildcard_imports" => Some("no_wildcard_imports"),
-        "no_env_access_outside_config" => Some("no_env_access_outside_config"),
-        "single_match_to_let_else" => Some("single_match_to_let_else"),
-        "raii_temp_directories" => Some("raii_temp_directories"),
-        "no_println_in_libraries" => Some("no_println_in_libraries"),
-        "cli_run_consumes_self" => Some("cli_run_consumes_self"),
-        "no_double_negation" => Some("no_double_negation"),
-        "googletest_conventions" => Some("googletest_conventions"),
-        "max_file_lines" => Some("max_file_lines"),
-        "no_trivial_getters_setters"
-        | "no_trivial_getset"
-        | "trivial_getters_setters"
-        | "trivial_getset" => Some("no_trivial_getters_setters"),
-        "max_nesting_depth" => Some("max_nesting_depth"),
-        "lib_facade_hygiene" => Some("lib_facade_hygiene"),
-        "no_negative_bool" => Some("no_negative_bool"),
-        "no_has_trait_prefix" => Some("no_has_trait_prefix"),
-        "granular_visitor_hooks" => Some("granular_visitor_hooks"),
-        "no_bifurcated_trait_dispatch" => Some("no_bifurcated_trait_dispatch"),
-        "no_primitive_flag_clutter" => Some("no_primitive_flag_clutter"),
-        "no_interior_mutability_in_visitors" => Some("no_interior_mutability_in_visitors"),
-        "prefer_scoped_closures" => Some("prefer_scoped_closures"),
-        "descriptive_checker_names" => Some("descriptive_checker_names"),
-        _ => None,
-    }
+    RuleId::from_name(rule_name).map(RuleId::as_str)
 }
 
 /// Checks whether a manifest specifies `[lints] workspace = true`.

@@ -50,8 +50,9 @@
 //! ```
 
 use super::common::{extract_type_ident, has_cfg_test_attr, has_test_attr};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TestScope, WithTestScope, derives_clap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::{self, Visit};
@@ -61,7 +62,7 @@ pub(crate) struct NoTrivialGettersSettersRule;
 
 impl Rule for NoTrivialGettersSettersRule {
     fn name(&self) -> &'static str {
-        "purist::no_trivial_getters_setters"
+        RuleId::NoTrivialGettersSetters.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -81,13 +82,7 @@ impl Rule for NoTrivialGettersSettersRule {
             if visitor.exempt_structs.contains(struct_name) {
                 continue;
             }
-            check_struct_getter_setter_combos(
-                ctx,
-                self.name(),
-                struct_name,
-                methods,
-                &mut diagnostics,
-            );
+            check_struct_getter_setter_combos(ctx, struct_name, methods, &mut diagnostics);
         }
 
         diagnostics.sort_by_key(|d| {
@@ -209,7 +204,6 @@ fn is_exempt_method(item_fn: &syn::ImplItemFn) -> bool {
 
 struct DiagEmitter<'a, 'c> {
     ctx: &'a LintContext<'c>,
-    rule_name: &'static str,
     struct_name: &'a str,
     field_name: &'a str,
     diagnostics: &'a mut Vec<Diagnostic>,
@@ -217,18 +211,15 @@ struct DiagEmitter<'a, 'c> {
 
 impl DiagEmitter<'_, '_> {
     fn emit(&mut self, method: &MethodInfo<'_>, kind: &str, partner_name: &str) {
-        let msg = format!(
-            "Method '{}' is a trivial {kind} for field '{}' on struct '{}' which forms a trivial getter/setter combo with '{partner_name}'. Trivial getter/setter combos add unnecessary indirection (YAGNI).",
-            method.name, self.field_name, self.struct_name
-        );
-        let fix = format!(
-            "Remove trivial {kind} '{}' and access field '{}' directly.",
-            method.name, self.field_name
-        );
         self.diagnostics.push(
-            Diagnostic::new(self.rule_name, Severity::Warning, msg)
-                .with_span(self.ctx.to_span(method.span))
-                .with_suggested_fix(fix),
+            HygieneDiagnostic::TrivialGetterSetterCombo {
+                method_name: method.name.clone(),
+                kind: kind.to_string(),
+                field_name: self.field_name.to_string(),
+                struct_name: self.struct_name.to_string(),
+                partner_name: partner_name.to_string(),
+            }
+            .into_diagnostic(self.ctx.to_span(method.span)),
         );
     }
 }
@@ -236,7 +227,6 @@ impl DiagEmitter<'_, '_> {
 /// Checks methods of a struct for trivial getter/setter combos.
 fn check_struct_getter_setter_combos(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     struct_name: &str,
     methods: &[MethodInfo<'_>],
     diagnostics: &mut Vec<Diagnostic>,
@@ -274,7 +264,6 @@ fn check_struct_getter_setter_combos(
 
         let mut emitter = DiagEmitter {
             ctx,
-            rule_name,
             struct_name,
             field_name,
             diagnostics,

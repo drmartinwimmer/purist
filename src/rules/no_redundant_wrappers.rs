@@ -23,8 +23,9 @@
 //! ```
 
 use super::common::has_test_attr;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 
@@ -33,7 +34,7 @@ pub(crate) struct NoRedundantWrappersRule;
 
 impl Rule for NoRedundantWrappersRule {
     fn name(&self) -> &'static str {
-        "purist::no_redundant_wrappers"
+        RuleId::NoRedundantWrappers.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -54,17 +55,11 @@ impl Rule for NoRedundantWrappersRule {
                     let span = ctx.to_span(item_fn.sig.ident.span());
                     let fn_name = item_fn.sig.ident.to_string();
                     diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Function '{fn_name}' is a redundant wrapper that merely forwards to '{target_desc}'. Call '{target_desc}' directly."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix(format!(
-                            "Remove wrapper function '{fn_name}' and call '{target_desc}' directly at call sites."
-                        )),
+                        HygieneDiagnostic::RedundantWrapperFn {
+                            fn_name,
+                            target_desc,
+                        }
+                        .into_diagnostic(span),
                     );
                 }
             }

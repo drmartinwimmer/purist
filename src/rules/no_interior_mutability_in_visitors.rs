@@ -26,8 +26,9 @@
 //! ```
 
 use super::common::{extract_type_ident, has_suppression_attribute, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -38,7 +39,7 @@ pub(crate) struct NoInteriorMutabilityInVisitorsRule;
 
 impl Rule for NoInteriorMutabilityInVisitorsRule {
     fn name(&self) -> &'static str {
-        "purist::no_interior_mutability_in_visitors"
+        RuleId::NoInteriorMutabilityInVisitors.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -93,15 +94,12 @@ impl<'ast> Visit<'ast> for VisitorFieldScanner<'_> {
             let span = self.ctx.to_span(field.span());
 
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_interior_mutability_in_visitors",
-                    Severity::Warning,
-                    format!(
-                        "Visitor struct '{struct_name}' declares field '{field_name}' with interior mutability ('{bad_type}'). AST visitors provide '&mut self' during single-threaded traversal; use direct mutable fields or stack types instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace interior mutability with direct mutable fields or a stack."),
+                ArchitectureDiagnostic::VisitorInteriorMutability {
+                    struct_name: struct_name.clone(),
+                    field_name,
+                    bad_type: bad_type.to_string(),
+                }
+                .into_diagnostic(span),
             );
         }
         visit::visit_field(self, field);
@@ -170,6 +168,7 @@ fn find_in_type_args(args: &syn::AngleBracketedGenericArguments) -> Option<&'sta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

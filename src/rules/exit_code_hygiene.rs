@@ -48,8 +48,9 @@
 
 use super::common::path_ends_with_ident;
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{MainScope, WithMainScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -59,7 +60,7 @@ pub(crate) struct ExitCodeHygieneRule;
 
 impl Rule for ExitCodeHygieneRule {
     fn name(&self) -> &'static str {
-        "purist::exit_code_hygiene"
+        RuleId::ExitCodeHygiene.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -120,17 +121,8 @@ impl ExitCodeVisitor<'_> {
 
         let span = self.ctx.to_span(item_fn.sig.output.span());
         let fn_name = item_fn.sig.ident.to_string();
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::exit_code_hygiene",
-                Severity::Warning,
-                format!(
-                    "Function '{fn_name}' returns 'ExitCode'. Library functions must return 'Result' and let the CLI entrypoint handle exit codes."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Change return type to 'Result<...>' and propagate errors to the caller."),
-        );
+        self.diagnostics
+            .push(ArchitectureDiagnostic::FnReturnsExitCode { fn_name }.into_diagnostic(span));
     }
 
     /// Inspects a call expression for `process::exit`, returning diagnostics for raw integer codes or calls outside `main()`.
@@ -146,28 +138,14 @@ impl ExitCodeVisitor<'_> {
         if let Some(syn::Expr::Lit(expr_lit)) = call.args.first()
             && matches!(expr_lit.lit, syn::Lit::Int(_))
         {
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::exit_code_hygiene",
-                    Severity::Warning,
-                    "Raw integer literal passed to 'exit(...)'. Use 'ExitCode::SUCCESS' or 'ExitCode::FAILURE' instead.",
-                )
-                .with_span(span.clone())
-                .with_suggested_fix("Replace integer literal with 'ExitCode::SUCCESS' or 'ExitCode::FAILURE'."),
-            );
+            self.diagnostics
+                .push(ArchitectureDiagnostic::RawIntProcessExit.into_diagnostic(span.clone()));
         }
 
         // Check if exit is called outside of main function in main.rs
         if !self.main_scope.is_in_main() {
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::exit_code_hygiene",
-                    Severity::Warning,
-                    "Direct invocation of 'process::exit' outside 'main()'. Propagate errors using 'Result' instead.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Propagate errors via 'Result' and handle exit codes strictly in 'fn main() -> ExitCode'."),
-            );
+            self.diagnostics
+                .push(ArchitectureDiagnostic::ProcessExitOutsideMain.into_diagnostic(span));
         }
     }
 }

@@ -9,6 +9,7 @@ mod discovery;
 mod engine;
 mod reporter;
 mod rule_config;
+mod rule_diagnostics;
 mod rules;
 mod scopes;
 

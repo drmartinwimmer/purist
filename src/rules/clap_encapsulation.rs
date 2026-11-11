@@ -35,8 +35,9 @@
 //! }
 //! ```
 
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     ClapScope, TestScope, WithClapScope, WithTestScope, is_command_execution_fn_name,
     is_command_struct_name, is_flattened_field,
@@ -50,7 +51,7 @@ pub(crate) struct ClapEncapsulationRule;
 
 impl Rule for ClapEncapsulationRule {
     fn name(&self) -> &'static str {
-        "purist::clap_struct_encapsulation"
+        RuleId::ClapStructEncapsulation.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -145,22 +146,18 @@ impl ClapEncapsulationVisitor<'_> {
         if requires_run_method && !self.struct_has_run_method.contains(&struct_name) {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::clap_struct_encapsulation",
-                    Severity::Warning,
-                    format!(
-                        "Clap command struct '{struct_name}' lacks an associated 'run' or 'execute' method. Encapsulate execution inside an associated method."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Implement 'pub fn run(self, ...)' for this command struct."),
+                ArchitectureDiagnostic::ClapMissingRunMethod { struct_name }.into_diagnostic(span),
             );
         }
     }
 
     fn check_clap_field_public_visibility(&mut self, field: &syn::Field) {
         if matches!(field.vis, syn::Visibility::Public(_)) && !is_flattened_field(field) {
-            let struct_name = self.clap_scope.current_struct_name().unwrap_or("unknown");
+            let struct_name = self
+                .clap_scope
+                .current_struct_name()
+                .unwrap_or("unknown")
+                .to_string();
             let field_name = field
                 .ident
                 .as_ref()
@@ -168,15 +165,11 @@ impl ClapEncapsulationVisitor<'_> {
                 .unwrap_or_else(|| "unnamed".to_string());
             let span = self.ctx.to_span(field.vis.span());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::clap_struct_encapsulation",
-                    Severity::Warning,
-                    format!(
-                        "Field '{field_name}' in Clap struct '{struct_name}' is declared public. Clap argument fields should remain private to encapsulate command execution."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Make field private and encapsulate logic within struct methods."),
+                ArchitectureDiagnostic::ClapPublicField {
+                    field_name,
+                    struct_name,
+                }
+                .into_diagnostic(span),
             );
         }
     }

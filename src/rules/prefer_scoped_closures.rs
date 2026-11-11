@@ -27,8 +27,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use quote::ToTokens;
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -40,7 +41,7 @@ pub(crate) struct PreferScopedClosuresRule;
 
 impl Rule for PreferScopedClosuresRule {
     fn name(&self) -> &'static str {
-        "purist::prefer_scoped_closures"
+        RuleId::PreferScopedClosures.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -111,15 +112,12 @@ impl LifecycleVisitor<'_> {
                 {
                     let span = self.ctx.to_span(enter_call.span());
                     self.diagnostics.push(
-                        Diagnostic::new(
-                            "purist::prefer_scoped_closures",
-                            Severity::Warning,
-                            format!(
-                                "Manual paired lifecycle calls ('{enter_name}' / '{method_name}') on '{receiver_key}'. Use a scoped closure ('with_...') or RAII guard to guarantee state restoration on error or early return."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Replace manual push/pop with a scoped closure or RAII guard."),
+                        ArchitectureDiagnostic::ManualPairedLifecycleCalls {
+                            enter_name,
+                            exit_name: method_name,
+                            receiver_key,
+                        }
+                        .into_diagnostic(span),
                     );
                 }
             }
@@ -148,6 +146,7 @@ fn is_exit_lifecycle_method(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

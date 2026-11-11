@@ -30,8 +30,9 @@
 use super::common::{
     count_production_lines, has_cfg_test_attr, has_suppression_attribute, has_test_attr,
 };
-use crate::diagnostics::{Diagnostic, Severity, Span};
+use crate::diagnostics::{Diagnostic, Span};
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::{Item, Visibility};
 
@@ -46,7 +47,7 @@ pub(crate) struct LibFacadeHygieneRule;
 
 impl Rule for LibFacadeHygieneRule {
     fn name(&self) -> &'static str {
-        "purist::lib_facade_hygiene"
+        RuleId::LibFacadeHygiene.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -78,15 +79,11 @@ impl Rule for LibFacadeHygieneRule {
         if prod_lines > max_prod_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
             diagnostics.push(
-                Diagnostic::new(
-                    self.name(),
-                    Severity::Warning,
-                    format!(
-                        "Library root 'lib.rs' is too large ({prod_lines} production lines, limit is {max_prod_lines}). Keep 'lib.rs' as a concise facade index.",
-                    ),
-                )
-                .with_span(first_line_span)
-                .with_suggested_fix("Move domain logic, command definitions, or helpers into dedicated submodules and re-export them from lib.rs."),
+                ArchitectureDiagnostic::LibRsTooLarge {
+                    prod_lines,
+                    max_prod_lines,
+                }
+                .into_diagnostic(first_line_span),
             );
         }
 
@@ -103,17 +100,14 @@ impl Rule for LibFacadeHygieneRule {
                 let fn_lines = end_line.saturating_sub(start_line) + 1;
 
                 if fn_lines > max_fn_lines {
-                    let fn_name = &item_fn.sig.ident;
+                    let fn_name = item_fn.sig.ident.to_string();
                     diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Function '{fn_name}' in 'lib.rs' is too long ({fn_lines} lines, limit is {max_fn_lines}). Functions in 'lib.rs' should be brief facade delegates.",
-                            ),
-                        )
-                        .with_span(ctx.to_span(span))
-                        .with_suggested_fix(format!("Move the implementation of '{fn_name}' into a dedicated submodule and re-export it.")),
+                        ArchitectureDiagnostic::LibRsFnTooLong {
+                            fn_name,
+                            fn_lines,
+                            max_fn_lines,
+                        }
+                        .into_diagnostic(ctx.to_span(span)),
                     );
                 }
             } else if let Item::Mod(item_mod) = item
@@ -127,17 +121,8 @@ impl Rule for LibFacadeHygieneRule {
                     "command" | "commands" | "tool" | "tools" | "cmd"
                 ) {
                     diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Public module 'pub mod {mod_name};' in 'lib.rs' exposes internal command/tool adapters in the public library API. Use 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export only public facade types via 'pub use'."
-                            ),
-                        )
-                        .with_span(ctx.to_span(item_mod.ident.span()))
-                        .with_suggested_fix(format!(
-                            "Change 'pub mod {mod_name};' to 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export intended public types at the crate root."
-                        )),
+                        ArchitectureDiagnostic::LibRsPubAdapterMod { mod_name }
+                            .into_diagnostic(ctx.to_span(item_mod.ident.span())),
                     );
                 }
             }

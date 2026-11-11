@@ -36,8 +36,9 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::{check_macro_matches, check_method_call_matches_name};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -46,7 +47,7 @@ pub(crate) struct TestPatternsRule;
 
 impl Rule for TestPatternsRule {
     fn name(&self) -> &'static str {
-        "purist::test_patterns"
+        RuleId::TestPatterns.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -114,17 +115,8 @@ impl TestVisitor<'_> {
 
         if segments.len() < 3 {
             let span = self.ctx.to_span(ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::test_patterns",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Rename test to follow '<verb>_<description>_<outcome>' (e.g. 'parse_valid_input_succeeds')."),
-            );
+            self.diagnostics
+                .push(HygieneDiagnostic::ShortTestFnName { name }.into_diagnostic(span));
         }
     }
 
@@ -137,15 +129,10 @@ impl TestVisitor<'_> {
 
         let span = self.ctx.to_span(mac.path.span());
         self.diagnostics.push(
-            Diagnostic::new(
-                "purist::test_patterns",
-                Severity::Warning,
-                format!(
-                    "Usage of '{name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))' or 'expect_that!(actual, eq(expected))'."),
+            HygieneDiagnostic::LegacyAssertionMacroInTest {
+                macro_name: name.to_string(),
+            }
+            .into_diagnostic(span),
         );
     }
 
@@ -153,15 +140,8 @@ impl TestVisitor<'_> {
     fn check_method_call_unwrap_in_test(&mut self, call: &syn::ExprMethodCall) {
         if check_method_call_matches_name(call, &["unwrap"]) {
             let span = self.ctx.to_span(call.method.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::test_patterns",
-                    Severity::Warning,
-                    "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Return Result<(), Box<dyn std::error::Error>> or googletest::Result<()> and use '?' instead of '.unwrap()'."),
-            );
+            self.diagnostics
+                .push(HygieneDiagnostic::UnwrapInTest.into_diagnostic(span));
         }
     }
 }

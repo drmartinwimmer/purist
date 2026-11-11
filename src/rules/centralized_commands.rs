@@ -34,8 +34,9 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -44,7 +45,7 @@ pub(crate) struct CentralizedCommandsRule;
 
 impl Rule for CentralizedCommandsRule {
     fn name(&self) -> &'static str {
-        "purist::centralized_command_execution"
+        RuleId::CentralizedCommandExecution.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -120,15 +121,8 @@ impl CommandVisitor<'_> {
         const TARGETS: &[&[&str]] = &[&["Command", "new"]];
         if check_call_matches_path(call, TARGETS) {
             let span = self.ctx.to_span(call.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::centralized_command_execution",
-                    Severity::Warning,
-                    "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module."),
-            );
+            self.diagnostics
+                .push(ArchitectureDiagnostic::UncentralizedCommandNew.into_diagnostic(span));
         }
     }
 }

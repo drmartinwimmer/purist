@@ -32,8 +32,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, is_bool_type};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::visit::{self, Visit};
 
@@ -54,7 +55,7 @@ pub(crate) struct NoNegativeBoolRule;
 
 impl Rule for NoNegativeBoolRule {
     fn name(&self) -> &'static str {
-        "purist::no_negative_bool"
+        RuleId::NoNegativeBool.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -151,17 +152,12 @@ impl NegativeBoolVisitor<'_> {
                 .container_description()
                 .unwrap_or_else(|| "type".to_string());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_negative_bool",
-                    Severity::Warning,
-                    format!(
-                        "Field '{field_name}' in {container_desc} uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename '{field_name}' to affirmative '{suggested}'."
-                )),
+                HygieneDiagnostic::NegativeBooleanField {
+                    field_name,
+                    container_desc,
+                    suggested,
+                }
+                .into_diagnostic(span),
             );
         }
     }
@@ -197,17 +193,11 @@ impl NegativeBoolVisitor<'_> {
             let span = self.ctx.to_span(pat_ident.ident.span());
             let suggested = suggest_affirmative(&var_name, prefix);
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_negative_bool",
-                    Severity::Warning,
-                    format!(
-                        "Variable '{var_name}' uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename '{var_name}' to affirmative '{suggested}'."
-                )),
+                HygieneDiagnostic::NegativeBooleanVariable {
+                    var_name,
+                    suggested,
+                }
+                .into_diagnostic(span),
             );
         }
     }

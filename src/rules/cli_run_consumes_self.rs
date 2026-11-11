@@ -42,8 +42,9 @@
 
 use super::common::{TestScope, WithTestScope, extract_type_ident};
 use crate::checkers::{ReceiverKind, check_fn_receiver};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     TypeScope, WithTypeScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name,
@@ -57,7 +58,7 @@ pub(crate) struct CliRunConsumesSelfRule;
 
 impl Rule for CliRunConsumesSelfRule {
     fn name(&self) -> &'static str {
-        "purist::cli_run_consumes_self"
+        RuleId::CliRunConsumesSelf.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -125,12 +126,8 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
                 && let Some(struct_name) = this.type_scope.current_impl_name()
                 && (is_cli_or_command_struct_name(struct_name)
                     || this.clap_structs.contains(struct_name))
-                && let Some(diag) = check_method_receiver_consumes_self(
-                    this.ctx,
-                    "purist::cli_run_consumes_self",
-                    struct_name,
-                    impl_fn,
-                )
+                && let Some(diag) =
+                    check_method_receiver_consumes_self(this.ctx, struct_name, impl_fn)
             {
                 this.diagnostics.push(diag);
             }
@@ -143,7 +140,6 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
 /// Checks whether an implementation method on a command struct incorrectly borrows `&self`.
 fn check_method_receiver_consumes_self(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     struct_name: &str,
     impl_fn: &syn::ImplItemFn,
 ) -> Option<Diagnostic> {
@@ -159,15 +155,11 @@ fn check_method_receiver_consumes_self(
 
     let span = ctx.to_span(impl_fn.sig.inputs.first()?.span());
     Some(
-        Diagnostic::new(
-            rule_name,
-            Severity::Warning,
-            format!(
-                "CLI execution method '{fn_name}' on command struct '{struct_name}' takes '&self' by reference. CLI commands should consume 'self' by value ('pub fn {fn_name}(self, ...)') to take ownership of parsed arguments and avoid unnecessary cloning."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Change method receiver from '&self' to 'self'."),
+        ArchitectureDiagnostic::CliRunTakesRefSelf {
+            fn_name,
+            struct_name: struct_name.to_string(),
+        }
+        .into_diagnostic(span),
     )
 }
 

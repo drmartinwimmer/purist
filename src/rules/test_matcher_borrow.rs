@@ -26,8 +26,9 @@
 //! ```
 
 use crate::checkers::check_macro_matches;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{HygieneDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::Token;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
@@ -39,7 +40,7 @@ pub(crate) struct TestMatcherBorrowRule;
 
 impl Rule for TestMatcherBorrowRule {
     fn name(&self) -> &'static str {
-        "purist::test_matcher_borrow_simplification"
+        RuleId::TestMatcherBorrowSimplification.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -120,19 +121,7 @@ fn check_method_call_redundant_borrow(
     let method_name = call.method.to_string();
     if method_name == "as_str" {
         let span = ctx.to_span(call.span());
-        Some(
-            Diagnostic::new(
-                "purist::test_matcher_borrow_simplification",
-                Severity::Warning,
-                format!(
-                    "Redundant '.{method_name}()' in GoogleTest assertion. GoogleTest matchers accept borrowed references directly."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix(format!(
-                "Replace '.{method_name}()' with a reference borrowing the expression directly ('&<expr>')."
-            )),
-        )
+        Some(HygieneDiagnostic::RedundantMatcherBorrow { method_name }.into_diagnostic(span))
     } else {
         None
     }

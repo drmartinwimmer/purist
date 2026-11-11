@@ -48,8 +48,9 @@ use super::common::{
     path_ends_with_ident,
 };
 use crate::checkers::extract_fn_return_type;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -58,7 +59,7 @@ pub(crate) struct ErrorTypesRule;
 
 impl Rule for ErrorTypesRule {
     fn name(&self) -> &'static str {
-        "purist::error_types"
+        RuleId::ErrorTypes.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -176,29 +177,25 @@ fn check_error_type_naming(
         return None;
     }
 
-    if is_subject_error_name(&name) {
+    if is_subject_error_name(&name)
+        || (derives_trait(attrs, "Diagnostic") && is_subject_diagnostic_name(&name))
+    {
         return None;
     }
 
     let span = ctx.to_span(ident.span());
-    Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Error type '{name}' must follow the '<Subject>Error' naming convention (e.g., 'ConfigError', 'ParseError')."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(
-            "Rename the error type to '<Subject>Error' so it remains unambiguous when imported or re-exported.",
-        ),
-    )
+    Some(ArchitectureDiagnostic::ErrorTypeNaming { name }.into_diagnostic(span))
 }
 
 /// Returns true if `name` ends with `Error` and has a non-empty `<Subject>` prefix.
 fn is_subject_error_name(name: &str) -> bool {
     name.strip_suffix("Error")
+        .is_some_and(|prefix| !prefix.is_empty())
+}
+
+/// Returns true if `name` ends with `Diagnostic` and has a non-empty `<Subject>` prefix.
+fn is_subject_diagnostic_name(name: &str) -> bool {
+    name.strip_suffix("Diagnostic")
         .is_some_and(|prefix| !prefix.is_empty())
 }
 
@@ -213,19 +210,7 @@ fn check_manual_error_impl(ctx: &LintContext<'_>, item_impl: &syn::ItemImpl) -> 
         .map_or_else(|| "error type".to_string(), ToString::to_string);
     let span = ctx.to_span(trait_path.span());
 
-    Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Manual 'Error' trait implementation for '{target_name}'. Derive 'thiserror::Error' instead."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(
-            "Replace manual 'impl std::error::Error' and 'Display' boilerplate with '#[derive(Debug, thiserror::Error)]'.",
-        ),
-    )
+    Some(ArchitectureDiagnostic::ManualErrorImpl { target_name }.into_diagnostic(span))
 }
 
 /// Returns true if `path` refers to `Error`, `error::Error`, `std::error::Error`, or `core::error::Error`.
@@ -253,15 +238,7 @@ fn check_fn_signature_unstructured_error(
     let fn_name = sig.ident.to_string();
 
     Some(
-        Diagnostic::new(
-            "purist::error_types",
-            Severity::Warning,
-            format!(
-                "Function '{fn_name}' returns unstructured error type '{err_desc}'. Use structured error enums via thiserror or anyhow::Result."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Define a dedicated error enum deriving 'thiserror::Error' or use 'anyhow::Result'."),
+        ArchitectureDiagnostic::UnstructuredErrorReturn { fn_name, err_desc }.into_diagnostic(span),
     )
 }
 

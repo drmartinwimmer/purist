@@ -35,8 +35,9 @@
 
 use super::common::{TestScope, WithTestScope, extract_type_ident, path_last_ident};
 use crate::checkers::check_macro_matches;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use crate::scopes::{
     ClapScope, WithClapScope, is_cli_or_command_struct_name, is_command_execution_fn_name,
 };
@@ -48,7 +49,7 @@ pub(crate) struct NoPrintlnInLibrariesRule;
 
 impl Rule for NoPrintlnInLibrariesRule {
     fn name(&self) -> &'static str {
-        "purist::no_println_in_libraries"
+        RuleId::NoPrintlnInLibraries.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -195,15 +196,10 @@ impl PrintlnVisitor<'_> {
 
         let span = self.ctx.to_span(mac.path.span());
         self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_println_in_libraries",
-                Severity::Warning,
-                format!(
-                    "Direct use of '{name}!' in library code. Library code should return structured errors or use logging."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Remove print statement; propagate information via 'Result' or use 'tracing'/'log'."),
+            ArchitectureDiagnostic::PrintlnInLibrary {
+                macro_name: name.to_string(),
+            }
+            .into_diagnostic(span),
         );
     }
 }

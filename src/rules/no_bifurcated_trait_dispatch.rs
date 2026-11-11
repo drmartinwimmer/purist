@@ -40,8 +40,9 @@ use std::collections::{HashMap, HashSet};
 use super::common::{
     TestScope, WithTestScope, extract_type_ident, has_suppression_attribute, path_last_ident,
 };
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{ArchitectureDiagnostic, IntoPuristDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -50,7 +51,7 @@ pub(crate) struct NoBifurcatedTraitDispatchRule;
 
 impl Rule for NoBifurcatedTraitDispatchRule {
     fn name(&self) -> &'static str {
-        "purist::no_bifurcated_trait_dispatch"
+        RuleId::NoBifurcatedTraitDispatch.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -311,31 +312,21 @@ impl DispatchVisitor<'_> {
         };
 
         let diag_span = self.ctx.to_span(span);
-        let type_a = &d1.type_name;
-        let type_b = &d2.type_name;
-        let method_name = &d1.method_name;
-
-        let message = if let Some(trait_name) = &shared_trait_opt {
-            format!(
-                "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' implementing trait '{trait_name}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
-            )
+        let rule_diag = if let Some(shared_trait) = shared_trait_opt {
+            ArchitectureDiagnostic::BifurcatedTraitDispatchWithTrait {
+                type_a: d1.type_name.clone(),
+                type_b: d2.type_name.clone(),
+                method_name: d1.method_name.clone(),
+                shared_trait,
+            }
         } else {
-            format!(
-                "Bifurcated dispatch to sibling types '{type_a}' and '{type_b}' on method '{method_name}'. Consolidate into a single parameterized type or unify dispatch outside the branch."
-            )
+            ArchitectureDiagnostic::BifurcatedTraitDispatch {
+                type_a: d1.type_name.clone(),
+                type_b: d2.type_name.clone(),
+                method_name: d1.method_name.clone(),
+            }
         };
-
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_bifurcated_trait_dispatch",
-                Severity::Warning,
-                message,
-            )
-            .with_span(diag_span)
-            .with_suggested_fix(format!(
-                "Consolidate '{type_a}' and '{type_b}' into a single parameterized type, or instantiate a trait object/enum before dispatching."
-            )),
-        );
+        self.diagnostics.push(rule_diag.into_diagnostic(diag_span));
         true
     }
 }
