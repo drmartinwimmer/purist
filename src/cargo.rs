@@ -1,5 +1,6 @@
 use crate::PuristError;
 use crate::discovery::find_workspace_cargo_toml;
+use crate::rule_diagnostics::RuleId;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
@@ -72,54 +73,8 @@ pub(crate) struct PuristLintsConfig {
 
 impl PuristLintsConfig {
     pub(crate) fn get(&self, rule_name: &str) -> Option<RuleLevel> {
-        let stripped = rule_name
-            .strip_prefix("purist::")
-            .or_else(|| rule_name.strip_prefix("opinionated::"))
-            .unwrap_or(rule_name);
-        match stripped {
-            "no_inline_mods" => Some(self.no_inline_mods),
-            "free_functions" => Some(self.free_functions),
-            "path_resolution" => Some(self.path_resolution),
-            "error_types" => Some(self.error_types),
-            "clippy_suppression_hygiene" => Some(self.clippy_suppression_hygiene),
-            "test_patterns" => Some(self.test_patterns),
-            "no_redundant_conversions" => Some(self.no_redundant_conversions),
-            "use_declarations_over_qualified_paths" => {
-                Some(self.use_declarations_over_qualified_paths)
-            }
-            "no_redundant_wrappers" => Some(self.no_redundant_wrappers),
-            "no_boxed_dyn_error" => Some(self.no_boxed_dyn_error),
-            "test_matcher_borrow_simplification" => Some(self.test_matcher_borrow_simplification),
-            "no_test_prefix" => Some(self.no_test_prefix),
-            "no_unsafe_in_tests" => Some(self.no_unsafe_in_tests),
-            "centralized_command_execution" => Some(self.centralized_command_execution),
-            "clap_struct_encapsulation" => Some(self.clap_struct_encapsulation),
-            "command_struct_naming" => Some(self.command_struct_naming),
-            "config_struct_naming" => Some(self.config_struct_naming),
-            "exit_code_hygiene" => Some(self.exit_code_hygiene),
-            "idiomatic_option_bool_mapping" => Some(self.idiomatic_option_bool_mapping),
-            "no_wildcard_imports" => Some(self.no_wildcard_imports),
-            "no_env_access_outside_config" => Some(self.no_env_access_outside_config),
-            "single_match_to_let_else" => Some(self.single_match_to_let_else),
-            "raii_temp_directories" => Some(self.raii_temp_directories),
-            "no_println_in_libraries" => Some(self.no_println_in_libraries),
-            "cli_run_consumes_self" => Some(self.cli_run_consumes_self),
-            "no_double_negation" => Some(self.no_double_negation),
-            "googletest_conventions" => Some(self.googletest_conventions),
-            "max_file_lines" => Some(self.max_file_lines),
-            "no_trivial_getters_setters" => Some(self.no_trivial_getters_setters),
-            "max_nesting_depth" => Some(self.max_nesting_depth),
-            "lib_facade_hygiene" => Some(self.lib_facade_hygiene),
-            "no_negative_bool" => Some(self.no_negative_bool),
-            "no_has_trait_prefix" => Some(self.no_has_trait_prefix),
-            "granular_visitor_hooks" => Some(self.granular_visitor_hooks),
-            "no_bifurcated_trait_dispatch" => Some(self.no_bifurcated_trait_dispatch),
-            "no_primitive_flag_clutter" => Some(self.no_primitive_flag_clutter),
-            "no_interior_mutability_in_visitors" => Some(self.no_interior_mutability_in_visitors),
-            "prefer_scoped_closures" => Some(self.prefer_scoped_closures),
-            "descriptive_checker_names" => Some(self.descriptive_checker_names),
-            _ => None,
-        }
+        let rule_id = RuleId::from_name(rule_name)?;
+        Some(self.level_for_id(rule_id))
     }
 
     pub(crate) fn set(
@@ -127,55 +82,99 @@ impl PuristLintsConfig {
         rule_name: &str,
         level: RuleLevel,
     ) -> Result<(), UnrecognizedRule> {
-        let stripped = rule_name
-            .strip_prefix("purist::")
-            .or_else(|| rule_name.strip_prefix("opinionated::"))
-            .unwrap_or(rule_name);
-        match stripped {
-            "no_inline_mods" => self.no_inline_mods = level,
-            "free_functions" => self.free_functions = level,
-            "path_resolution" => self.path_resolution = level,
-            "error_types" => self.error_types = level,
-            "clippy_suppression_hygiene" => self.clippy_suppression_hygiene = level,
-            "test_patterns" => self.test_patterns = level,
-            "no_redundant_conversions" => self.no_redundant_conversions = level,
-            "use_declarations_over_qualified_paths" => {
-                self.use_declarations_over_qualified_paths = level
-            }
-            "no_redundant_wrappers" => self.no_redundant_wrappers = level,
-            "no_boxed_dyn_error" => self.no_boxed_dyn_error = level,
-            "test_matcher_borrow_simplification" => self.test_matcher_borrow_simplification = level,
-            "no_test_prefix" => self.no_test_prefix = level,
-            "no_unsafe_in_tests" => self.no_unsafe_in_tests = level,
-            "centralized_command_execution" => self.centralized_command_execution = level,
-            "clap_struct_encapsulation" => self.clap_struct_encapsulation = level,
-            "command_struct_naming" => self.command_struct_naming = level,
-            "config_struct_naming" => self.config_struct_naming = level,
-            "exit_code_hygiene" => self.exit_code_hygiene = level,
-            "idiomatic_option_bool_mapping" => self.idiomatic_option_bool_mapping = level,
-            "no_wildcard_imports" => self.no_wildcard_imports = level,
-            "no_env_access_outside_config" => self.no_env_access_outside_config = level,
-            "single_match_to_let_else" => self.single_match_to_let_else = level,
-            "raii_temp_directories" => self.raii_temp_directories = level,
-            "no_println_in_libraries" => self.no_println_in_libraries = level,
-            "cli_run_consumes_self" => self.cli_run_consumes_self = level,
-            "no_double_negation" => self.no_double_negation = level,
-            "googletest_conventions" => self.googletest_conventions = level,
-            "max_file_lines" => self.max_file_lines = level,
-            "no_trivial_getters_setters" => self.no_trivial_getters_setters = level,
-            "max_nesting_depth" => self.max_nesting_depth = level,
-            "lib_facade_hygiene" => self.lib_facade_hygiene = level,
-            "no_negative_bool" => self.no_negative_bool = level,
-            "no_has_trait_prefix" => self.no_has_trait_prefix = level,
-            "granular_visitor_hooks" => self.granular_visitor_hooks = level,
-            "no_bifurcated_trait_dispatch" => self.no_bifurcated_trait_dispatch = level,
-            "no_primitive_flag_clutter" => self.no_primitive_flag_clutter = level,
-            "no_interior_mutability_in_visitors" => self.no_interior_mutability_in_visitors = level,
-            "prefer_scoped_closures" => self.prefer_scoped_closures = level,
-            "descriptive_checker_names" => self.descriptive_checker_names = level,
-            _ => return Err(UnrecognizedRule),
-        }
+        let rule_id = RuleId::from_name(rule_name).ok_or(UnrecognizedRule)?;
+        *self.level_mut_for_id(rule_id) = level;
         Ok(())
+    }
+
+    const fn level_for_id(&self, rule_id: RuleId) -> RuleLevel {
+        match rule_id {
+            RuleId::NoInlineMods => self.no_inline_mods,
+            RuleId::FreeFunctions => self.free_functions,
+            RuleId::PathResolution => self.path_resolution,
+            RuleId::ErrorTypes => self.error_types,
+            RuleId::ClippySuppressionHygiene => self.clippy_suppression_hygiene,
+            RuleId::TestPatterns => self.test_patterns,
+            RuleId::NoRedundantConversions => self.no_redundant_conversions,
+            RuleId::UseDeclarationsOverQualifiedPaths => self.use_declarations_over_qualified_paths,
+            RuleId::NoRedundantWrappers => self.no_redundant_wrappers,
+            RuleId::NoBoxedDynError => self.no_boxed_dyn_error,
+            RuleId::TestMatcherBorrowSimplification => self.test_matcher_borrow_simplification,
+            RuleId::NoTestPrefix => self.no_test_prefix,
+            RuleId::NoUnsafeInTests => self.no_unsafe_in_tests,
+            RuleId::CentralizedCommandExecution => self.centralized_command_execution,
+            RuleId::ClapStructEncapsulation => self.clap_struct_encapsulation,
+            RuleId::CommandStructNaming => self.command_struct_naming,
+            RuleId::ConfigStructNaming => self.config_struct_naming,
+            RuleId::ExitCodeHygiene => self.exit_code_hygiene,
+            RuleId::IdiomaticOptionBoolMapping => self.idiomatic_option_bool_mapping,
+            RuleId::NoWildcardImports => self.no_wildcard_imports,
+            RuleId::NoEnvAccessOutsideConfig => self.no_env_access_outside_config,
+            RuleId::SingleMatchToLetElse => self.single_match_to_let_else,
+            RuleId::RaiiTempDirectories => self.raii_temp_directories,
+            RuleId::NoPrintlnInLibraries => self.no_println_in_libraries,
+            RuleId::CliRunConsumesSelf => self.cli_run_consumes_self,
+            RuleId::NoDoubleNegation => self.no_double_negation,
+            RuleId::GoogletestConventions => self.googletest_conventions,
+            RuleId::MaxFileLines => self.max_file_lines,
+            RuleId::NoTrivialGettersSetters => self.no_trivial_getters_setters,
+            RuleId::MaxNestingDepth => self.max_nesting_depth,
+            RuleId::LibFacadeHygiene => self.lib_facade_hygiene,
+            RuleId::NoNegativeBool => self.no_negative_bool,
+            RuleId::NoHasTraitPrefix => self.no_has_trait_prefix,
+            RuleId::GranularVisitorHooks => self.granular_visitor_hooks,
+            RuleId::NoBifurcatedTraitDispatch => self.no_bifurcated_trait_dispatch,
+            RuleId::NoPrimitiveFlagClutter => self.no_primitive_flag_clutter,
+            RuleId::NoInteriorMutabilityInVisitors => self.no_interior_mutability_in_visitors,
+            RuleId::PreferScopedClosures => self.prefer_scoped_closures,
+            RuleId::DescriptiveCheckerNames => self.descriptive_checker_names,
+        }
+    }
+
+    fn level_mut_for_id(&mut self, rule_id: RuleId) -> &mut RuleLevel {
+        match rule_id {
+            RuleId::NoInlineMods => &mut self.no_inline_mods,
+            RuleId::FreeFunctions => &mut self.free_functions,
+            RuleId::PathResolution => &mut self.path_resolution,
+            RuleId::ErrorTypes => &mut self.error_types,
+            RuleId::ClippySuppressionHygiene => &mut self.clippy_suppression_hygiene,
+            RuleId::TestPatterns => &mut self.test_patterns,
+            RuleId::NoRedundantConversions => &mut self.no_redundant_conversions,
+            RuleId::UseDeclarationsOverQualifiedPaths => {
+                &mut self.use_declarations_over_qualified_paths
+            }
+            RuleId::NoRedundantWrappers => &mut self.no_redundant_wrappers,
+            RuleId::NoBoxedDynError => &mut self.no_boxed_dyn_error,
+            RuleId::TestMatcherBorrowSimplification => &mut self.test_matcher_borrow_simplification,
+            RuleId::NoTestPrefix => &mut self.no_test_prefix,
+            RuleId::NoUnsafeInTests => &mut self.no_unsafe_in_tests,
+            RuleId::CentralizedCommandExecution => &mut self.centralized_command_execution,
+            RuleId::ClapStructEncapsulation => &mut self.clap_struct_encapsulation,
+            RuleId::CommandStructNaming => &mut self.command_struct_naming,
+            RuleId::ConfigStructNaming => &mut self.config_struct_naming,
+            RuleId::ExitCodeHygiene => &mut self.exit_code_hygiene,
+            RuleId::IdiomaticOptionBoolMapping => &mut self.idiomatic_option_bool_mapping,
+            RuleId::NoWildcardImports => &mut self.no_wildcard_imports,
+            RuleId::NoEnvAccessOutsideConfig => &mut self.no_env_access_outside_config,
+            RuleId::SingleMatchToLetElse => &mut self.single_match_to_let_else,
+            RuleId::RaiiTempDirectories => &mut self.raii_temp_directories,
+            RuleId::NoPrintlnInLibraries => &mut self.no_println_in_libraries,
+            RuleId::CliRunConsumesSelf => &mut self.cli_run_consumes_self,
+            RuleId::NoDoubleNegation => &mut self.no_double_negation,
+            RuleId::GoogletestConventions => &mut self.googletest_conventions,
+            RuleId::MaxFileLines => &mut self.max_file_lines,
+            RuleId::NoTrivialGettersSetters => &mut self.no_trivial_getters_setters,
+            RuleId::MaxNestingDepth => &mut self.max_nesting_depth,
+            RuleId::LibFacadeHygiene => &mut self.lib_facade_hygiene,
+            RuleId::NoNegativeBool => &mut self.no_negative_bool,
+            RuleId::NoHasTraitPrefix => &mut self.no_has_trait_prefix,
+            RuleId::GranularVisitorHooks => &mut self.granular_visitor_hooks,
+            RuleId::NoBifurcatedTraitDispatch => &mut self.no_bifurcated_trait_dispatch,
+            RuleId::NoPrimitiveFlagClutter => &mut self.no_primitive_flag_clutter,
+            RuleId::NoInteriorMutabilityInVisitors => &mut self.no_interior_mutability_in_visitors,
+            RuleId::PreferScopedClosures => &mut self.prefer_scoped_closures,
+            RuleId::DescriptiveCheckerNames => &mut self.descriptive_checker_names,
+        }
     }
 }
 

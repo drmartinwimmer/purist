@@ -45,8 +45,9 @@
 //! ```
 
 use super::common::extract_type_ident;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use std::collections::{HashMap, HashSet};
 use syn::Fields;
 
@@ -55,7 +56,7 @@ pub(crate) struct FreeFunctionsRule;
 
 impl Rule for FreeFunctionsRule {
     fn name(&self) -> &'static str {
-        "purist::free_functions"
+        RuleId::FreeFunctions.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -69,7 +70,7 @@ impl Rule for FreeFunctionsRule {
         let impl_analysis = analyze_struct_implementations(file, &empty_structs);
 
         // 3. Generate findings for structs that have static functions but no instance methods or traits
-        build_free_function_diagnostics(ctx, self.name(), empty_structs, impl_analysis)
+        build_free_function_diagnostics(ctx, empty_structs, impl_analysis)
     }
 }
 
@@ -152,7 +153,6 @@ fn analyze_struct_implementations(
 /// Produces diagnostics for empty braced/tuple structs that act strictly as function namespaces.
 fn build_free_function_diagnostics(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     empty_structs: HashMap<String, proc_macro2::Span>,
     analysis: StructImplAnalysis,
 ) -> Vec<Diagnostic> {
@@ -171,17 +171,8 @@ fn build_free_function_diagnostics(
 
         if static_fn_count > 0 && !has_instance_methods && !implements_traits {
             diagnostics.push(
-                Diagnostic::new(
-                    rule_name,
-                    Severity::Warning,
-                    format!(
-                        "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module or a unit struct ('struct {struct_name};')."
-                    ),
-                )
-                .with_span(ctx.to_span(span))
-                .with_suggested_fix(format!(
-                    "Remove struct '{struct_name}' and export its functions as top-level free functions, or convert it to a unit struct 'struct {struct_name};'."
-                )),
+                RuleDiagnostic::StatelessNamespaceStruct { struct_name }
+                    .into_diagnostic(ctx.to_span(span)),
             );
         }
     }

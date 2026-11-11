@@ -63,8 +63,9 @@
 use super::common::{
     TestScope, WithTestScope, derives_trait, extract_type_ident, has_suppression_attribute,
 };
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use crate::scopes::{
     TypeScope, WithTypeScope, is_command_execution_fn_name, is_command_struct_name,
     is_flattened_field, is_parser_struct_name,
@@ -77,7 +78,7 @@ pub(crate) struct CommandStructNamingRule;
 
 impl Rule for CommandStructNamingRule {
     fn name(&self) -> &'static str {
-        "purist::command_struct_naming"
+        RuleId::CommandStructNaming.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -197,19 +198,8 @@ impl CommandStructNamingVisitor<'_> {
         if derives_parser {
             if !is_parser_struct_name(&struct_name) {
                 let span = self.ctx.to_span(item_struct.ident.span());
-                self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::command_struct_naming",
-                        Severity::Warning,
-                        format!(
-                            "Clap parser struct '{struct_name}' does not follow the top-level CLI parser naming convention. Structs deriving 'clap::Parser' must be named 'Cli' or '<Subject>Cli'."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(
-                        "Rename the top-level parser struct to 'Cli' or '<Subject>Cli'.",
-                    ),
-                );
+                self.diagnostics
+                    .push(RuleDiagnostic::ParserStructNaming { struct_name }.into_diagnostic(span));
             }
             return;
         }
@@ -240,29 +230,13 @@ impl CommandStructNamingVisitor<'_> {
             "Command" | "Args" | "Subcommand" | "Subcommands"
         );
 
-        let (message, suggested_fix) = if is_bare_suffix {
-            (
-                format!(
-                    "Clap command struct '{struct_name}' uses an unadorned suffix without a subject prefix. Follow the '<Subject>Command', '<Subject>Args', or '<Subject>Subcommand' naming convention."
-                ),
-                format!(
-                    "Prefix '{struct_name}' with a descriptive subject (e.g. 'Workspace{struct_name}' or 'BuildCommand')."
-                ),
-            )
+        let diag = if is_bare_suffix {
+            RuleDiagnostic::BareCommandStructSuffix { struct_name }
         } else {
-            (
-                format!(
-                    "Clap command struct '{struct_name}' does not follow the CLI command naming convention. Command structs must be named '<Subject>Command', '<Subject>Args', or '<Subject>Subcommand'."
-                ),
-                "Rename the struct to end with 'Command', 'Args', or 'Subcommand' (e.g. '<Subject>Command', '<Subject>Args', or '<Subject>Subcommand').".to_string(),
-            )
+            RuleDiagnostic::InvalidCommandStructNaming { struct_name }
         };
 
-        self.diagnostics.push(
-            Diagnostic::new("purist::command_struct_naming", Severity::Warning, message)
-                .with_span(span)
-                .with_suggested_fix(suggested_fix),
-        );
+        self.diagnostics.push(diag.into_diagnostic(span));
     }
 }
 

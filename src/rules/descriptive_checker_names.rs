@@ -25,8 +25,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 use syn::{ImplItemFn, ItemFn, ItemImpl};
 
@@ -35,7 +36,7 @@ pub(crate) struct DescriptiveCheckerNamesRule;
 
 impl Rule for DescriptiveCheckerNamesRule {
     fn name(&self) -> &'static str {
-        "purist::descriptive_checker_names"
+        RuleId::DescriptiveCheckerNames.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -108,17 +109,8 @@ impl CheckerNamingVisitor<'_> {
         let name = ident.to_string();
         if is_vague_checker_name(&name) {
             let span = self.ctx.to_span(ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::descriptive_checker_names",
-                    Severity::Warning,
-                    format!(
-                        "Function '{name}' uses a vague check name. Follow the 'check_<subject>_<condition>' naming convention (e.g. 'check_fn_signature_unsafe_in_test')."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Rename to include both the subject and the condition/violation being checked."),
-            );
+            self.diagnostics
+                .push(RuleDiagnostic::VagueCheckerName { name }.into_diagnostic(span));
         }
     }
 }
@@ -145,6 +137,7 @@ fn is_vague_checker_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

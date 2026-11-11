@@ -25,8 +25,9 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 
 /// Rule detecting unanchored relative path operations in non-test code.
@@ -34,7 +35,7 @@ pub(crate) struct PathResolutionRule;
 
 impl Rule for PathResolutionRule {
     fn name(&self) -> &'static str {
-        "purist::path_resolution"
+        RuleId::PathResolution.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -133,18 +134,11 @@ impl PathVisitor<'_> {
             if is_unanchored_relative_path(&val) {
                 let span = self.ctx.to_span(lit_str.span());
                 self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::path_resolution",
-                        Severity::Warning,
-                        format!(
-                            "Unanchored relative path '{val}' in '{}'. Relative paths break when executed outside the crate root.",
-                            self.ctx.file_path().display()
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(format!(
-                        "Anchor path using 'Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"{val}\")' or workspace root."
-                    )),
+                    RuleDiagnostic::UnanchoredRelativePath {
+                        path_val: val,
+                        file_path: self.ctx.file_path().display().to_string(),
+                    }
+                    .into_diagnostic(span),
                 );
             }
         }

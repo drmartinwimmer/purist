@@ -27,8 +27,9 @@
 //! ```
 
 use super::common::{macro_name, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -37,7 +38,7 @@ pub(crate) struct SingleMatchToLetElseRule;
 
 impl Rule for SingleMatchToLetElseRule {
     fn name(&self) -> &'static str {
-        "purist::single_match_to_let_else"
+        RuleId::SingleMatchToLetElse.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -102,15 +103,7 @@ fn check_expr_match_single_to_let_else(
 
         if can_convert {
             let span = ctx.to_span(expr_match.span());
-            return Some(
-                Diagnostic::new(
-                    "purist::single_match_to_let_else",
-                    Severity::Warning,
-                    "Match expression can be simplified using idiomatic 'let ... = ... else { ... };' construct.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace 'match' with 'let Some(...) = expr else { ... };' to reduce indentation."),
-            );
+            return Some(RuleDiagnostic::SingleMatchToLetElse.into_diagnostic(span));
         }
     }
 

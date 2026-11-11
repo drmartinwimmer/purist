@@ -60,8 +60,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, is_bool_type};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 use syn::{FnArg, Pat, ReturnType};
 
@@ -70,7 +71,7 @@ pub(crate) struct NoDoubleNegationRule;
 
 impl Rule for NoDoubleNegationRule {
     fn name(&self) -> &'static str {
-        "purist::no_double_negation"
+        RuleId::NoDoubleNegation.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -154,17 +155,11 @@ impl DoubleNegationVisitor<'_> {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_method_name(&fn_name);
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_double_negation",
-                    Severity::Warning,
-                    format!(
-                        "Method '{fn_name}' uses negative boolean naming causing double negation (e.g. '{fn_name}(false)'). Use affirmative naming instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename to an affirmative identifier (e.g. '{suggested}')."
-                )),
+                RuleDiagnostic::NegativeBooleanMethod {
+                    fn_name: fn_name.clone(),
+                    suggested,
+                }
+                .into_diagnostic(span),
             );
         }
 
@@ -173,17 +168,8 @@ impl DoubleNegationVisitor<'_> {
             let span = self.ctx.to_span(sig.ident.span());
             let suggested = suggest_affirmative_predicate_name(&fn_name);
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_double_negation",
-                    Severity::Warning,
-                    format!(
-                        "Predicate '{fn_name}' uses negative boolean naming causing double negation when negated (e.g. '!{fn_name}()'). Use affirmative naming instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename to an affirmative predicate (e.g. '{suggested}')."
-                )),
+                RuleDiagnostic::NegativeBooleanPredicate { fn_name, suggested }
+                    .into_diagnostic(span),
             );
         }
     }
@@ -197,17 +183,7 @@ impl DoubleNegationVisitor<'_> {
             if is_negative_parameter_name(&param_name) {
                 let span = self.ctx.to_span(pat_ident.ident.span());
                 self.diagnostics.push(
-                    Diagnostic::new(
-                        "purist::no_double_negation",
-                        Severity::Warning,
-                        format!(
-                            "Parameter '{param_name}' uses negative boolean naming causing double negation when passed 'false'. Use affirmative naming instead (e.g. 'enabled', 'include')."
-                        ),
-                    )
-                    .with_span(span)
-                    .with_suggested_fix(
-                        "Rename to an affirmative parameter such as 'enabled' or 'include'.",
-                    ),
+                    RuleDiagnostic::NegativeBooleanParameter { param_name }.into_diagnostic(span),
                 );
             }
         }

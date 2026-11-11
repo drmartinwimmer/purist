@@ -46,8 +46,9 @@
 //! ```
 
 use super::common::{has_suppression_attribute, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -61,7 +62,7 @@ pub(crate) struct GranularVisitorHooksRule;
 
 impl Rule for GranularVisitorHooksRule {
     fn name(&self) -> &'static str {
-        "purist::granular_visitor_hooks"
+        RuleId::GranularVisitorHooks.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -124,17 +125,12 @@ impl AstHookScanner<'_> {
         for (span, hook_name, description) in loop_checker.found_violations {
             let diag_span = self.ctx.to_span(span);
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::granular_visitor_hooks",
-                    Severity::Warning,
-                    format!(
-                        "Manual iteration over {description} in '{fn_name}'. Implement and delegate to the specialized '{hook_name}' visitor hook instead to preserve recursive traversal and attribute scoping."
-                    ),
-                )
-                .with_span(diag_span)
-                .with_suggested_fix(format!(
-                    "Implement the specialized 'fn {hook_name}(...)' visitor hook instead of manual iteration."
-                )),
+                RuleDiagnostic::ManualAstIteration {
+                    description: description.to_string(),
+                    fn_name: fn_name.clone(),
+                    hook_name: hook_name.to_string(),
+                }
+                .into_diagnostic(diag_span),
             );
         }
     }
@@ -376,6 +372,7 @@ fn extract_root_ident(expr: &Expr) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

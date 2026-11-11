@@ -32,8 +32,9 @@
 
 use super::common::{TestScope, WithTestScope, is_drop_trait_impl};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -43,7 +44,7 @@ pub(crate) struct RaiiTempDirectoriesRule;
 
 impl Rule for RaiiTempDirectoriesRule {
     fn name(&self) -> &'static str {
-        "purist::raii_temp_directories"
+        RuleId::RaiiTempDirectories.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -119,15 +120,8 @@ impl TempDirVisitor<'_> {
         }
 
         let span = self.ctx.to_span(call.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::raii_temp_directories",
-                Severity::Warning,
-                "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."),
-        );
+        self.diagnostics
+            .push(RuleDiagnostic::ManualRemoveDirAllInTest.into_diagnostic(span));
     }
 }
 

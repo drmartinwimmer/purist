@@ -33,8 +33,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, has_suppression_attribute};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use crate::scopes::{SuppressionScope, WithSuppressionScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -44,7 +45,7 @@ pub(crate) struct NoUnsafeInTestsRule;
 
 impl Rule for NoUnsafeInTestsRule {
     fn name(&self) -> &'static str {
-        "purist::no_unsafe_in_tests"
+        RuleId::NoUnsafeInTests.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -125,16 +126,10 @@ impl UnsafeTestVisitor<'_> {
         if matches!(sig.safety, syn::Safety::Unsafe(_)) {
             let span = self.ctx.to_span(sig.fn_token.span());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_unsafe_in_tests",
-                    Severity::Error,
-                    format!(
-                        "Function '{}' in test context is declared 'unsafe'. Tests must verify code through safe interfaces.",
-                        sig.ident
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Remove 'unsafe' from test code; verify behavior strictly through safe public interfaces."),
+                RuleDiagnostic::UnsafeFnInTest {
+                    fn_name: sig.ident.to_string(),
+                }
+                .into_diagnostic(span),
             );
         }
     }
@@ -142,21 +137,15 @@ impl UnsafeTestVisitor<'_> {
     /// Emits a diagnostic for an `unsafe` block expression in test context.
     fn check_expr_unsafe_block_in_test(&mut self, expr_unsafe: &syn::ExprUnsafe) {
         let span = self.ctx.to_span(expr_unsafe.unsafe_token.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_unsafe_in_tests",
-                Severity::Error,
-                "Usage of 'unsafe' block in test context. Tests must exercise safe public abstractions.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Remove 'unsafe' block from test code; verify behavior strictly through safe public interfaces."),
-        );
+        self.diagnostics
+            .push(RuleDiagnostic::UnsafeBlockInTest.into_diagnostic(span));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

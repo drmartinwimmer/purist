@@ -45,8 +45,9 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -55,7 +56,7 @@ pub(crate) struct NoEnvAccessOutsideConfigRule;
 
 impl Rule for NoEnvAccessOutsideConfigRule {
     fn name(&self) -> &'static str {
-        "purist::no_env_access_outside_config"
+        RuleId::NoEnvAccessOutsideConfig.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -150,17 +151,8 @@ impl EnvAccessVisitor<'_> {
             .unwrap_or_else(|| "env".to_string());
         let span = self.ctx.to_span(call.span());
 
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::no_env_access_outside_config",
-                Severity::Warning,
-                format!(
-                    "Direct invocation of 'std::env::{func_name}' outside configuration/CLI/tool modules. Parse environment parameters in a dedicated configuration layer."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Parse environment variables in a centralized 'config.rs', 'manifest.rs', 'metadata.rs', 'cli.rs', or 'tool' module and pass explicit parameters."),
-        );
+        self.diagnostics
+            .push(RuleDiagnostic::DirectEnvAccess { func_name }.into_diagnostic(span));
     }
 }
 

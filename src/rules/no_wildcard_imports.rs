@@ -20,8 +20,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -30,7 +31,7 @@ pub(crate) struct NoWildcardImportsRule;
 
 impl Rule for NoWildcardImportsRule {
     fn name(&self) -> &'static str {
-        "purist::no_wildcard_imports"
+        RuleId::NoWildcardImports.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -96,17 +97,8 @@ impl WildcardImportVisitor<'_> {
                         format!("{}::*", path_segments.join("::"))
                     };
                     let span = self.ctx.to_span(g.span());
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "purist::no_wildcard_imports",
-                            Severity::Warning,
-                            format!(
-                                "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Replace wildcard import with explicit item imports."),
-                    );
+                    self.diagnostics
+                        .push(RuleDiagnostic::WildcardImport { path_str }.into_diagnostic(span));
                 }
             }
             syn::UseTree::Group(group) => {
