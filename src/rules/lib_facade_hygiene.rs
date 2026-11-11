@@ -27,11 +27,13 @@
 //! pub use processing::{process_data, Output};
 //! ```
 
-use super::common::{count_production_lines, has_cfg_test_attr, has_test_attr};
+use super::common::{
+    count_production_lines, has_cfg_test_attr, has_suppression_attribute, has_test_attr,
+};
 use crate::diagnostics::{Diagnostic, Severity, Span};
 use crate::engine::{LintContext, Rule};
-use syn::Item;
 use syn::spanned::Spanned;
+use syn::{Item, Visibility};
 
 /// Default maximum allowed line count for production code in `lib.rs`.
 pub const DEFAULT_MAX_LIB_PRODUCTION_LINES: usize = 200;
@@ -112,6 +114,30 @@ impl Rule for LibFacadeHygieneRule {
                         )
                         .with_span(ctx.to_span(span))
                         .with_suggested_fix(format!("Move the implementation of '{fn_name}' into a dedicated submodule and re-export it.")),
+                    );
+                }
+            } else if let Item::Mod(item_mod) = item
+                && matches!(item_mod.vis, Visibility::Public(_))
+                && !has_cfg_test_attr(&item_mod.attrs)
+                && !has_suppression_attribute(&item_mod.attrs, "lib_facade_hygiene")
+            {
+                let mod_name = item_mod.ident.to_string();
+                if matches!(
+                    mod_name.as_str(),
+                    "command" | "commands" | "tool" | "tools" | "cmd"
+                ) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            self.name(),
+                            Severity::Warning,
+                            format!(
+                                "Public module 'pub mod {mod_name};' in 'lib.rs' exposes internal command/tool adapters in the public library API. Use 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export only public facade types via 'pub use'."
+                            ),
+                        )
+                        .with_span(ctx.to_span(item_mod.ident.span()))
+                        .with_suggested_fix(format!(
+                            "Change 'pub mod {mod_name};' to 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export intended public types at the crate root."
+                        )),
                     );
                 }
             }
@@ -248,6 +274,27 @@ mod tests {
         let configured_ctx = LintContext::new(Path::new("src/lib.rs"), &code).with_config(&config);
         let diags_configured = rule.check_file(&configured_ctx, &file);
         assert_that!(diags_configured, is_empty());
+        Ok(())
+    }
+
+    #[googletest::test]
+    fn pub_mod_command_or_tools_in_lib_rs_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
+        let code = "pub mod command;\npub mod tools;\nmod commands;\npub(crate) mod tool;\n";
+        let file = syn::parse_file(code)?;
+        let ctx = LintContext::new(Path::new("src/lib.rs"), code);
+        let diags = LibFacadeHygieneRule.check_file(&ctx, &file);
+
+        assert_that!(diags.len(), eq(2));
+        let d0 = diags.first().ok_or("expected d0")?;
+        let d1 = diags.get(1).ok_or("expected d1")?;
+        assert_that!(
+            &d0.message,
+            contains_substring("Public module 'pub mod command;' in 'lib.rs'")
+        );
+        assert_that!(
+            &d1.message,
+            contains_substring("Public module 'pub mod tools;' in 'lib.rs'")
+        );
         Ok(())
     }
 }
