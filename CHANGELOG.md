@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.11.0...purist-v0.12.0) (2026-11-11)
+
+
+### Features
+
+* **clap:** enforce Cli naming and run(self) encapsulation on Parser structs ([e0e4b01](https://github.com/drmartinwimmer/purist/commit/e0e4b01b588a4a643802554f09d66fca333669df))
+* **clap:** enforce Cli naming and run(self) encapsulation on Parser structs ([a1d3742](https://github.com/drmartinwimmer/purist/commit/a1d3742228e8f717bdbf0e7e644ad05e28f77de7))
+* **error-types:** enforce &lt;Subject&gt;Error naming and thiserror::Error derive ([9d52844](https://github.com/drmartinwimmer/purist/commit/9d52844c8c96de67fbe7ccf14b160ded43636d85))
+* **error-types:** enforce &lt;Subject&gt;Error naming and thiserror::Error derive ([f251e1a](https://github.com/drmartinwimmer/purist/commit/f251e1ad5604249a450b14184a1937ef4499c140))
+* **facade:** forbid pub mod command/tools in lib.rs ([0826344](https://github.com/drmartinwimmer/purist/commit/0826344e188470bfc05d1b24d015714176b66877))
+* **facade:** forbid pub mod command/tools in lib.rs ([8d96990](https://github.com/drmartinwimmer/purist/commit/8d96990f46561dba09227e01f29aa5f615db931d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * purist-derive bumped from 0.11.0 to 0.12.0
+
 ## [0.11.0](https://github.com/drmartinwimmer/purist/compare/purist-v0.10.1...purist-v0.11.0) (2026-10-20)
 
 
