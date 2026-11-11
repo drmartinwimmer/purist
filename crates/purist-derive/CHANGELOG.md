@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/drmartinwimmer/purist/compare/purist-derive-v0.11.0...purist-derive-v0.12.0) (2026-11-11)
+
+
+### Miscellaneous Chores
+
+* **purist-derive:** Synchronize purist-workspace versions
+
 ## [0.11.0](https://github.com/drmartinwimmer/purist/compare/purist-derive-v0.10.1...purist-derive-v0.11.0) (2026-10-20)
 
 
