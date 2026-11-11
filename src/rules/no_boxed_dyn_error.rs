@@ -35,8 +35,9 @@
 
 use super::common::{TestScope, WithTestScope, path_ends_with_ident};
 use crate::checkers::extract_fn_return_type;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
@@ -45,7 +46,7 @@ pub(crate) struct NoBoxedDynErrorRule;
 
 impl Rule for NoBoxedDynErrorRule {
     fn name(&self) -> &'static str {
-        "purist::no_boxed_dyn_error"
+        RuleId::NoBoxedDynError.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -135,17 +136,7 @@ fn check_fn_signature_boxed_dyn_error(
     }
 
     let span = ctx.to_span(sig.output.span());
-    Some(
-        Diagnostic::new(
-            "purist::no_boxed_dyn_error",
-            Severity::Error,
-            format!(
-                "Function '{fn_name}' returns 'Box<dyn Error>'. Return a concrete domain error enum deriving 'thiserror::Error' instead."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Return a concrete domain error enum deriving 'thiserror::Error' with appropriate '#[from]' conversions."),
-    )
+    Some(RuleDiagnostic::BoxedDynErrorReturn { fn_name }.into_diagnostic(span))
 }
 
 /// Recursively detects whether a type contains `Box<dyn Error>` or any trait object targeting `Error`.
@@ -197,6 +188,7 @@ fn is_dyn_error_trait(ty: &syn::Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
     use std::path::Path;
 

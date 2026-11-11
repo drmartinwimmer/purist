@@ -38,8 +38,9 @@ use super::common::{
     TestScope, WithTestScope, derives_any, extract_type_ident, has_suppression_attribute,
     is_bool_type, path_ends_with_ident,
 };
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use std::collections::HashSet;
 use std::path::Path;
 use syn::visit::{self, Visit};
@@ -50,7 +51,7 @@ pub(crate) struct NoPrimitiveFlagClutterRule;
 
 impl Rule for NoPrimitiveFlagClutterRule {
     fn name(&self) -> &'static str {
-        "purist::no_primitive_flag_clutter"
+        RuleId::NoPrimitiveFlagClutter.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -106,15 +107,11 @@ impl StructFlagVisitor<'_> {
         if is_visitor && flag_count >= 2 {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_primitive_flag_clutter",
-                    Severity::Warning,
-                    format!(
-                        "Visitor struct '{struct_name}' contains multiple boolean/flag tracking fields ({flag_count}). Consolidate traversal state into cohesive domain scopes (e.g. 'TestScope', 'DepthScope', 'MainScope') instead of loose flags."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Consolidate loose flags into a domain scope with 'With...' traits and derive macros."),
+                RuleDiagnostic::VisitorFlagClutter {
+                    struct_name,
+                    flag_count,
+                }
+                .into_diagnostic(span),
             );
         } else if !is_visitor
             && flag_count >= 4
@@ -123,15 +120,11 @@ impl StructFlagVisitor<'_> {
         {
             let span = self.ctx.to_span(item_struct.ident.span());
             self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_primitive_flag_clutter",
-                    Severity::Warning,
-                    format!(
-                        "Struct '{struct_name}' contains multiple loose boolean fields ({flag_count}). Encapsulate related boolean flags into a domain state enum, configuration struct, or bitflags."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Encapsulate boolean flags into an enum state machine or configuration type."),
+                RuleDiagnostic::StructFlagClutter {
+                    struct_name,
+                    flag_count,
+                }
+                .into_diagnostic(span),
             );
         }
     }
@@ -219,6 +212,7 @@ fn is_tool_module_path(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
 
     #[googletest::test]

@@ -27,8 +27,9 @@
 
 use super::common::{TestScope, WithTestScope, has_test_attr};
 use crate::checkers::check_ident_has_test_prefix;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `test_` or `test` prefixes in test function names.
@@ -36,7 +37,7 @@ pub(crate) struct NoTestPrefixRule;
 
 impl Rule for NoTestPrefixRule {
     fn name(&self) -> &'static str {
-        "purist::no_test_prefix"
+        RuleId::NoTestPrefix.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -100,19 +101,7 @@ fn check_fn_ident_forbidden_test_prefix(
     }
 
     let span = ctx.to_span(ident.span());
-    Some(
-        Diagnostic::new(
-            "purist::no_test_prefix",
-            Severity::Warning,
-            format!(
-                "Test function '{name}' has a redundant 'test_' prefix. Use '<action>_<scenario>_<outcome>' naming (e.g. 'parse_valid_manifest_succeeds')."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(format!(
-            "Rename test '{name}' to remove the 'test_' prefix and follow '<action>_<scenario>_<outcome>'."
-        )),
-    )
+    Some(RuleDiagnostic::RedundantTestPrefix { name }.into_diagnostic(span))
 }
 
 #[cfg(test)]

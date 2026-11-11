@@ -29,15 +29,16 @@
 //! ```
 
 use super::common::has_cfg_test_attr;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 
 /// Rule enforcing modular project organization by forbidding inline modules in entry point files.
 pub(crate) struct NoInlineModsRule;
 
 impl Rule for NoInlineModsRule {
     fn name(&self) -> &'static str {
-        "purist::no_inline_mods"
+        RuleId::NoInlineMods.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -50,7 +51,7 @@ impl Rule for NoInlineModsRule {
 
         for item in &file.items {
             if let syn::Item::Mod(item_mod) = item
-                && let Some(diag) = check_mod_forbidden_inline_in_root(ctx, self.name(), item_mod)
+                && let Some(diag) = check_mod_forbidden_inline_in_root(ctx, item_mod)
             {
                 diagnostics.push(diag);
             }
@@ -63,7 +64,6 @@ impl Rule for NoInlineModsRule {
 /// Checks whether an item module is an unidiomatic inline module in a crate root file.
 fn check_mod_forbidden_inline_in_root(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     item_mod: &syn::ItemMod,
 ) -> Option<Diagnostic> {
     // Ignore file module declarations (e.g. `mod foo;` without inline body)
@@ -78,18 +78,11 @@ fn check_mod_forbidden_inline_in_root(
     let span = ctx.to_span(item_mod.ident.span());
 
     Some(
-        Diagnostic::new(
-            rule_name,
-            Severity::Warning,
-            format!(
-                "Inline module '{mod_name}' in '{}' violates modularity guidelines. Submodules should be placed in dedicated files.",
-                ctx.file_path().display()
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(format!(
-            "Move module content to '{mod_name}.rs' or '{mod_name}/mod.rs' and declare 'mod {mod_name};'."
-        )),
+        RuleDiagnostic::InlineModule {
+            mod_name,
+            file_path: ctx.file_path().display().to_string(),
+        }
+        .into_diagnostic(span),
     )
 }
 

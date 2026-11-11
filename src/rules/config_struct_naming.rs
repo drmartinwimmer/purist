@@ -55,8 +55,9 @@ use super::common::{
     TestScope, WithTestScope, derives_any, extract_type_ident, has_suppression_attribute,
 };
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use crate::scopes::{TypeScope, WithTypeScope, derives_clap};
 use std::collections::HashSet;
 use std::path::Path;
@@ -67,7 +68,7 @@ pub(crate) struct ConfigStructNamingRule;
 
 impl Rule for ConfigStructNamingRule {
     fn name(&self) -> &'static str {
-        "purist::config_struct_naming"
+        RuleId::ConfigStructNaming.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -351,17 +352,11 @@ impl ConfigStructNamingVisitor<'_> {
         let span = self.ctx.to_span(item_struct.ident.span());
 
         self.diagnostics.push(
-            Diagnostic::new(
-                "purist::config_struct_naming",
-                Severity::Warning,
-                format!(
-                    "Configuration struct '{struct_name}' does not follow the '<Subject>Config', '<Subject>Manifest', or '<Subject>Metadata' naming convention. Rename it to '{suggested_name}'."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix(format!(
-                "Rename configuration struct '{struct_name}' to '{suggested_name}'."
-            )),
+            RuleDiagnostic::InvalidConfigStructNaming {
+                struct_name,
+                suggested_name,
+            }
+            .into_diagnostic(span),
         );
     }
 }

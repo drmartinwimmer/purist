@@ -28,8 +28,9 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope};
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::engine::{LintContext, Rule};
+use crate::rule_diagnostics::{RuleDiagnostic, RuleId};
 use crate::scopes::{BlockScope, WithBlockScope};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -40,7 +41,7 @@ pub(crate) struct NoRedundantConversionsRule;
 
 impl Rule for NoRedundantConversionsRule {
     fn name(&self) -> &'static str {
-        "purist::no_redundant_conversions"
+        RuleId::NoRedundantConversions.qualified_name()
     }
 
     fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
@@ -148,15 +149,8 @@ fn check_redundant_conversion_call(
     for arg in &call.args {
         if let Some(inner_call_span) = find_nested_serializer_call(arg) {
             let span = ctx.to_span(inner_call_span);
-            findings.push(
-                Diagnostic::new(
-                    "purist::no_redundant_conversions",
-                    Severity::Warning,
-                    "Redundant serialization roundtrip: value serialized and immediately deserialized.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Use 'Clone::clone', 'From::from', or 'serde_json::to_value' instead of stringifying and re-parsing."),
-            );
+            findings
+                .push(RuleDiagnostic::RedundantNestedSerializationRoundtrip.into_diagnostic(span));
         }
     }
 
@@ -167,15 +161,8 @@ fn check_redundant_conversion_call(
         {
             let span = ctx.to_span(init_span);
             findings.push(
-                Diagnostic::new(
-                    "purist::no_redundant_conversions",
-                    Severity::Warning,
-                    format!(
-                        "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
+                RuleDiagnostic::RedundantVariableSerializationRoundtrip { ident }
+                    .into_diagnostic(span),
             );
         }
     }
