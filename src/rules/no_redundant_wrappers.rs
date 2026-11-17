@@ -23,20 +23,20 @@
 //! ```
 
 use super::common::has_test_attr;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 
 /// Rule detecting trivial wrapper functions that merely forward arguments to an associated method.
 pub(crate) struct NoRedundantWrappersRule;
 
-impl Rule for NoRedundantWrappersRule {
-    fn name(&self) -> &'static str {
-        "purist::no_redundant_wrappers"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoRedundantWrappersRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoRedundantWrappersDiagnostic> {
         let mut diagnostics = Vec::new();
 
         if ctx.is_test_file() {
@@ -53,19 +53,11 @@ impl Rule for NoRedundantWrappersRule {
                 if let Some(target_desc) = detect_redundant_forwarding(item_fn) {
                     let span = ctx.to_span(item_fn.sig.ident.span());
                     let fn_name = item_fn.sig.ident.to_string();
-                    diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Function '{fn_name}' is a redundant wrapper that merely forwards to '{target_desc}'. Call '{target_desc}' directly."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix(format!(
-                            "Remove wrapper function '{fn_name}' and call '{target_desc}' directly at call sites."
-                        )),
-                    );
+                    diagnostics.push(NoRedundantWrappersDiagnostic {
+                        fn_name,
+                        target_desc,
+                        span,
+                    });
                 }
             }
         }
@@ -177,10 +169,26 @@ fn expr_to_string(expr: &syn::Expr) -> String {
     }
 }
 
+/// Diagnostic emitted by `purist::no_redundant_wrappers`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Function '{fn_name}' is a redundant wrapper that merely forwards to '{target_desc}'. Call '{target_desc}' directly."
+)]
+#[diagnostic(help(
+    "Remove wrapper function '{fn_name}' and call '{target_desc}' directly at call sites."
+))]
+pub struct NoRedundantWrappersDiagnostic {
+    pub fn_name: String,
+    pub target_desc: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -192,8 +200,11 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_redundant_wrappers"));
-        assert_that!(&diag.message, contains_substring("redundant wrapper"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_redundant_wrappers")
+        );
+        assert_that!(diag.to_string(), contains_substring("redundant wrapper"));
         Ok(())
     }
 
@@ -206,8 +217,11 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_redundant_wrappers"));
-        assert_that!(&diag.message, contains_substring("redundant wrapper"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_redundant_wrappers")
+        );
+        assert_that!(diag.to_string(), contains_substring("redundant wrapper"));
         Ok(())
     }
 

@@ -1,9 +1,11 @@
 //! Procedural derive macros for purist AST visitor scope traits.
 
 mod derive;
+mod rule_macro;
 
 use derive::{derive_block_scope, derive_scope};
 use proc_macro::TokenStream;
+use rule_macro::{derive_rule_registry, expand_rule_diagnostic};
 use syn::{DeriveInput, parse_macro_input};
 
 /// Derives the `WithTestScope` trait for an AST visitor struct.
@@ -107,4 +109,23 @@ pub fn derive_with_suppression_scope(input: TokenStream) -> TokenStream {
         &["suppression_scope", "suppressed_scope"],
         &["SuppressionScope"],
     )
+}
+
+/// Attribute macro for per-rule `<RuleName>Diagnostic` types.
+///
+/// Automatically injects `#[diagnostic(code(purist::<rule_name>))]` derived from the type name
+/// and verifies at compile time that the type name matches its module file name `src/rules/<rule_name>.rs`
+/// and `RuleId::<RuleName>`.
+#[proc_macro_attribute]
+pub fn rule_diagnostic(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    expand_rule_diagnostic(attr, input)
+}
+
+/// Derives `RuleId`, `PuristLintsConfig`, and `default_rules()` from the top-level `RuleDiagnostic` enum,
+/// verifying 1-to-1 consistency across variant names, inner `<RuleName>Diagnostic` types, and `<RuleName>Rule` structs.
+#[proc_macro_derive(RuleRegistry, attributes(rule_alias))]
+pub fn derive_rule_registry_macro(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_rule_registry(input)
 }

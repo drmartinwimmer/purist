@@ -25,20 +25,20 @@
 //! fn read_config() { ... }
 //! ```
 
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing suppression hygiene: requiring `reason = "…"` and a preceding explanatory comment.
-pub(crate) struct ClippySuppressRule;
+pub(crate) struct ClippySuppressionHygieneRule;
 
-impl Rule for ClippySuppressRule {
-    fn name(&self) -> &'static str {
-        "purist::clippy_suppression_hygiene"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl ClippySuppressionHygieneRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<ClippySuppressionHygieneDiagnostic> {
         let mut visitor = SuppressVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -54,7 +54,7 @@ struct SuppressVisitor<'a> {
     /// Context containing source text and preceding comment lookup helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<ClippySuppressionHygieneDiagnostic>,
 }
 
 impl<'ast> Visit<'ast> for SuppressVisitor<'_> {
@@ -72,7 +72,7 @@ impl<'ast> Visit<'ast> for SuppressVisitor<'_> {
 fn check_attr_clippy_suppression(
     ctx: &LintContext<'_>,
     attr: &syn::Attribute,
-) -> Option<Diagnostic> {
+) -> Option<ClippySuppressionHygieneDiagnostic> {
     if !is_lint_suppression_attr(attr) {
         return None;
     }
@@ -83,33 +83,11 @@ fn check_attr_clippy_suppression(
     let span = ctx.to_span(attr.span());
 
     match (has_reason, has_comment) {
-        (false, false) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add reason = \"...\" to the attribute and document the rationale in a comment directly above it."),
-        ),
-        (false, true) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add reason = \"...\" parameter to the suppression attribute."),
-        ),
-        (true, false) => Some(
-            Diagnostic::new(
-                "purist::clippy_suppression_hygiene",
-                Severity::Warning,
-                "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Add an explanatory '// ...' comment on the line immediately preceding the attribute."),
-        ),
+        (false, false) => {
+            Some(ClippySuppressionHygieneDiagnostic::MissingReasonAndComment { span })
+        }
+        (false, true) => Some(ClippySuppressionHygieneDiagnostic::MissingReason { span }),
+        (true, false) => Some(ClippySuppressionHygieneDiagnostic::MissingComment { span }),
         (true, true) => None,
     }
 }
@@ -131,10 +109,36 @@ fn has_reason_parameter(attr: &syn::Attribute) -> bool {
     has_reason
 }
 
+/// Diagnostics emitted by `purist::clippy_suppression_hygiene`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum ClippySuppressionHygieneDiagnostic {
+    #[error(
+        "Lint suppression attribute lacks both a 'reason = \"...\"' parameter and an explanatory code comment on the preceding line."
+    )]
+    #[diagnostic(help(
+        "Add reason = \"...\" to the attribute and document the rationale in a comment directly above it."
+    ))]
+    MissingReasonAndComment { span: Span },
+    #[error(
+        "Lint suppression attribute lacks a 'reason = \"...\"' parameter explaining why it is necessary."
+    )]
+    #[diagnostic(help("Add reason = \"...\" parameter to the suppression attribute."))]
+    MissingReason { span: Span },
+    #[error(
+        "Lint suppression attribute lacks an accompanying code comment on the preceding line explaining why the lint cannot be resolved."
+    )]
+    #[diagnostic(help(
+        "Add an explanatory '// ...' comment on the line immediately preceding the attribute."
+    ))]
+    MissingComment { span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -143,12 +147,15 @@ mod tests {
         let source = "#[allow(clippy::unwrap_used)]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClippySuppressRule.check_file(&ctx, &ast);
+        let diags = ClippySuppressionHygieneRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
-        assert_that!(&diag.message, contains_substring("lacks both a 'reason"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clippy_suppression_hygiene")
+        );
+        assert_that!(diag.to_string(), contains_substring("lacks both a 'reason"));
         Ok(())
     }
 
@@ -157,13 +164,16 @@ mod tests {
         let source = "#[allow(clippy::unwrap_used, reason = \"safe\")]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClippySuppressRule.check_file(&ctx, &ast);
+        let diags = ClippySuppressionHygieneRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clippy_suppression_hygiene")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("lacks an accompanying code comment")
         );
         Ok(())
@@ -174,13 +184,16 @@ mod tests {
         let source = "// Reason explained here\n#[allow(clippy::unwrap_used)]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClippySuppressRule.check_file(&ctx, &ast);
+        let diags = ClippySuppressionHygieneRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::clippy_suppression_hygiene"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::clippy_suppression_hygiene")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("lacks a 'reason = \"...\"' parameter")
         );
         Ok(())
@@ -192,7 +205,7 @@ mod tests {
         let source = "// Tested invariant guarantees no panic here\n#[expect(clippy::unwrap_used, reason = \"infallible after check\")]\nfn foo() {}\n";
         let ctx = LintContext::new(Path::new("src/foo.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = ClippySuppressRule.check_file(&ctx, &ast);
+        let diags = ClippySuppressionHygieneRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())

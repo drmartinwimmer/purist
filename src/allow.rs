@@ -5,66 +5,13 @@
 
 use crate::PuristError;
 use crate::cargo::CargoManifest;
-use crate::diagnostics::DiagnosticReport;
+use crate::diagnostics::{Diagnostic, DiagnosticReport};
 use crate::discovery::{find_cargo_toml, find_workspace_cargo_toml};
+use crate::rules::RuleId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, value};
-
-/// Returns the canonical rule name if `rule_name` is a known purist lint rule.
-pub(crate) fn canonical_rule_name(rule_name: &str) -> Option<&'static str> {
-    let stripped = rule_name
-        .strip_prefix("purist::")
-        .or_else(|| rule_name.strip_prefix("opinionated::"))
-        .unwrap_or(rule_name);
-
-    match stripped {
-        "no_inline_mods" => Some("no_inline_mods"),
-        "free_functions" => Some("free_functions"),
-        "path_resolution" => Some("path_resolution"),
-        "error_types" => Some("error_types"),
-        "clippy_suppression_hygiene" => Some("clippy_suppression_hygiene"),
-        "test_patterns" => Some("test_patterns"),
-        "no_redundant_conversions" => Some("no_redundant_conversions"),
-        "use_declarations_over_qualified_paths" => Some("use_declarations_over_qualified_paths"),
-        "no_redundant_wrappers" => Some("no_redundant_wrappers"),
-        "no_boxed_dyn_error" => Some("no_boxed_dyn_error"),
-        "test_matcher_borrow_simplification" => Some("test_matcher_borrow_simplification"),
-        "no_test_prefix" => Some("no_test_prefix"),
-        "no_unsafe_in_tests" => Some("no_unsafe_in_tests"),
-        "centralized_command_execution" => Some("centralized_command_execution"),
-        "clap_struct_encapsulation" => Some("clap_struct_encapsulation"),
-        "command_struct_naming" => Some("command_struct_naming"),
-        "config_struct_naming" => Some("config_struct_naming"),
-        "exit_code_hygiene" => Some("exit_code_hygiene"),
-        "idiomatic_option_bool_mapping" => Some("idiomatic_option_bool_mapping"),
-        "no_wildcard_imports" => Some("no_wildcard_imports"),
-        "no_env_access_outside_config" => Some("no_env_access_outside_config"),
-        "single_match_to_let_else" => Some("single_match_to_let_else"),
-        "raii_temp_directories" => Some("raii_temp_directories"),
-        "no_println_in_libraries" => Some("no_println_in_libraries"),
-        "cli_run_consumes_self" => Some("cli_run_consumes_self"),
-        "no_double_negation" => Some("no_double_negation"),
-        "googletest_conventions" => Some("googletest_conventions"),
-        "max_file_lines" => Some("max_file_lines"),
-        "no_trivial_getters_setters"
-        | "no_trivial_getset"
-        | "trivial_getters_setters"
-        | "trivial_getset" => Some("no_trivial_getters_setters"),
-        "max_nesting_depth" => Some("max_nesting_depth"),
-        "lib_facade_hygiene" => Some("lib_facade_hygiene"),
-        "no_negative_bool" => Some("no_negative_bool"),
-        "no_has_trait_prefix" => Some("no_has_trait_prefix"),
-        "granular_visitor_hooks" => Some("granular_visitor_hooks"),
-        "no_bifurcated_trait_dispatch" => Some("no_bifurcated_trait_dispatch"),
-        "no_primitive_flag_clutter" => Some("no_primitive_flag_clutter"),
-        "no_interior_mutability_in_visitors" => Some("no_interior_mutability_in_visitors"),
-        "prefer_scoped_closures" => Some("prefer_scoped_closures"),
-        "descriptive_checker_names" => Some("descriptive_checker_names"),
-        _ => None,
-    }
-}
 
 /// Checks whether a manifest specifies `[lints] workspace = true`.
 fn has_lints_workspace_true(manifest_path: &Path) -> bool {
@@ -251,15 +198,15 @@ pub(crate) fn allow_project(
     let mut rules_by_manifest: BTreeMap<PathBuf, BTreeSet<&'static str>> = BTreeMap::new();
 
     for diag in &report.diagnostics {
-        let Some(rule_name) = canonical_rule_name(&diag.rule) else {
+        let Some(code) = diag.code() else {
+            continue;
+        };
+        let Some(rule_id) = RuleId::from_name(&code.to_string()) else {
             continue;
         };
 
-        let file_manifest = diag
-            .span
-            .as_ref()
-            .and_then(|s| find_cargo_toml(&s.file))
-            .unwrap_or_else(|| target_manifest.clone());
+        let file_manifest =
+            find_cargo_toml(&diag.span().file).unwrap_or_else(|| target_manifest.clone());
 
         let final_manifest = if has_lints_workspace_true(&file_manifest) {
             find_workspace_cargo_toml(&file_manifest).unwrap_or(file_manifest)
@@ -270,7 +217,7 @@ pub(crate) fn allow_project(
         rules_by_manifest
             .entry(final_manifest)
             .or_default()
-            .insert(rule_name);
+            .insert(rule_id.as_str());
     }
 
     if rules_by_manifest.is_empty() {
@@ -289,8 +236,8 @@ pub(crate) fn allow_project(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::{Diagnostic, Severity, Span};
-    use crate::rules::default_rules;
+    use crate::diagnostics::Span;
+    use crate::rules::RuleDiagnostic;
     use googletest::prelude::*;
 
     struct TempDirGuard(PathBuf);
@@ -299,30 +246,6 @@ mod tests {
         fn drop(&mut self) {
             drop(fs::remove_dir_all(&self.0));
         }
-    }
-
-    #[googletest::test]
-    fn canonical_rule_name_maps_canonical_rule_names_succeeds() {
-        for rule in default_rules() {
-            let name = rule.name();
-            let stripped = name.strip_prefix("purist::").unwrap_or(name);
-            assert_that!(canonical_rule_name(name), eq(Some(stripped)));
-            assert_that!(canonical_rule_name(stripped), eq(Some(stripped)));
-        }
-        assert_that!(
-            canonical_rule_name("purist::no_wildcard_imports"),
-            eq(Some("no_wildcard_imports"))
-        );
-        assert_that!(
-            canonical_rule_name("opinionated::no_wildcard_imports"),
-            eq(Some("no_wildcard_imports"))
-        );
-        assert_that!(
-            canonical_rule_name("no_wildcard_imports"),
-            eq(Some("no_wildcard_imports"))
-        );
-        assert_that!(canonical_rule_name("purist::syntax_error"), eq(None));
-        assert_that!(canonical_rule_name("unknown_nonexistent_rule"), eq(None));
     }
 
     #[googletest::test]
@@ -550,22 +473,17 @@ edition = "2024"
 
         let src_file = temp_dir.join("src/lib.rs");
         let mut report = DiagnosticReport::default();
-        report.add(
-            Diagnostic::new(
-                "purist::no_wildcard_imports",
-                Severity::Warning,
-                "Wildcard import used",
-            )
-            .with_span(Span::new(&src_file, 1, 1, 1, 10)),
-        );
-        report.add(
-            Diagnostic::new(
-                "purist::error_types",
-                Severity::Warning,
-                "Unstructured error",
-            )
-            .with_span(Span::new(&src_file, 5, 1, 5, 20)),
-        );
+        report.add(RuleDiagnostic::from(crate::NoWildcardImportsDiagnostic {
+            path_str: "foo::*".to_string(),
+            span: Span::new(&src_file, 1, 1, 1, 10),
+        }));
+        report.add(RuleDiagnostic::from(
+            crate::ErrorTypesDiagnostic::UnstructuredErrorReturn {
+                fn_name: "run".to_string(),
+                err_desc: "String".to_string(),
+                span: Span::new(&src_file, 5, 1, 5, 20),
+            },
+        ));
 
         let count = allow_project(&temp_dir, &report)?;
         assert_that!(count, eq(2));

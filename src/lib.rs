@@ -13,9 +13,28 @@ mod rules;
 mod scopes;
 
 pub use command::{PuristCommand, PuristError};
-pub use diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
+pub use diagnostics::{
+    Diagnostic, DiagnosticReport, EngineDiagnostic, PuristDiagnostic, Severity, Span,
+};
 pub use engine::PuristEngine;
 pub use reporter::{OutputFormat, render_report};
+pub use rules::{
+    CentralizedCommandExecutionDiagnostic, ClapStructEncapsulationDiagnostic,
+    CliRunConsumesSelfDiagnostic, ClippySuppressionHygieneDiagnostic,
+    CommandStructNamingDiagnostic, ConfigStructNamingDiagnostic, DescriptiveCheckerNamesDiagnostic,
+    ErrorTypesDiagnostic, ExitCodeHygieneDiagnostic, FreeFunctionsDiagnostic,
+    GoogletestConventionsDiagnostic, GranularVisitorHooksDiagnostic,
+    IdiomaticOptionBoolMappingDiagnostic, LibFacadeHygieneDiagnostic, MaxFileLinesDiagnostic,
+    MaxNestingDepthDiagnostic, NoBifurcatedTraitDispatchDiagnostic, NoBoxedDynErrorDiagnostic,
+    NoDoubleNegationDiagnostic, NoEnvAccessOutsideConfigDiagnostic, NoHasTraitPrefixDiagnostic,
+    NoInlineModsDiagnostic, NoInteriorMutabilityInVisitorsDiagnostic, NoNegativeBoolDiagnostic,
+    NoPrimitiveFlagClutterDiagnostic, NoPrintlnInLibrariesDiagnostic,
+    NoRedundantConversionsDiagnostic, NoRedundantWrappersDiagnostic, NoTestPrefixDiagnostic,
+    NoTrivialGettersSettersDiagnostic, NoUnsafeInTestsDiagnostic, NoWildcardImportsDiagnostic,
+    PathResolutionDiagnostic, PreferScopedClosuresDiagnostic, RaiiTempDirectoriesDiagnostic,
+    RuleDiagnostic, SingleMatchToLetElseDiagnostic, TestMatcherBorrowSimplificationDiagnostic,
+    TestPatternsDiagnostic, UseDeclarationsOverQualifiedPathsDiagnostic,
+};
 
 #[cfg(test)]
 mod tests {

@@ -34,20 +34,20 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging raw `Command::new` invocations outside dedicated command/tool modules.
-pub(crate) struct CentralizedCommandsRule;
+pub(crate) struct CentralizedCommandExecutionRule;
 
-impl Rule for CentralizedCommandsRule {
-    fn name(&self) -> &'static str {
-        "purist::centralized_command_execution"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl CentralizedCommandExecutionRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<CentralizedCommandExecutionDiagnostic> {
         if is_exempt_path(ctx) {
             return Vec::new();
         }
@@ -85,7 +85,7 @@ struct CommandVisitor<'a> {
     /// Context containing file metadata and source span converters.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<CentralizedCommandExecutionDiagnostic>,
     /// Tracks active test scope across modules and test functions.
     test_scope: TestScope,
 }
@@ -120,23 +120,30 @@ impl CommandVisitor<'_> {
         const TARGETS: &[&[&str]] = &[&["Command", "new"]];
         if check_call_matches_path(call, TARGETS) {
             let span = self.ctx.to_span(call.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::centralized_command_execution",
-                    Severity::Warning,
-                    "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module."),
-            );
+            self.diagnostics
+                .push(CentralizedCommandExecutionDiagnostic { span });
         }
     }
+}
+
+/// Diagnostic emitted by `purist::centralized_command_execution`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Direct invocation of 'Command::new' outside dedicated command/tool module. Encapsulate external process execution in a dedicated tool struct."
+)]
+#[diagnostic(help(
+    "Encapsulate command execution and stdout parsing in a dedicated tool builder struct in a 'tools' or 'commands' module."
+))]
+pub struct CentralizedCommandExecutionDiagnostic {
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -148,11 +155,14 @@ pub fn check_git() {
 "#;
         let ctx = LintContext::new(Path::new("src/services/git.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = CentralizedCommandsRule.check_file(&ctx, &ast);
+        let diags = CentralizedCommandExecutionRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::centralized_command_execution"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::centralized_command_execution")
+        );
         Ok(())
     }
 
@@ -165,7 +175,7 @@ pub fn run_cargo() {
 "#;
         let ctx = LintContext::new(Path::new("src/tools/cargo.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = CentralizedCommandsRule.check_file(&ctx, &ast);
+        let diags = CentralizedCommandExecutionRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -181,7 +191,7 @@ fn execute_git_works() {
 "#;
         let ctx = LintContext::new(Path::new("src/services/git.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = CentralizedCommandsRule.check_file(&ctx, &ast);
+        let diags = CentralizedCommandExecutionRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())

@@ -20,20 +20,20 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule flagging wildcard `*` imports outside test contexts and preludes.
 pub(crate) struct NoWildcardImportsRule;
 
-impl Rule for NoWildcardImportsRule {
-    fn name(&self) -> &'static str {
-        "purist::no_wildcard_imports"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoWildcardImportsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoWildcardImportsDiagnostic> {
         let mut visitor = WildcardImportVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -49,7 +49,7 @@ impl Rule for NoWildcardImportsRule {
 #[derive(WithTestScope)]
 struct WildcardImportVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoWildcardImportsDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -96,17 +96,8 @@ impl WildcardImportVisitor<'_> {
                         format!("{}::*", path_segments.join("::"))
                     };
                     let span = self.ctx.to_span(g.span());
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            "purist::no_wildcard_imports",
-                            Severity::Warning,
-                            format!(
-                                "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
-                            ),
-                        )
-                        .with_span(span)
-                        .with_suggested_fix("Replace wildcard import with explicit item imports."),
-                    );
+                    self.diagnostics
+                        .push(NoWildcardImportsDiagnostic { path_str, span });
                 }
             }
             syn::UseTree::Group(group) => {
@@ -119,10 +110,23 @@ impl WildcardImportVisitor<'_> {
     }
 }
 
+/// Diagnostic emitted by `purist::no_wildcard_imports`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Avoid wildcard import '{path_str}'. Wildcard imports obscure symbol provenance and cause namespace pollution."
+)]
+#[diagnostic(help("Replace wildcard import with explicit item imports."))]
+pub struct NoWildcardImportsDiagnostic {
+    pub path_str: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -134,8 +138,11 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_wildcard_imports"));
-        assert_that!(&diag.message, contains_substring("std::collections::*"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_wildcard_imports")
+        );
+        assert_that!(diag.to_string(), contains_substring("std::collections::*"));
         Ok(())
     }
 
@@ -156,6 +163,7 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use miette::Diagnostic;
 }
 "#;
         let ctx = LintContext::new(Path::new("src/lib.rs"), source);

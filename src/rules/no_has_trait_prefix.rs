@@ -27,19 +27,19 @@
 //! ```
 
 use super::common::has_suppression_attribute;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::visit::{self, Visit};
 
 /// Rule forbidding `Has...` prefixes on trait definitions.
 pub(crate) struct NoHasTraitPrefixRule;
 
-impl Rule for NoHasTraitPrefixRule {
-    fn name(&self) -> &'static str {
-        "purist::no_has_trait_prefix"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoHasTraitPrefixRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoHasTraitPrefixDiagnostic> {
         let mut visitor = TraitNamingVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -53,7 +53,7 @@ impl Rule for NoHasTraitPrefixRule {
 /// Visitor that inspects trait definitions for `Has...` prefixes.
 struct TraitNamingVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoHasTraitPrefixDiagnostic>,
 }
 
 impl<'ast> Visit<'ast> for TraitNamingVisitor<'_> {
@@ -72,19 +72,10 @@ impl TraitNamingVisitor<'_> {
         let ident_str = item_trait.ident.to_string();
         if is_has_trait_name(&ident_str) {
             let span = self.ctx.to_span(item_trait.ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_has_trait_prefix",
-                    Severity::Warning,
-                    format!(
-                        "Trait '{ident_str}' uses the 'Has...' prefix, which is an OOP-style anti-pattern in Rust. Use 'With...' for contextual capabilities or a descriptive noun/adjective."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(
-                    "Rename trait to 'With...' if providing scoped execution/context, or a descriptive noun/adjective.",
-                ),
-            );
+            self.diagnostics.push(NoHasTraitPrefixDiagnostic {
+                trait_name: ident_str,
+                span,
+            });
         }
     }
 }
@@ -99,10 +90,26 @@ fn is_has_trait_name(ident: &str) -> bool {
     matches!(fourth_char, Some(c) if c.is_uppercase() || c == '_')
 }
 
+/// Diagnostic emitted by `purist::no_has_trait_prefix`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Trait '{trait_name}' uses the 'Has...' prefix, which is an OOP-style anti-pattern in Rust. Use 'With...' for contextual capabilities or a descriptive noun/adjective."
+)]
+#[diagnostic(help(
+    "Rename trait to 'With...' if providing scoped execution/context, or a descriptive noun/adjective."
+))]
+pub struct NoHasTraitPrefixDiagnostic {
+    pub trait_name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -118,10 +125,16 @@ pub trait HasLogger {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_has_trait_prefix"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_has_trait_prefix")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Trait 'HasLogger' uses the 'Has...' prefix")
         );
         Ok(())

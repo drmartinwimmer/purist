@@ -42,8 +42,8 @@
 
 use super::common::{TestScope, WithTestScope, extract_type_ident};
 use crate::checkers::{ReceiverKind, check_fn_receiver};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{
     TypeScope, WithTypeScope, derives_clap, is_cli_or_command_struct_name,
     is_command_execution_fn_name,
@@ -55,12 +55,12 @@ use syn::visit::{self, Visit};
 /// Rule enforcing that CLI command execution methods consume `self` by value rather than `&self`.
 pub(crate) struct CliRunConsumesSelfRule;
 
-impl Rule for CliRunConsumesSelfRule {
-    fn name(&self) -> &'static str {
-        "purist::cli_run_consumes_self"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl CliRunConsumesSelfRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<CliRunConsumesSelfDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -96,7 +96,7 @@ fn collect_clap_struct_names(file: &syn::File) -> HashSet<String> {
 #[derive(WithTestScope, WithTypeScope)]
 struct CliRunVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<CliRunConsumesSelfDiagnostic>,
     test_scope: TestScope,
     type_scope: TypeScope,
     clap_structs: HashSet<String>,
@@ -125,12 +125,8 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
                 && let Some(struct_name) = this.type_scope.current_impl_name()
                 && (is_cli_or_command_struct_name(struct_name)
                     || this.clap_structs.contains(struct_name))
-                && let Some(diag) = check_method_receiver_consumes_self(
-                    this.ctx,
-                    "purist::cli_run_consumes_self",
-                    struct_name,
-                    impl_fn,
-                )
+                && let Some(diag) =
+                    check_method_receiver_consumes_self(this.ctx, struct_name, impl_fn)
             {
                 this.diagnostics.push(diag);
             }
@@ -143,10 +139,9 @@ impl<'ast> Visit<'ast> for CliRunVisitor<'_> {
 /// Checks whether an implementation method on a command struct incorrectly borrows `&self`.
 fn check_method_receiver_consumes_self(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     struct_name: &str,
     impl_fn: &syn::ImplItemFn,
-) -> Option<Diagnostic> {
+) -> Option<CliRunConsumesSelfDiagnostic> {
     let fn_name = impl_fn.sig.ident.to_string();
     if !is_command_execution_fn_name(&fn_name) {
         return None;
@@ -158,23 +153,31 @@ fn check_method_receiver_consumes_self(
     }
 
     let span = ctx.to_span(impl_fn.sig.inputs.first()?.span());
-    Some(
-        Diagnostic::new(
-            rule_name,
-            Severity::Warning,
-            format!(
-                "CLI execution method '{fn_name}' on command struct '{struct_name}' takes '&self' by reference. CLI commands should consume 'self' by value ('pub fn {fn_name}(self, ...)') to take ownership of parsed arguments and avoid unnecessary cloning."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix("Change method receiver from '&self' to 'self'."),
-    )
+    Some(CliRunConsumesSelfDiagnostic {
+        fn_name,
+        struct_name: struct_name.to_string(),
+        span,
+    })
+}
+
+/// Diagnostic emitted by `purist::cli_run_consumes_self`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "CLI execution method '{fn_name}' on command struct '{struct_name}' takes '&self' by reference. CLI commands should consume 'self' by value ('pub fn {fn_name}(self, ...)') to take ownership of parsed arguments and avoid unnecessary cloning."
+)]
+#[diagnostic(help("Change method receiver from '&self' to 'self'."))]
+pub struct CliRunConsumesSelfDiagnostic {
+    pub fn_name: String,
+    pub struct_name: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -194,9 +197,12 @@ impl BuildCommand {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::cli_run_consumes_self"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::cli_run_consumes_self")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("takes '&self' by reference")
         );
         Ok(())

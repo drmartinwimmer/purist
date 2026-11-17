@@ -32,8 +32,8 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope, is_bool_type};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::visit::{self, Visit};
 
@@ -52,12 +52,12 @@ const NEGATIVE_EXACT_WORDS: &[&str] = &["skip", "disable", "disabled", "disallow
 /// Rule enforcing affirmative/positive boolean naming across structs, enums, and bindings.
 pub(crate) struct NoNegativeBoolRule;
 
-impl Rule for NoNegativeBoolRule {
-    fn name(&self) -> &'static str {
-        "purist::no_negative_bool"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoNegativeBoolRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoNegativeBoolDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -77,7 +77,7 @@ impl Rule for NoNegativeBoolRule {
 #[derive(WithTestScope, WithTypeScope)]
 struct NegativeBoolVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoNegativeBoolDiagnostic>,
     test_scope: TestScope,
     type_scope: TypeScope,
 }
@@ -150,19 +150,13 @@ impl NegativeBoolVisitor<'_> {
                 .type_scope
                 .container_description()
                 .unwrap_or_else(|| "type".to_string());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_negative_bool",
-                    Severity::Warning,
-                    format!(
-                        "Field '{field_name}' in {container_desc} uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename '{field_name}' to affirmative '{suggested}'."
-                )),
-            );
+            self.diagnostics
+                .push(NoNegativeBoolDiagnostic::NegativeBooleanField {
+                    field_name,
+                    container_desc,
+                    suggested,
+                    span,
+                });
         }
     }
 
@@ -196,19 +190,12 @@ impl NegativeBoolVisitor<'_> {
         if is_bool {
             let span = self.ctx.to_span(pat_ident.ident.span());
             let suggested = suggest_affirmative(&var_name, prefix);
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_negative_bool",
-                    Severity::Warning,
-                    format!(
-                        "Variable '{var_name}' uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix(format!(
-                    "Rename '{var_name}' to affirmative '{suggested}'."
-                )),
-            );
+            self.diagnostics
+                .push(NoNegativeBoolDiagnostic::NegativeBooleanVariable {
+                    var_name,
+                    suggested,
+                    span,
+                });
         }
     }
 }
@@ -244,6 +231,32 @@ fn suggest_affirmative(name: &str, prefix: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or("enabled")
         .to_string()
+}
+
+/// Diagnostics emitted by `purist::no_negative_bool`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoNegativeBoolDiagnostic {
+    #[error(
+        "Field '{field_name}' in {container_desc} uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
+    )]
+    #[diagnostic(help("Rename '{field_name}' to affirmative '{suggested}'."))]
+    NegativeBooleanField {
+        field_name: String,
+        container_desc: String,
+        suggested: String,
+        span: Span,
+    },
+
+    #[error(
+        "Variable '{var_name}' uses negative boolean naming. Use affirmative/positive naming (e.g. '{suggested}') instead of negative booleans."
+    )]
+    #[diagnostic(help("Rename '{var_name}' to affirmative '{suggested}'."))]
+    NegativeBooleanVariable {
+        var_name: String,
+        suggested: String,
+        span: Span,
+    },
 }
 
 #[cfg(test)]
@@ -282,9 +295,9 @@ mod tests {
         let diags = rule.check_file(&ctx, &file);
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(diag.message, contains_substring("skip_fmt"));
+        assert_that!(diag.to_string(), contains_substring("skip_fmt"));
         assert_that!(
-            diag.message,
+            diag.to_string(),
             contains_substring("uses negative boolean naming")
         );
         Ok(())
@@ -303,7 +316,7 @@ mod tests {
         let diags = rule.check_file(&ctx, &file);
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(diag.message, contains_substring("no_cache"));
+        assert_that!(diag.to_string(), contains_substring("no_cache"));
         Ok(())
     }
 
@@ -323,8 +336,8 @@ mod tests {
         assert_that!(diags.len(), eq(2));
         let first = diags.first().ok_or("expected first diagnostic")?;
         let second = diags.get(1).ok_or("expected second diagnostic")?;
-        assert_that!(first.message, contains_substring("skip_tls"));
-        assert_that!(second.message, contains_substring("no_cache"));
+        assert_that!(first.to_string(), contains_substring("skip_tls"));
+        assert_that!(second.to_string(), contains_substring("no_cache"));
         Ok(())
     }
 
@@ -343,8 +356,8 @@ mod tests {
         assert_that!(diags.len(), eq(2));
         let first = diags.first().ok_or("expected first diagnostic")?;
         let second = diags.get(1).ok_or("expected second diagnostic")?;
-        assert_that!(first.message, contains_substring("disabled"));
-        assert_that!(second.message, contains_substring("skip"));
+        assert_that!(first.to_string(), contains_substring("disabled"));
+        assert_that!(second.to_string(), contains_substring("skip"));
         Ok(())
     }
 
@@ -396,7 +409,7 @@ mod tests {
         let diags = rule.check_file(&ctx, &file);
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(diag.message, contains_substring("skip_check"));
+        assert_that!(diag.to_string(), contains_substring("skip_check"));
         Ok(())
     }
 
@@ -415,8 +428,8 @@ mod tests {
         assert_that!(diags.len(), eq(2));
         let first = diags.first().ok_or("expected first diagnostic")?;
         let second = diags.get(1).ok_or("expected second diagnostic")?;
-        assert_that!(first.message, contains_substring("skip_formatting"));
-        assert_that!(second.message, contains_substring("no_lints"));
+        assert_that!(first.to_string(), contains_substring("skip_formatting"));
+        assert_that!(second.to_string(), contains_substring("no_lints"));
         Ok(())
     }
 

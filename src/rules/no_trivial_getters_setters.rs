@@ -50,8 +50,8 @@
 //! ```
 
 use super::common::{extract_type_ident, has_cfg_test_attr, has_test_attr};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{TestScope, WithTestScope, derives_clap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::{self, Visit};
@@ -59,12 +59,12 @@ use syn::visit::{self, Visit};
 /// Rule detecting trivial getter/setter combos where direct field access suffices.
 pub(crate) struct NoTrivialGettersSettersRule;
 
-impl Rule for NoTrivialGettersSettersRule {
-    fn name(&self) -> &'static str {
-        "purist::no_trivial_getters_setters"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoTrivialGettersSettersRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoTrivialGettersSettersDiagnostic> {
         let mut diagnostics = Vec::new();
         if ctx.is_test_file() {
             return diagnostics;
@@ -81,21 +81,10 @@ impl Rule for NoTrivialGettersSettersRule {
             if visitor.exempt_structs.contains(struct_name) {
                 continue;
             }
-            check_struct_getter_setter_combos(
-                ctx,
-                self.name(),
-                struct_name,
-                methods,
-                &mut diagnostics,
-            );
+            check_struct_getter_setter_combos(ctx, struct_name, methods, &mut diagnostics);
         }
 
-        diagnostics.sort_by_key(|d| {
-            d.span
-                .as_ref()
-                .map(|s| (s.start_line, s.start_col))
-                .unwrap_or((0, 0))
-        });
+        diagnostics.sort_by_key(|d| (d.span().start_line, d.span().start_col));
         diagnostics
     }
 }
@@ -209,37 +198,30 @@ fn is_exempt_method(item_fn: &syn::ImplItemFn) -> bool {
 
 struct DiagEmitter<'a, 'c> {
     ctx: &'a LintContext<'c>,
-    rule_name: &'static str,
     struct_name: &'a str,
     field_name: &'a str,
-    diagnostics: &'a mut Vec<Diagnostic>,
+    diagnostics: &'a mut Vec<NoTrivialGettersSettersDiagnostic>,
 }
 
 impl DiagEmitter<'_, '_> {
     fn emit(&mut self, method: &MethodInfo<'_>, kind: &str, partner_name: &str) {
-        let msg = format!(
-            "Method '{}' is a trivial {kind} for field '{}' on struct '{}' which forms a trivial getter/setter combo with '{partner_name}'. Trivial getter/setter combos add unnecessary indirection (YAGNI).",
-            method.name, self.field_name, self.struct_name
-        );
-        let fix = format!(
-            "Remove trivial {kind} '{}' and access field '{}' directly.",
-            method.name, self.field_name
-        );
-        self.diagnostics.push(
-            Diagnostic::new(self.rule_name, Severity::Warning, msg)
-                .with_span(self.ctx.to_span(method.span))
-                .with_suggested_fix(fix),
-        );
+        self.diagnostics.push(NoTrivialGettersSettersDiagnostic {
+            method_name: method.name.clone(),
+            kind: kind.to_string(),
+            field_name: self.field_name.to_string(),
+            struct_name: self.struct_name.to_string(),
+            partner_name: partner_name.to_string(),
+            span: self.ctx.to_span(method.span),
+        });
     }
 }
 
 /// Checks methods of a struct for trivial getter/setter combos.
 fn check_struct_getter_setter_combos(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     struct_name: &str,
     methods: &[MethodInfo<'_>],
-    diagnostics: &mut Vec<Diagnostic>,
+    diagnostics: &mut Vec<NoTrivialGettersSettersDiagnostic>,
 ) {
     let mut field_accessors: HashMap<String, FieldAccessors<'_>> = HashMap::new();
 
@@ -274,7 +256,6 @@ fn check_struct_getter_setter_combos(
 
         let mut emitter = DiagEmitter {
             ctx,
-            rule_name,
             struct_name,
             field_name,
             diagnostics,
@@ -495,10 +476,29 @@ fn extract_field_and_param_from_setter_stmt(
     None
 }
 
+/// Diagnostic emitted by `purist::no_trivial_getters_setters`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Method '{method_name}' is a trivial {kind} for field '{field_name}' on struct '{struct_name}' which forms a trivial getter/setter combo with '{partner_name}'. Trivial getter/setter combos add unnecessary indirection (YAGNI)."
+)]
+#[diagnostic(help(
+    "Remove trivial {kind} '{method_name}' and access field '{field_name}' directly."
+))]
+pub struct NoTrivialGettersSettersDiagnostic {
+    pub method_name: String,
+    pub kind: String,
+    pub field_name: String,
+    pub struct_name: String,
+    pub partner_name: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -525,13 +525,16 @@ impl Point {
         assert_that!(diags.len(), eq(2));
         let d0 = diags.first().ok_or("expected first diagnostic")?;
         let d1 = diags.get(1).ok_or("expected second diagnostic")?;
-        assert_that!(&d0.rule, eq("purist::no_trivial_getters_setters"));
         assert_that!(
-            &d0.message,
+            d0.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_trivial_getters_setters")
+        );
+        assert_that!(
+            d0.to_string(),
             contains_substring("Method 'x' is a trivial getter")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Method 'set_x' is a trivial setter")
         );
         Ok(())
@@ -562,11 +565,11 @@ impl Point {
         let d0 = diags.first().ok_or("expected first diagnostic")?;
         let d1 = diags.get(1).ok_or("expected second diagnostic")?;
         assert_that!(
-            &d0.message,
+            d0.to_string(),
             contains_substring("Method 'x' is a trivial getter")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Method 'set_x' is a trivial setter")
         );
         Ok(())
@@ -597,11 +600,11 @@ impl Config {
         let d0 = diags.first().ok_or("expected first diagnostic")?;
         let d1 = diags.get(1).ok_or("expected second diagnostic")?;
         assert_that!(
-            &d0.message,
+            d0.to_string(),
             contains_substring("Method 'get_timeout' is a trivial getter")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Method 'set_timeout' is a trivial setter")
         );
         Ok(())
@@ -632,11 +635,11 @@ impl Item {
         let d0 = diags.first().ok_or("expected first diagnostic")?;
         let d1 = diags.get(1).ok_or("expected second diagnostic")?;
         assert_that!(
-            &d0.message,
+            d0.to_string(),
             contains_substring("Method 'count' is a trivial getter")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Method 'count_mut' is a trivial mutable getter")
         );
         Ok(())

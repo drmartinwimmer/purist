@@ -28,8 +28,8 @@
 //! ```
 
 use super::common::{TestScope, WithTestScope};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{BlockScope, WithBlockScope};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -38,12 +38,12 @@ use syn::visit::{self, Visit};
 /// Rule detecting redundant serialization roundtrips (e.g. `to_string` followed by `from_str`).
 pub(crate) struct NoRedundantConversionsRule;
 
-impl Rule for NoRedundantConversionsRule {
-    fn name(&self) -> &'static str {
-        "purist::no_redundant_conversions"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoRedundantConversionsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoRedundantConversionsDiagnostic> {
         if ctx.is_test_file() {
             return Vec::new();
         }
@@ -66,7 +66,7 @@ struct RedundantConversionsVisitor<'a> {
     /// Lint context containing file path and coordinate mapping helpers.
     ctx: &'a LintContext<'a>,
     /// Accumulated diagnostic findings.
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoRedundantConversionsDiagnostic>,
     /// Lexical block scope tracking variables assigned from serializer outputs.
     block_scope: BlockScope<String, proc_macro2::Span>,
     /// Tracks active test scope across modules and test functions.
@@ -137,7 +137,7 @@ fn check_redundant_conversion_call(
     ctx: &LintContext<'_>,
     call: &syn::ExprCall,
     block_scope: &BlockScope<String, proc_macro2::Span>,
-) -> Vec<Diagnostic> {
+) -> Vec<NoRedundantConversionsDiagnostic> {
     let mut findings = Vec::new();
 
     if !is_serde_parse_func(&call.func) {
@@ -149,13 +149,7 @@ fn check_redundant_conversion_call(
         if let Some(inner_call_span) = find_nested_serializer_call(arg) {
             let span = ctx.to_span(inner_call_span);
             findings.push(
-                Diagnostic::new(
-                    "purist::no_redundant_conversions",
-                    Severity::Warning,
-                    "Redundant serialization roundtrip: value serialized and immediately deserialized.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Use 'Clone::clone', 'From::from', or 'serde_json::to_value' instead of stringifying and re-parsing."),
+                NoRedundantConversionsDiagnostic::RedundantNestedSerializationRoundtrip { span },
             );
         }
     }
@@ -167,15 +161,10 @@ fn check_redundant_conversion_call(
         {
             let span = ctx.to_span(init_span);
             findings.push(
-                Diagnostic::new(
-                    "purist::no_redundant_conversions",
-                    Severity::Warning,
-                    format!(
-                        "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."),
+                NoRedundantConversionsDiagnostic::RedundantVariableSerializationRoundtrip {
+                    ident,
+                    span,
+                },
             );
         }
     }
@@ -259,10 +248,29 @@ fn find_nested_serializer_call(expr: &syn::Expr) -> Option<proc_macro2::Span> {
     }
 }
 
+/// Diagnostics emitted by `purist::no_redundant_conversions`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoRedundantConversionsDiagnostic {
+    #[error("Redundant serialization roundtrip: value serialized and immediately deserialized.")]
+    #[diagnostic(help(
+        "Use 'Clone::clone', 'From::from', or 'serde_json::to_value' instead of stringifying and re-parsing."
+    ))]
+    RedundantNestedSerializationRoundtrip { span: Span },
+    #[error(
+        "Redundant serialization roundtrip: variable '{ident}' serialized and immediately deserialized."
+    )]
+    #[diagnostic(help(
+        "Use 'Clone::clone', 'From::from', or direct mapping instead of roundtrip serialization."
+    ))]
+    RedundantVariableSerializationRoundtrip { ident: String, span: Span },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -278,7 +286,10 @@ fn duplicate(data: &MyData) -> MyData {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_redundant_conversions"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_redundant_conversions")
+        );
         Ok(())
     }
 
@@ -297,8 +308,14 @@ fn convert(data: &MyData) -> MyData {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_redundant_conversions"));
-        assert_that!(&diag.message, contains_substring("variable 'serialized'"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_redundant_conversions")
+        );
+        assert_that!(
+            diag.to_string(),
+            contains_substring("variable 'serialized'")
+        );
         Ok(())
     }
 

@@ -45,20 +45,20 @@
 //! ```
 
 use super::common::extract_type_ident;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use std::collections::{HashMap, HashSet};
 use syn::Fields;
 
 /// Rule detecting stateless empty braced/tuple structs used solely as static namespaces.
 pub(crate) struct FreeFunctionsRule;
 
-impl Rule for FreeFunctionsRule {
-    fn name(&self) -> &'static str {
-        "purist::free_functions"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl FreeFunctionsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<FreeFunctionsDiagnostic> {
         // 1. Identify all non-unit empty structs (braced `{}` or tuple `()`) in the file
         let empty_structs = collect_empty_structs(file);
         if empty_structs.is_empty() {
@@ -69,7 +69,7 @@ impl Rule for FreeFunctionsRule {
         let impl_analysis = analyze_struct_implementations(file, &empty_structs);
 
         // 3. Generate findings for structs that have static functions but no instance methods or traits
-        build_free_function_diagnostics(ctx, self.name(), empty_structs, impl_analysis)
+        build_free_function_diagnostics(ctx, empty_structs, impl_analysis)
     }
 }
 
@@ -152,10 +152,9 @@ fn analyze_struct_implementations(
 /// Produces diagnostics for empty braced/tuple structs that act strictly as function namespaces.
 fn build_free_function_diagnostics(
     ctx: &LintContext<'_>,
-    rule_name: &'static str,
     empty_structs: HashMap<String, proc_macro2::Span>,
     analysis: StructImplAnalysis,
-) -> Vec<Diagnostic> {
+) -> Vec<FreeFunctionsDiagnostic> {
     let mut diagnostics = Vec::new();
 
     for (struct_name, span) in empty_structs {
@@ -170,30 +169,36 @@ fn build_free_function_diagnostics(
         let implements_traits = analysis.implemented_traits.contains(&struct_name);
 
         if static_fn_count > 0 && !has_instance_methods && !implements_traits {
-            diagnostics.push(
-                Diagnostic::new(
-                    rule_name,
-                    Severity::Warning,
-                    format!(
-                        "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module or a unit struct ('struct {struct_name};')."
-                    ),
-                )
-                .with_span(ctx.to_span(span))
-                .with_suggested_fix(format!(
-                    "Remove struct '{struct_name}' and export its functions as top-level free functions, or convert it to a unit struct 'struct {struct_name};'."
-                )),
-            );
+            diagnostics.push(FreeFunctionsDiagnostic {
+                struct_name,
+                span: ctx.to_span(span),
+            });
         }
     }
 
-    diagnostics.sort_by_key(|d| d.span.as_ref().map(|s| s.start_line).unwrap_or(0));
+    diagnostics.sort_by_key(|d| d.span().start_line);
     diagnostics
+}
+
+/// Diagnostic emitted by `purist::free_functions`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Struct '{struct_name}' is stateless and used solely as a namespace for functions. Replace with idiomatic free functions in the module or a unit struct ('struct {struct_name};')."
+)]
+#[diagnostic(help(
+    "Remove struct '{struct_name}' and export its functions as top-level free functions, or convert it to a unit struct 'struct {struct_name};'."
+))]
+pub struct FreeFunctionsDiagnostic {
+    pub struct_name: String,
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -213,9 +218,12 @@ impl Parser {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::free_functions"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::free_functions")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Struct 'Parser' is stateless")
         );
         Ok(())
@@ -238,7 +246,10 @@ impl Parser {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::free_functions"));
+        assert_that!(
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::free_functions")
+        );
         Ok(())
     }
 

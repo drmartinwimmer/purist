@@ -38,8 +38,8 @@ use super::common::{
     TestScope, WithTestScope, derives_any, extract_type_ident, has_suppression_attribute,
     is_bool_type, path_ends_with_ident,
 };
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use std::collections::HashSet;
 use std::path::Path;
 use syn::visit::{self, Visit};
@@ -48,12 +48,12 @@ use syn::{Item, ItemImpl, ItemStruct, Type};
 /// Rule forbidding excessive loose boolean and flag tracking fields in structs.
 pub(crate) struct NoPrimitiveFlagClutterRule;
 
-impl Rule for NoPrimitiveFlagClutterRule {
-    fn name(&self) -> &'static str {
-        "purist::no_primitive_flag_clutter"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoPrimitiveFlagClutterRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoPrimitiveFlagClutterDiagnostic> {
         let visitor_names = identify_visitor_struct_names(file);
         let mut visitor = StructFlagVisitor {
             ctx,
@@ -71,7 +71,7 @@ impl Rule for NoPrimitiveFlagClutterRule {
 #[derive(WithTestScope)]
 struct StructFlagVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoPrimitiveFlagClutterDiagnostic>,
     test_scope: TestScope,
     visitor_names: HashSet<String>,
 }
@@ -105,34 +105,24 @@ impl StructFlagVisitor<'_> {
 
         if is_visitor && flag_count >= 2 {
             let span = self.ctx.to_span(item_struct.ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_primitive_flag_clutter",
-                    Severity::Warning,
-                    format!(
-                        "Visitor struct '{struct_name}' contains multiple boolean/flag tracking fields ({flag_count}). Consolidate traversal state into cohesive domain scopes (e.g. 'TestScope', 'DepthScope', 'MainScope') instead of loose flags."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Consolidate loose flags into a domain scope with 'With...' traits and derive macros."),
-            );
+            self.diagnostics
+                .push(NoPrimitiveFlagClutterDiagnostic::VisitorFlagClutter {
+                    struct_name,
+                    flag_count,
+                    span,
+                });
         } else if !is_visitor
             && flag_count >= 4
             && !is_serde_wire_struct(item_struct)
             && !is_tool_module_path(self.ctx.file_path())
         {
             let span = self.ctx.to_span(item_struct.ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_primitive_flag_clutter",
-                    Severity::Warning,
-                    format!(
-                        "Struct '{struct_name}' contains multiple loose boolean fields ({flag_count}). Encapsulate related boolean flags into a domain state enum, configuration struct, or bitflags."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Encapsulate boolean flags into an enum state machine or configuration type."),
-            );
+            self.diagnostics
+                .push(NoPrimitiveFlagClutterDiagnostic::StructFlagClutter {
+                    struct_name,
+                    flag_count,
+                    span,
+                });
         }
     }
 }
@@ -216,10 +206,41 @@ fn is_tool_module_path(path: &Path) -> bool {
         || stem.ends_with("_tools")
 }
 
+/// Diagnostics emitted by `purist::no_primitive_flag_clutter`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum NoPrimitiveFlagClutterDiagnostic {
+    #[error(
+        "Visitor struct '{struct_name}' contains multiple boolean/flag tracking fields ({flag_count}). Consolidate traversal state into cohesive domain scopes (e.g. 'TestScope', 'DepthScope', 'MainScope') instead of loose flags."
+    )]
+    #[diagnostic(help(
+        "Consolidate loose flags into a domain scope with 'With...' traits and derive macros."
+    ))]
+    VisitorFlagClutter {
+        struct_name: String,
+        flag_count: usize,
+        span: Span,
+    },
+
+    #[error(
+        "Struct '{struct_name}' contains multiple loose boolean fields ({flag_count}). Encapsulate related boolean flags into a domain state enum, configuration struct, or bitflags."
+    )]
+    #[diagnostic(help(
+        "Encapsulate boolean flags into an enum state machine or configuration type."
+    ))]
+    StructFlagClutter {
+        struct_name: String,
+        flag_count: usize,
+        span: Span,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
 
     #[googletest::test]
     fn visitor_with_multiple_boolean_flags_is_flagged() -> Result<(), Box<dyn std::error::Error>> {
@@ -235,10 +256,16 @@ struct SyntaxVisitor {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_primitive_flag_clutter"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_primitive_flag_clutter")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Visitor struct 'SyntaxVisitor' contains multiple boolean/flag tracking fields (2)"
             )
@@ -262,10 +289,16 @@ struct UserAccount {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_primitive_flag_clutter"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_primitive_flag_clutter")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Struct 'UserAccount' contains multiple loose boolean fields (4)")
         );
         Ok(())

@@ -23,21 +23,21 @@
 //! ```
 
 use super::common::path_last_ident;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule detecting verbose qualified paths in code that should be imported via `use` statements.
-pub(crate) struct UseDeclarationsRule;
+pub(crate) struct UseDeclarationsOverQualifiedPathsRule;
 
-impl Rule for UseDeclarationsRule {
-    fn name(&self) -> &'static str {
-        "purist::use_declarations_over_qualified_paths"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl UseDeclarationsOverQualifiedPathsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<UseDeclarationsOverQualifiedPathsDiagnostic> {
         let imported_names = collect_imported_names(file);
 
         let mut visitor = QualifiedPathVisitor {
@@ -98,7 +98,7 @@ fn is_self_use_tree(tree: &syn::UseTree) -> bool {
 /// Visitor that inspects type and expression paths, flagging overly long qualified references.
 struct QualifiedPathVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<UseDeclarationsOverQualifiedPathsDiagnostic>,
     imported_names: &'a HashSet<String>,
 }
 
@@ -144,7 +144,7 @@ fn check_path_excessive_qualification(
     ctx: &LintContext<'_>,
     path: &syn::Path,
     imported_names: &HashSet<String>,
-) -> Option<Diagnostic> {
+) -> Option<UseDeclarationsOverQualifiedPathsDiagnostic> {
     if !should_flag_qualified_path(path, imported_names) {
         return None;
     }
@@ -156,21 +156,13 @@ fn check_path_excessive_qualification(
         .collect::<Vec<_>>()
         .join("::");
 
-    let target_ident = path_last_ident(path)?;
+    let target_ident = path_last_ident(path)?.to_string();
     let span = ctx.to_span(path.span());
-    Some(
-        Diagnostic::new(
-            "purist::use_declarations_over_qualified_paths",
-            Severity::Warning,
-            format!(
-                "Avoid long qualified path '{path_str}'. Add a 'use' declaration at the top of the module."
-            ),
-        )
-        .with_span(span)
-        .with_suggested_fix(format!(
-            "Import '{path_str}' via 'use {path_str};' and refer to '{target_ident}' directly."
-        )),
-    )
+    Some(UseDeclarationsOverQualifiedPathsDiagnostic {
+        path_str,
+        target_ident,
+        span,
+    })
 }
 
 /// Checks whether a name is a Rust primitive type (e.g. `usize`).
@@ -238,10 +230,26 @@ fn should_flag_qualified_path(path: &syn::Path, imported_names: &HashSet<String>
     true
 }
 
+/// Diagnostic emitted by `purist::use_declarations_over_qualified_paths`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Avoid long qualified path '{path_str}'. Add a 'use' declaration at the top of the module."
+)]
+#[diagnostic(help(
+    "Import '{path_str}' via 'use {path_str};' and refer to '{target_ident}' directly."
+))]
+pub struct UseDeclarationsOverQualifiedPathsDiagnostic {
+    pub path_str: String,
+    pub target_ident: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -249,16 +257,16 @@ mod tests {
         let source = "fn process(w: crate::workspace::Workspace) {}\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.rule,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
             eq("purist::use_declarations_over_qualified_paths")
         );
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring("crate::workspace::Workspace")
         );
         Ok(())
@@ -269,16 +277,16 @@ mod tests {
         let source = "fn init() -> syn::punctuated::Punctuated { todo!() }\n";
         let ctx = LintContext::new(Path::new("src/config.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            &diag.rule,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
             eq("purist::use_declarations_over_qualified_paths")
         );
         assert_that!(
-            &diag.message,
+            diag.to_string(),
             contains_substring("syn::punctuated::Punctuated")
         );
         Ok(())
@@ -289,7 +297,7 @@ mod tests {
         let source = "fn process(file: syn::File) -> googletest::Result<()> { Ok(()) }\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -300,7 +308,7 @@ mod tests {
         let source = "fn max() -> usize { usize::MAX }\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -311,7 +319,7 @@ mod tests {
         let source = "use crate::workspace::Workspace;\nfn process(w: Workspace) {}\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())
@@ -322,7 +330,7 @@ mod tests {
         let source = "fn open(p: &std::path::Path) {}\n";
         let ctx = LintContext::new(Path::new("src/main.rs"), source);
         let ast = syn::parse_file(source)?;
-        let diags = UseDeclarationsRule.check_file(&ctx, &ast);
+        let diags = UseDeclarationsOverQualifiedPathsRule.check_file(&ctx, &ast);
 
         assert_that!(diags.is_empty(), is_true());
         Ok(())

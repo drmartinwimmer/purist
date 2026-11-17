@@ -30,8 +30,8 @@
 use super::common::{
     count_production_lines, has_cfg_test_attr, has_suppression_attribute, has_test_attr,
 };
-use crate::diagnostics::{Diagnostic, Severity, Span};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::{Item, Visibility};
 
@@ -44,12 +44,12 @@ pub const DEFAULT_MAX_LIB_FN_LINES: usize = 20;
 /// Rule enforcing concise, modular library root files (`lib.rs`).
 pub(crate) struct LibFacadeHygieneRule;
 
-impl Rule for LibFacadeHygieneRule {
-    fn name(&self) -> &'static str {
-        "purist::lib_facade_hygiene"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl LibFacadeHygieneRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<LibFacadeHygieneDiagnostic> {
         let is_lib_file = ctx
             .file_path()
             .file_name()
@@ -77,17 +77,11 @@ impl Rule for LibFacadeHygieneRule {
         let prod_lines = count_production_lines(file, ctx.source());
         if prod_lines > max_prod_lines {
             let first_line_span = Span::new(ctx.file_path(), 1, 1, 1, 1);
-            diagnostics.push(
-                Diagnostic::new(
-                    self.name(),
-                    Severity::Warning,
-                    format!(
-                        "Library root 'lib.rs' is too large ({prod_lines} production lines, limit is {max_prod_lines}). Keep 'lib.rs' as a concise facade index.",
-                    ),
-                )
-                .with_span(first_line_span)
-                .with_suggested_fix("Move domain logic, command definitions, or helpers into dedicated submodules and re-export them from lib.rs."),
-            );
+            diagnostics.push(LibFacadeHygieneDiagnostic::LibRsTooLarge {
+                prod_lines,
+                max_prod_lines,
+                span: first_line_span,
+            });
         }
 
         // 2. Check for large free functions directly in lib.rs outside cfg(test)
@@ -103,18 +97,13 @@ impl Rule for LibFacadeHygieneRule {
                 let fn_lines = end_line.saturating_sub(start_line) + 1;
 
                 if fn_lines > max_fn_lines {
-                    let fn_name = &item_fn.sig.ident;
-                    diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Function '{fn_name}' in 'lib.rs' is too long ({fn_lines} lines, limit is {max_fn_lines}). Functions in 'lib.rs' should be brief facade delegates.",
-                            ),
-                        )
-                        .with_span(ctx.to_span(span))
-                        .with_suggested_fix(format!("Move the implementation of '{fn_name}' into a dedicated submodule and re-export it.")),
-                    );
+                    let fn_name = item_fn.sig.ident.to_string();
+                    diagnostics.push(LibFacadeHygieneDiagnostic::LibRsFnTooLong {
+                        fn_name,
+                        fn_lines,
+                        max_fn_lines,
+                        span: ctx.to_span(span),
+                    });
                 }
             } else if let Item::Mod(item_mod) = item
                 && matches!(item_mod.vis, Visibility::Public(_))
@@ -126,25 +115,54 @@ impl Rule for LibFacadeHygieneRule {
                     mod_name.as_str(),
                     "command" | "commands" | "tool" | "tools" | "cmd"
                 ) {
-                    diagnostics.push(
-                        Diagnostic::new(
-                            self.name(),
-                            Severity::Warning,
-                            format!(
-                                "Public module 'pub mod {mod_name};' in 'lib.rs' exposes internal command/tool adapters in the public library API. Use 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export only public facade types via 'pub use'."
-                            ),
-                        )
-                        .with_span(ctx.to_span(item_mod.ident.span()))
-                        .with_suggested_fix(format!(
-                            "Change 'pub mod {mod_name};' to 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export intended public types at the crate root."
-                        )),
-                    );
+                    diagnostics.push(LibFacadeHygieneDiagnostic::LibRsPubAdapterMod {
+                        mod_name,
+                        span: ctx.to_span(item_mod.ident.span()),
+                    });
                 }
             }
         }
 
         diagnostics
     }
+}
+
+/// Diagnostics emitted by `purist::lib_facade_hygiene`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum LibFacadeHygieneDiagnostic {
+    #[error(
+        "Library root 'lib.rs' is too large ({prod_lines} production lines, limit is {max_prod_lines}). Keep 'lib.rs' as a concise facade index."
+    )]
+    #[diagnostic(help(
+        "Move domain logic, command definitions, or helpers into dedicated submodules and re-export them from lib.rs."
+    ))]
+    LibRsTooLarge {
+        prod_lines: usize,
+        max_prod_lines: usize,
+        span: Span,
+    },
+
+    #[error(
+        "Function '{fn_name}' in 'lib.rs' is too long ({fn_lines} lines, limit is {max_fn_lines}). Functions in 'lib.rs' should be brief facade delegates."
+    )]
+    #[diagnostic(help(
+        "Move the implementation of '{fn_name}' into a dedicated submodule and re-export it."
+    ))]
+    LibRsFnTooLong {
+        fn_name: String,
+        fn_lines: usize,
+        max_fn_lines: usize,
+        span: Span,
+    },
+
+    #[error(
+        "Public module 'pub mod {mod_name};' in 'lib.rs' exposes internal command/tool adapters in the public library API. Use 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export only public facade types via 'pub use'."
+    )]
+    #[diagnostic(help(
+        "Change 'pub mod {mod_name};' to 'mod {mod_name};' or 'pub(crate) mod {mod_name};' and re-export intended public types at the crate root."
+    ))]
+    LibRsPubAdapterMod { mod_name: String, span: Span },
 }
 
 #[cfg(test)]
@@ -190,7 +208,7 @@ mod tests {
         let diags = rule.check_file(&ctx, &file);
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(diag.message, contains_substring("is too large"));
+        assert_that!(diag.to_string(), contains_substring("is too large"));
         Ok(())
     }
 
@@ -205,7 +223,7 @@ mod tests {
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
         assert_that!(
-            diag.message,
+            diag.to_string(),
             contains_substring("Function 'heavy_worker' in 'lib.rs' is too long")
         );
         Ok(())
@@ -288,11 +306,11 @@ mod tests {
         let d0 = diags.first().ok_or("expected d0")?;
         let d1 = diags.get(1).ok_or("expected d1")?;
         assert_that!(
-            &d0.message,
+            d0.to_string(),
             contains_substring("Public module 'pub mod command;' in 'lib.rs'")
         );
         assert_that!(
-            &d1.message,
+            d1.to_string(),
             contains_substring("Public module 'pub mod tools;' in 'lib.rs'")
         );
         Ok(())

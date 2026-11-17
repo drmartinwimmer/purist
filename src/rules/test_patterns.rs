@@ -36,20 +36,20 @@
 
 use super::common::{TestScope, WithTestScope};
 use crate::checkers::{check_macro_matches, check_method_call_matches_name};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Rule enforcing test conventions: naming (<verb>_<desc>_<outcome>), googletest assertions, and ? over unwrap.
 pub(crate) struct TestPatternsRule;
 
-impl Rule for TestPatternsRule {
-    fn name(&self) -> &'static str {
-        "purist::test_patterns"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl TestPatternsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<TestPatternsDiagnostic> {
         let mut visitor = TestVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -65,7 +65,7 @@ impl Rule for TestPatternsRule {
 #[derive(WithTestScope)]
 struct TestVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<TestPatternsDiagnostic>,
     test_scope: TestScope,
 }
 
@@ -114,17 +114,8 @@ impl TestVisitor<'_> {
 
         if segments.len() < 3 {
             let span = self.ctx.to_span(ident.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::test_patterns",
-                    Severity::Warning,
-                    format!(
-                        "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Rename test to follow '<verb>_<description>_<outcome>' (e.g. 'parse_valid_input_succeeds')."),
-            );
+            self.diagnostics
+                .push(TestPatternsDiagnostic::ShortTestFnName { name, span });
         }
     }
 
@@ -136,40 +127,57 @@ impl TestVisitor<'_> {
         };
 
         let span = self.ctx.to_span(mac.path.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::test_patterns",
-                Severity::Warning,
-                format!(
-                    "Usage of '{name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
-                ),
-            )
-            .with_span(span)
-            .with_suggested_fix("Replace with 'assert_that!(actual, eq(expected))' or 'expect_that!(actual, eq(expected))'."),
-        );
+        self.diagnostics
+            .push(TestPatternsDiagnostic::LegacyAssertionMacroInTest {
+                macro_name: name.to_string(),
+                span,
+            });
     }
 
     /// Checks if a method call inside a test is `.unwrap()`.
     fn check_method_call_unwrap_in_test(&mut self, call: &syn::ExprMethodCall) {
         if check_method_call_matches_name(call, &["unwrap"]) {
             let span = self.ctx.to_span(call.method.span());
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::test_patterns",
-                    Severity::Warning,
-                    "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers.",
-                )
-                .with_span(span)
-                .with_suggested_fix("Return Result<(), Box<dyn std::error::Error>> or googletest::Result<()> and use '?' instead of '.unwrap()'."),
-            );
+            self.diagnostics
+                .push(TestPatternsDiagnostic::UnwrapInTest { span });
         }
     }
+}
+
+/// Diagnostics emitted by `purist::test_patterns`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+pub enum TestPatternsDiagnostic {
+    #[error(
+        "Test function '{name}' does not conform to '<verb>_<description>_<outcome>' naming convention."
+    )]
+    #[diagnostic(help(
+        "Rename test to follow '<verb>_<description>_<outcome>' (e.g. 'parse_valid_input_succeeds')."
+    ))]
+    ShortTestFnName { name: String, span: Span },
+
+    #[error(
+        "Usage of '{macro_name}!' in test. Use GoogleTest matchers ('assert_that!' or 'expect_that!') instead."
+    )]
+    #[diagnostic(help(
+        "Replace with 'assert_that!(actual, eq(expected))' or 'expect_that!(actual, eq(expected))'."
+    ))]
+    LegacyAssertionMacroInTest { macro_name: String, span: Span },
+
+    #[error(
+        "Avoid calling '.unwrap()' in test bodies. Propagate errors using '?' or assert with GoogleTest matchers."
+    )]
+    #[diagnostic(help(
+        "Return Result<(), Box<dyn std::error::Error>> or googletest::Result<()> and use '?' instead of '.unwrap()'."
+    ))]
+    UnwrapInTest { span: Span },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -181,9 +189,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::test_patterns")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("does not conform to '<verb>_<description>_<outcome>'")
         );
         Ok(())
@@ -209,9 +220,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::test_patterns")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Usage of 'assert_eq!' in test")
         );
         Ok(())
@@ -227,9 +241,12 @@ mod tests {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::test_patterns"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::test_patterns")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Avoid calling '.unwrap()' in test bodies")
         );
         Ok(())

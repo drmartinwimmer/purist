@@ -26,8 +26,8 @@
 //! ```
 
 use super::common::{extract_type_ident, has_suppression_attribute, path_ends_with_ident};
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -36,12 +36,12 @@ use syn::{Item, ItemImpl, Type};
 /// Rule forbidding interior mutability fields in AST visitor structs.
 pub(crate) struct NoInteriorMutabilityInVisitorsRule;
 
-impl Rule for NoInteriorMutabilityInVisitorsRule {
-    fn name(&self) -> &'static str {
-        "purist::no_interior_mutability_in_visitors"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl NoInteriorMutabilityInVisitorsRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<NoInteriorMutabilityInVisitorsDiagnostic> {
         let visitor_names = identify_visitor_struct_names(file);
         let mut scanner = VisitorFieldScanner {
             ctx,
@@ -59,7 +59,7 @@ struct VisitorFieldScanner<'a> {
     ctx: &'a LintContext<'a>,
     visitor_names: HashSet<String>,
     current_visitor_struct: Option<String>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<NoInteriorMutabilityInVisitorsDiagnostic>,
 }
 
 impl<'ast> Visit<'ast> for VisitorFieldScanner<'_> {
@@ -92,17 +92,13 @@ impl<'ast> Visit<'ast> for VisitorFieldScanner<'_> {
                 .unwrap_or_else(|| "<unnamed>".to_string());
             let span = self.ctx.to_span(field.span());
 
-            self.diagnostics.push(
-                Diagnostic::new(
-                    "purist::no_interior_mutability_in_visitors",
-                    Severity::Warning,
-                    format!(
-                        "Visitor struct '{struct_name}' declares field '{field_name}' with interior mutability ('{bad_type}'). AST visitors provide '&mut self' during single-threaded traversal; use direct mutable fields or stack types instead."
-                    ),
-                )
-                .with_span(span)
-                .with_suggested_fix("Replace interior mutability with direct mutable fields or a stack."),
-            );
+            self.diagnostics
+                .push(NoInteriorMutabilityInVisitorsDiagnostic {
+                    struct_name: struct_name.clone(),
+                    field_name,
+                    bad_type: bad_type.to_string(),
+                    span,
+                });
         }
         visit::visit_field(self, field);
     }
@@ -167,10 +163,26 @@ fn find_in_type_args(args: &syn::AngleBracketedGenericArguments) -> Option<&'sta
     None
 }
 
+/// Diagnostic emitted by `purist::no_interior_mutability_in_visitors`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Visitor struct '{struct_name}' declares field '{field_name}' with interior mutability ('{bad_type}'). AST visitors provide '&mut self' during single-threaded traversal; use direct mutable fields or stack types instead."
+)]
+#[diagnostic(help("Replace interior mutability with direct mutable fields or a stack."))]
+pub struct NoInteriorMutabilityInVisitorsDiagnostic {
+    pub struct_name: String,
+    pub field_name: String,
+    pub bad_type: String,
+    pub span: Span,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::Severity;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -187,10 +199,16 @@ struct SyntaxVisitor {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::no_interior_mutability_in_visitors"));
-        assert_that!(diag.severity, eq(Severity::Warning));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::no_interior_mutability_in_visitors")
+        );
+        assert_that!(
+            diag.severity().unwrap_or(Severity::Warning),
+            eq(Severity::Warning)
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring(
                 "Visitor struct 'SyntaxVisitor' declares field 'scopes' with interior mutability ('RefCell')"
             )

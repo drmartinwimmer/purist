@@ -32,8 +32,8 @@
 
 use super::common::{TestScope, WithTestScope, is_drop_trait_impl};
 use crate::checkers::check_call_matches_path;
-use crate::diagnostics::{Diagnostic, Severity};
-use crate::engine::{LintContext, Rule};
+use crate::diagnostics::Span;
+use crate::engine::LintContext;
 use crate::scopes::{TypeScope, WithTypeScope};
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -41,12 +41,12 @@ use syn::visit::{self, Visit};
 /// Rule flagging manual `fs::remove_dir_all` in test contexts in favor of RAII cleanup.
 pub(crate) struct RaiiTempDirectoriesRule;
 
-impl Rule for RaiiTempDirectoriesRule {
-    fn name(&self) -> &'static str {
-        "purist::raii_temp_directories"
-    }
-
-    fn check_file(&self, ctx: &LintContext<'_>, file: &syn::File) -> Vec<Diagnostic> {
+impl RaiiTempDirectoriesRule {
+    pub(crate) fn check_file(
+        &self,
+        ctx: &LintContext<'_>,
+        file: &syn::File,
+    ) -> Vec<RaiiTempDirectoriesDiagnostic> {
         let mut visitor = TempDirVisitor {
             ctx,
             diagnostics: Vec::new(),
@@ -63,7 +63,7 @@ impl Rule for RaiiTempDirectoriesRule {
 #[derive(WithTestScope, WithTypeScope)]
 struct TempDirVisitor<'a> {
     ctx: &'a LintContext<'a>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<RaiiTempDirectoriesDiagnostic>,
     test_scope: TestScope,
     type_scope: TypeScope,
 }
@@ -119,22 +119,29 @@ impl TempDirVisitor<'_> {
         }
 
         let span = self.ctx.to_span(call.span());
-        self.diagnostics.push(
-            Diagnostic::new(
-                "purist::raii_temp_directories",
-                Severity::Warning,
-                "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures.",
-            )
-            .with_span(span)
-            .with_suggested_fix("Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."),
-        );
+        self.diagnostics
+            .push(RaiiTempDirectoriesDiagnostic { span });
     }
+}
+
+/// Diagnostic emitted by `purist::raii_temp_directories`.
+#[purist_derive::rule_diagnostic]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, miette::Diagnostic)]
+#[error(
+    "Manual 'fs::remove_dir_all' in test context. Use an RAII temporary directory guard to guarantee cleanup on assertion failures."
+)]
+#[diagnostic(help(
+    "Use an RAII temporary directory guard (implementing 'Drop' or via 'tempfile') instead of manual removal."
+))]
+pub struct RaiiTempDirectoriesDiagnostic {
+    pub span: Span,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use googletest::prelude::*;
+    use miette::Diagnostic;
     use std::path::Path;
 
     #[googletest::test]
@@ -152,9 +159,12 @@ fn file_creation_succeeds() {
 
         assert_that!(diags.len(), eq(1));
         let diag = diags.first().ok_or("expected diagnostic")?;
-        assert_that!(&diag.rule, eq("purist::raii_temp_directories"));
         assert_that!(
-            &diag.message,
+            diag.code().map(|c| c.to_string()).unwrap_or_default(),
+            eq("purist::raii_temp_directories")
+        );
+        assert_that!(
+            diag.to_string(),
             contains_substring("Manual 'fs::remove_dir_all' in test context")
         );
         Ok(())
